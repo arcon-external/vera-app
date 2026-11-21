@@ -3103,3 +3103,672 @@ describe("Performance overview integration (issue #644)", () => {
     expect(table.getAttribute("aria-label")).toBe("Period totals");
   });
 });
+
+describe("category comparison (issue #643)", () => {
+  const PINNED_TODAY = "2026-11-19";
+  const ZERO = {
+    poCount: 0,
+    amountMinor: 0,
+    costedMinor: 0,
+    uncostedMinor: 0,
+    capitalMinor: 0,
+    marginMinor: 0,
+    marginBps: null,
+    coverageBps: null,
+  } as const;
+  const FIVE_CATEGORY_CODES = [
+    "FM",
+    "FAB",
+    "SUPPLY_GEN",
+    "OTHERS",
+    "UNASSIGNED",
+  ];
+
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date(`${PINNED_TODAY}T03:00:00Z`));
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  /**
+   * A Performance snapshot restricted to one Business category with no
+   * purchase orders. The category comparison must still render genuine
+   * all-category evidence below it, outside the overview's empty gate.
+   */
+  function emptyRestricted(query: Query): PurchaseOrderReportData {
+    const report = reportFor(query);
+    report.filter = { ...query };
+    report.totals = { ...ZERO };
+    report.periods = [];
+    report.categories = report.categories
+      .filter((row) => row.businessCategory === query.category)
+      .map((row) => ({ ...row, ...ZERO }));
+    report.categorySeries = [];
+    report.monthSummary = {
+      month: "2026-11",
+      from: "2026-11-01",
+      to: "2026-12-01",
+      asOf: report.asOf,
+      mode: "month",
+      actual: { ...ZERO },
+      projection: {
+        status: "unavailable",
+        reason: "insufficient_months",
+        method: "No current-year forecast in this fixture.",
+      },
+    };
+    report.currentProjection = {
+      ...report.currentProjection,
+      mode: "none",
+      status: "unavailable",
+      reason: "not_current_period",
+      buckets: [],
+      currentMonth: undefined,
+    };
+    return report;
+  }
+
+  function respond(query: Query): PurchaseOrderReportData {
+    if (query.category !== "all") return emptyRestricted(query);
+    const report = reportFor(query);
+    report.filter = { ...query };
+    return report;
+  }
+
+  function categoryTrigger(): HTMLButtonElement {
+    return button("Choose categories");
+  }
+
+  function categoryPickerKey(code: string): HTMLButtonElement {
+    const found = document.querySelector<HTMLButtonElement>(
+      `[data-picker-key="${code}"]`
+    );
+    if (found === null) throw new Error(`no category picker item ${code}`);
+    return found;
+  }
+
+  function categoryScope(): HTMLElement {
+    const found = document.querySelector<HTMLElement>("[data-category-scope]");
+    if (found === null) throw new Error("no category scope");
+    return found;
+  }
+
+  function categoryClose(): HTMLButtonElement {
+    const found = document.querySelector<HTMLButtonElement>("[data-picker-close]");
+    if (found === null) throw new Error("no category picker close");
+    return found;
+  }
+
+  function categoryAll(): HTMLButtonElement {
+    const found = document.querySelector<HTMLButtonElement>("[data-picker-all]");
+    if (found === null) throw new Error("no All categories control");
+    return found;
+  }
+
+  function deferred<T>(): {
+    promise: Promise<T>;
+    resolve: (value: T) => void;
+    reject: (error: unknown) => void;
+  } {
+    let resolve!: (value: T) => void;
+    let reject!: (error: unknown) => void;
+    const promise = new Promise<T>((res, rej) => {
+      resolve = res;
+      reject = rej;
+    });
+    return { promise, resolve, reject };
+  }
+
+  async function exportPdf(): Promise<void> {
+    await act(async () => {
+      button("Export PDF").click();
+    });
+    await flush();
+  }
+
+  async function openCategoryPicker(): Promise<void> {
+    await act(async () => {
+      categoryTrigger().click();
+    });
+    await flush();
+  }
+
+  async function clickPickerNode(control: HTMLElement): Promise<void> {
+    await act(async () => {
+      control.click();
+    });
+    await flush();
+  }
+
+  it("renders the independent category section under an empty restricted Performance with no extra request", async () => {
+    reportMock.mockImplementation(async (query: Query) => respond(query));
+    await renderPage();
+    expect(reportMock).toHaveBeenCalledTimes(1);
+
+    await choose("Category", "Facility Management");
+    expect(calls()[1]).toMatchObject({ category: "FM" });
+    expect(reportMock).toHaveBeenCalledTimes(2);
+
+    const empty = document.querySelector("[data-report-overview-empty]");
+    const browser = document.querySelector<HTMLElement>(
+      "[data-category-browser]"
+    );
+    expect(empty).not.toBeNull();
+    expect(browser).not.toBeNull();
+    expect(
+      empty!.compareDocumentPosition(browser!) & Node.DOCUMENT_POSITION_FOLLOWING
+    ).toBeTruthy();
+
+    // The section is the all-category universe, not the restricted snapshot.
+    expect(categoryScope().textContent).toContain("All categories");
+    expect(categoryScope().textContent).toContain(reportRangeLabel(calls()[0]));
+    expect(categoryScope().textContent).toContain("IDR");
+    expect(categoryScope().textContent).toContain("As of 19 Nov 2026");
+    expect(categoryScope().textContent).not.toContain("Facility Management");
+    // By period still inherits Performance's own restricted category.
+    expect(
+      document.querySelector("[data-month-scope]")?.textContent
+    ).toContain("Facility Management");
+
+    const aggregate = browser!.querySelector("[data-category-aggregate]");
+    expect(aggregate).not.toBeNull();
+    const fabrication = browser!.querySelector('[data-category-row="FAB"]');
+    expect(fabrication?.textContent).toContain("Rp120.000.000");
+    expect(fabrication?.textContent).toContain("Rp-30.000.000");
+    expect(
+      browser!.querySelector('[data-category-row="UNASSIGNED"]')
+    ).not.toBeNull();
+    expect(
+      categoryTrigger().getAttribute("data-category-selection-summary")
+    ).toBe("All categories");
+    expect(reportMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("keeps export enabled for an explicit empty category selection and freezes the v1 envelope", async () => {
+    const onExport = vi.fn(
+      async (_view: PurchaseOrderReportView) =>
+        "/tmp/opencode/category-empty.pdf"
+    );
+    reportMock.mockImplementation(async (query: Query) => respond(query));
+    await renderPage({ onExport });
+
+    // Restrict Performance so the overview's own request stays answerable while
+    // the independent all-category scope is the one that cannot resolve.
+    await choose("Category", "Facility Management");
+    expect(reportMock).toHaveBeenCalledTimes(2);
+
+    await openCategoryPicker();
+    // A specific click while All is selected focuses that category only.
+    await clickPickerNode(categoryPickerKey("FAB"));
+    expect(document.querySelector("[data-category-card]")).not.toBeNull();
+    // The next click toggles it off, leaving the explicit empty selection.
+    await clickPickerNode(categoryPickerKey("FAB"));
+    expect(document.querySelector("[data-category-empty]")).not.toBeNull();
+    expect(
+      document.querySelector("[data-category-metric]")
+    ).toBeNull();
+    const close = document.querySelector<HTMLButtonElement>(
+      "[data-picker-close]"
+    );
+    if (close === null) throw new Error("no category picker close");
+    await clickPickerNode(close);
+    expect(document.querySelector("[data-report-picker]")).toBeNull();
+
+    // The empty selection needs no financial category source: a still-loading
+    // all-category scope cannot block its explicit empty section.
+    reportMock.mockImplementation(async (query: Query) => {
+      if (query.category === "all" && query.currency === "USD") {
+        return new Promise<PurchaseOrderReportData>(() => undefined);
+      }
+      return respond(query);
+    });
+    await choose("Currency", "USD");
+    await flush();
+
+    // The explicit empty selection survives the inherited scope change. While
+    // the unrestricted snapshot loads it shows no old-scope money, and because
+    // no selected category evidence is required the export stays available.
+    expect(document.querySelector("[data-category-metric]")).toBeNull();
+    expect(document.body.textContent).toContain("Loading categories");
+    expect(button("Export PDF").disabled).toBe(false);
+    await act(async () => {
+      button("Export PDF").click();
+    });
+    await flush();
+
+    expect(onExport).toHaveBeenCalledTimes(1);
+    const view = onExport.mock.calls[0][0];
+    expect(view.version).toBe(1);
+    expect(view.categories).toEqual({
+      source: 0,
+      codes: [],
+      layout: "individual",
+    });
+    // Empty categories add no extra snapshot; the overview remains source 0.
+    expect(view.sources).toHaveLength(1);
+    expect(view.overview).toBe(0);
+  });
+
+  it("places the category section below By period and above Notes, replacing the legacy table", async () => {
+    reportMock.mockImplementation(async (query: Query) => reportFor(query));
+    await renderPage();
+
+    const month = document.querySelector("[data-month-browser]");
+    const category = document.querySelector("[data-category-browser]");
+    const notes = Array.from(document.querySelectorAll("h2")).find(
+      (node) => node.textContent === "Notes"
+    );
+    expect(month).not.toBeNull();
+    expect(category).not.toBeNull();
+    expect(notes).not.toBeUndefined();
+    expect(
+      month!.compareDocumentPosition(category!) &
+        Node.DOCUMENT_POSITION_FOLLOWING
+    ).toBeTruthy();
+    expect(
+      category!.compareDocumentPosition(notes!) &
+        Node.DOCUMENT_POSITION_FOLLOWING
+    ).toBeTruthy();
+    // One By category heading and one Category totals table: the live browser
+    // owns both, and the legacy direct-view table is not duplicated beside it.
+    expect(
+      Array.from(document.querySelectorAll("h2")).filter(
+        (node) => node.textContent === "By category"
+      )
+    ).toHaveLength(1);
+    expect(
+      document.querySelectorAll('table[aria-label="Category totals"]')
+    ).toHaveLength(1);
+    expect(
+      document
+        .querySelector('table[aria-label="Category totals"]')
+        ?.closest("[data-category-aggregate]")
+    ).not.toBeNull();
+  });
+
+  it("selects a specific category from All without changing Performance or By period", async () => {
+    reportMock.mockImplementation(async (query: Query) => reportFor(query));
+    await renderPage();
+    const marks = document.querySelector("[data-chart-marks]");
+    const kpis = document.querySelector('[aria-label="Report KPIs"]')?.textContent;
+    const monthsSummary = button("Choose months").getAttribute(
+      "data-month-selection-summary"
+    );
+    expect(reportMock).toHaveBeenCalledTimes(1);
+
+    await openCategoryPicker();
+    const dialog = document.querySelector("[data-report-picker]");
+    expect(dialog).not.toBeNull();
+    await clickPickerNode(categoryPickerKey("FAB"));
+
+    // The modal stays open and updates its mark and count in place.
+    expect(document.querySelector("[data-report-picker]")).toBe(dialog);
+    expect(categoryPickerKey("FAB").getAttribute("aria-pressed")).toBe("true");
+    expect(document.querySelector("[data-picker-count]")?.textContent).toContain(
+      "1 selected"
+    );
+    const card = document.querySelector(
+      '[data-category-card][data-category-key="FAB"]'
+    );
+    expect(card).not.toBeNull();
+    expect(
+      card?.querySelector("[data-category-card-heading]")?.textContent
+    ).toBe("Fabrication");
+    expect(
+      card?.querySelectorAll("[data-category-metric]")
+    ).toHaveLength(6);
+    expect(
+      card?.querySelector('[data-category-metric="PO margin"]')?.className
+    ).toContain("text-danger-700");
+
+    // Performance, its chart node and By period are untouched.
+    expect(document.querySelector("[data-chart-marks]")).toBe(marks);
+    expect(document.querySelector('[aria-label="Report KPIs"]')?.textContent).toBe(
+      kpis
+    );
+    expect(
+      button("Choose months").getAttribute("data-month-selection-summary")
+    ).toBe(monthsSummary);
+    expect(reportMock).toHaveBeenCalledTimes(1);
+
+    await clickPickerNode(categoryClose());
+    expect(document.querySelector("[data-report-picker]")).toBeNull();
+    expect(document.activeElement).toBe(categoryTrigger());
+    expect(
+      categoryTrigger().getAttribute("data-category-selection-summary")
+    ).toBe("Fabrication");
+  });
+
+  it("does not dismiss the category picker on item, backdrop or Escape and restores the same trigger", async () => {
+    reportMock.mockImplementation(async (query: Query) => reportFor(query));
+    await renderPage();
+    const opener = categoryTrigger();
+    await openCategoryPicker();
+    await clickPickerNode(categoryPickerKey("FAB"));
+    expect(document.querySelector("[data-report-picker]")).not.toBeNull();
+
+    const backdrop = document.querySelector<HTMLElement>(
+      "[data-report-picker-backdrop]"
+    );
+    if (backdrop === null) throw new Error("no category picker backdrop");
+    await act(async () => {
+      backdrop.click();
+    });
+    await flush();
+    expect(document.querySelector("[data-report-picker]")).not.toBeNull();
+
+    await act(async () => {
+      document.dispatchEvent(
+        new KeyboardEvent("keydown", { key: "Escape", bubbles: true })
+      );
+    });
+    await flush();
+    expect(document.querySelector("[data-report-picker]")).not.toBeNull();
+
+    await clickPickerNode(categoryClose());
+    expect(document.querySelector("[data-report-picker]")).toBeNull();
+    expect(document.activeElement).toBe(opener);
+
+    // An inherited category change keeps the trigger node and the local
+    // selection, and asks the shared registry for no new all-category read.
+    await choose("Category", "Facility Management");
+    expect(reportMock).toHaveBeenCalledTimes(2);
+    expect(categoryTrigger()).toBe(opener);
+    expect(
+      categoryTrigger().getAttribute("data-category-selection-summary")
+    ).toBe("Fabrication");
+    expect(
+      document.querySelector('[data-category-card][data-category-key="FAB"]')
+    ).not.toBeNull();
+
+    await openCategoryPicker();
+    await clickPickerNode(categoryClose());
+    expect(document.activeElement).toBe(opener);
+    expect(categoryTrigger()).toBe(opener);
+  });
+
+  it("fetches one all-category snapshot for an uncached restricted scope, never one per code", async () => {
+    reportMock.mockImplementation(async (query: Query) => reportFor(query));
+    await renderPage();
+    expect(reportMock).toHaveBeenCalledTimes(1);
+    expect(calls()[0]).toMatchObject({ category: "all", currency: "IDR" });
+
+    await choose("Category", "Facility Management");
+    expect(reportMock).toHaveBeenCalledTimes(2);
+    expect(calls()[1]).toMatchObject({ category: "FM", currency: "IDR" });
+    // The all-category snapshot at the same range was already cached.
+    expect(calls().filter((call) => call.category === "all")).toHaveLength(1);
+
+    await choose("Category", "Fabrication");
+    expect(reportMock).toHaveBeenCalledTimes(3);
+    expect(calls()[2]).toMatchObject({ category: "FAB", currency: "IDR" });
+    expect(calls().filter((call) => call.category === "all")).toHaveLength(1);
+
+    await choose("Currency", "USD");
+    expect(reportMock).toHaveBeenCalledTimes(5);
+    expect(calls()[3]).toMatchObject({ category: "FAB", currency: "USD" });
+    expect(calls()[4]).toEqual({
+      from: "2026-01-01",
+      to: "2027-01-01",
+      bucket: "month",
+      category: "all",
+      currency: "USD",
+    });
+    // Exactly two all-category reads over the whole journey: the initial
+    // overview and the one new inherited scope. No query names the selected
+    // category for the local comparison.
+    expect(calls().filter((call) => call.category === "all")).toHaveLength(2);
+    expect(
+      calls()
+        .filter((call) => call.category === "FAB")
+        .map((call) => call.currency)
+    ).toEqual(["IDR", "USD"]);
+    expect(
+      document.querySelector('[data-category-row="FAB"]')?.textContent
+    ).toContain("$1,200,000.00");
+  });
+
+  it("never paints old money while a new all-category scope loads and retries only that source", async () => {
+    const onExport = vi.fn(
+      async (_view: PurchaseOrderReportView) =>
+        "/tmp/opencode/category-retry.pdf"
+    );
+    reportMock.mockImplementation(async (query: Query) => reportFor(query));
+    await renderPage({ onExport });
+    await choose("Category", "Facility Management");
+    expect(reportMock).toHaveBeenCalledTimes(2);
+    await openCategoryPicker();
+    await clickPickerNode(categoryPickerKey("FAB"));
+    await clickPickerNode(categoryClose());
+    expect(reportMock).toHaveBeenCalledTimes(2);
+
+    const pending = deferred<PurchaseOrderReportData>();
+    reportMock.mockImplementation(async (query: Query) => {
+      if (query.category === "all" && query.currency === "USD") {
+        return pending.promise;
+      }
+      return reportFor(query);
+    });
+    await choose("Currency", "USD");
+    expect(reportMock).toHaveBeenCalledTimes(4);
+
+    expect(categoryTrigger().disabled).toBe(true);
+    expect(categoryScope().textContent).toContain("USD");
+    expect(document.body.textContent).toContain("Loading categories");
+    expect(document.querySelector("[data-category-metric]")).toBeNull();
+    expect(document.querySelector("[data-category-aggregate]")).toBeNull();
+    expect(document.body.textContent).not.toContain("Rp120.000.000");
+    expect(button("Export PDF").disabled).toBe(true);
+
+    await act(async () => {
+      pending.reject(new Error("The all-category API is unreachable."));
+    });
+    await flush();
+    expect(document.body.textContent).toContain(
+      "The all-category API is unreachable."
+    );
+    expect(button("Retry categories")).not.toBeNull();
+    expect(document.querySelector("[data-category-metric]")).toBeNull();
+    expect(document.body.textContent).not.toContain("Rp120.000.000");
+    expect(button("Export PDF").disabled).toBe(true);
+
+    reportMock.mockImplementation(async (query: Query) => reportFor(query));
+    await act(async () => {
+      button("Retry categories").click();
+    });
+    await flush();
+    expect(reportMock).toHaveBeenCalledTimes(5);
+    expect(calls()[4]).toMatchObject({ category: "all", currency: "USD" });
+    expect(
+      document.querySelector(
+        '[data-category-card][data-category-key="FAB"] [data-category-metric="PO amount"]'
+      )?.textContent
+    ).toBe("$1,200,000.00");
+    expect(button("Export PDF").disabled).toBe(false);
+  });
+
+  it("surfaces a currency-mismatched category snapshot as an error, never zero", async () => {
+    reportMock.mockImplementation(async (query: Query) => reportFor(query));
+    await renderPage();
+    await choose("Category", "Facility Management");
+    expect(reportMock).toHaveBeenCalledTimes(2);
+
+    reportMock.mockImplementation(async (query: Query) => {
+      if (query.category === "all" && query.currency === "USD") {
+        // A stale IDR snapshot returned for the USD request: it must be an
+        // error, never rendered as zero under the USD caption.
+        return reportFor({ ...query, currency: "IDR" });
+      }
+      return reportFor(query);
+    });
+    await choose("Currency", "USD");
+    expect(reportMock).toHaveBeenCalledTimes(4);
+    expect(document.body.textContent).toContain(
+      "does not match this report's range, bucket, currency or all-category scope"
+    );
+    expect(document.querySelector("[data-category-metric]")).toBeNull();
+    expect(document.querySelector("[data-category-row]")).toBeNull();
+    expect(button("Export PDF").disabled).toBe(true);
+    expect(button("Retry categories")).not.toBeNull();
+  });
+
+  it("shows a business-date notice and refuses export for a stale category snapshot", async () => {
+    const onExport = vi.fn(async () => "/tmp/opencode/stale-category.pdf");
+    reportMock.mockImplementation(async (query: Query) => reportFor(query));
+    await renderPage({ onExport });
+    await choose("Category", "Facility Management");
+    expect(reportMock).toHaveBeenCalledTimes(2);
+
+    reportMock.mockImplementation(async (query: Query) => {
+      if (query.category === "all" && query.currency === "USD") {
+        const report = reportFor(query);
+        report.asOf = "2026-11-20";
+        return report;
+      }
+      return reportFor(query);
+    });
+    await choose("Currency", "USD");
+    expect(reportMock).toHaveBeenCalledTimes(4);
+    expect(document.body.textContent).toContain(
+      "different business date from the overview"
+    );
+    expect(document.querySelector("[data-category-aggregate]")).not.toBeNull();
+    expect(button("Export PDF").disabled).toBe(true);
+    await exportPdf();
+    expect(onExport).not.toHaveBeenCalled();
+  });
+
+  it("keeps the local category selection and makes zero requests on cached navigation", async () => {
+    reportMock.mockImplementation(async (query: Query) => reportFor(query));
+    await renderPage();
+    await openCategoryPicker();
+    await clickPickerNode(categoryPickerKey("FAB"));
+    await clickPickerNode(categoryClose());
+    expect(
+      categoryTrigger().getAttribute("data-category-selection-summary")
+    ).toBe("Fabrication");
+
+    await choose("Category", "Facility Management");
+    expect(reportMock).toHaveBeenCalledTimes(2);
+    expect(
+      categoryTrigger().getAttribute("data-category-selection-summary")
+    ).toBe("Fabrication");
+
+    await choose("Currency", "USD");
+    expect(reportMock).toHaveBeenCalledTimes(4);
+    expect(
+      categoryTrigger().getAttribute("data-category-selection-summary")
+    ).toBe("Fabrication");
+    expect(
+      document.querySelector(
+        '[data-category-card][data-category-key="FAB"] [data-category-metric="PO amount"]'
+      )?.textContent
+    ).toBe("$1,200,000.00");
+
+    const before = reportMock.mock.calls.length;
+    await act(async () => {
+      button("Next category").click();
+    });
+    await flush();
+    expect(reportMock.mock.calls.length).toBe(before);
+    expect(
+      document.querySelector(
+        '[data-category-card][data-category-key="SUPPLY_GEN"]'
+      )
+    ).not.toBeNull();
+    expect(
+      document.querySelector('[data-category-card][data-category-key="FAB"]')
+    ).toBeNull();
+
+    // All remembers the display preference: Individual then Aggregate are pure
+    // presentation over the same loaded snapshot.
+    await openCategoryPicker();
+    await clickPickerNode(categoryAll());
+    await clickPickerNode(categoryClose());
+    await act(async () => {
+      button("Individual").click();
+    });
+    await flush();
+    expect(reportMock.mock.calls.length).toBe(before);
+    expect(document.querySelectorAll("[data-category-card]")).toHaveLength(5);
+    await act(async () => {
+      button("Aggregate").click();
+    });
+    await flush();
+    expect(reportMock.mock.calls.length).toBe(before);
+    expect(
+      document.querySelector('[data-category-aggregate]')
+    ).not.toBeNull();
+    expect(document.querySelector("[data-category-card]")).toBeNull();
+  });
+
+  it("exports Aggregate, a subset, All/Individual and never a row sum", async () => {
+    const onExport = vi.fn(
+      async (_view: PurchaseOrderReportView) => "/tmp/opencode/category.pdf"
+    );
+    reportMock.mockImplementation(async (query: Query) => reportFor(query));
+    await renderPage({ onExport });
+
+    await exportPdf();
+    expect(onExport).toHaveBeenCalledTimes(1);
+    let view = onExport.mock.calls[0][0];
+    expect(view.version).toBe(1);
+    expect(view.categories).toEqual({
+      source: 0,
+      codes: FIVE_CATEGORY_CODES,
+      layout: "aggregate",
+    });
+    expect(view.sources).toHaveLength(1);
+
+    await openCategoryPicker();
+    await clickPickerNode(categoryPickerKey("FAB"));
+    await clickPickerNode(categoryClose());
+    await exportPdf();
+    view = onExport.mock.calls[1][0];
+    expect(view.categories).toEqual({
+      source: 0,
+      codes: ["FAB"],
+      layout: "individual",
+    });
+
+    await openCategoryPicker();
+    await clickPickerNode(categoryPickerKey("FM"));
+    await clickPickerNode(categoryClose());
+    await exportPdf();
+    view = onExport.mock.calls[2][0];
+    expect(view.categories).toEqual({
+      source: 0,
+      codes: ["FM", "FAB"],
+      layout: "individual",
+    });
+
+    await openCategoryPicker();
+    await clickPickerNode(categoryAll());
+    await clickPickerNode(categoryClose());
+    await act(async () => {
+      button("Individual").click();
+    });
+    await flush();
+    const beforeNavigation = reportMock.mock.calls.length;
+    await act(async () => {
+      button("Next category").click();
+    });
+    await flush();
+    expect(reportMock.mock.calls.length).toBe(beforeNavigation);
+    expect(document.querySelectorAll("[data-category-card]")).toHaveLength(5);
+
+    await exportPdf();
+    view = onExport.mock.calls[3][0];
+    expect(view.categories).toEqual({
+      source: 0,
+      codes: FIVE_CATEGORY_CODES,
+      layout: "individual",
+    });
+    // The whole journey is the initial overview only: every category action is
+    // local state over the already loaded all-category snapshot.
+    expect(reportMock).toHaveBeenCalledTimes(1);
+  });
+});

@@ -470,3 +470,183 @@ func TestExportPurchaseOrderReportWritesEmptyAndAggregateViews(t *testing.T) {
 		})
 	}
 }
+
+// Issue #643: the category comparison travels in the same version-1 envelope.
+// The binding still validates it before opening the save dialog and still needs
+// no API client: every figure is frozen in the payload.
+func reportCategoryFixture() poreport.Report {
+	snapshot := reportAggregateFixture()
+	money := func(poCount, amount, costed, uncosted, capital, margin int64) poreport.Metrics {
+		return poreport.Metrics{
+			PoCount: poCount, AmountMinor: amount, CostedMinor: costed,
+			UncostedMinor: uncosted, CapitalMinor: capital, MarginMinor: margin,
+			CoverageBps: int64Pointer(9000),
+		}
+	}
+	snapshot.Categories = []poreport.Category{
+		{
+			BusinessCategory: poreport.CategoryFm, Label: "Facility Management",
+			Metrics: money(3, 3_000_000, 2_700_000, 300_000, 2_100_000, 600_000),
+		},
+		{
+			BusinessCategory: poreport.CategoryFab, Label: "Fabrication",
+			Metrics: money(2, 2_000_000, 1_800_000, 200_000, 2_200_000, -400_000),
+		},
+		{
+			BusinessCategory: poreport.CategorySupplyGeneral, Label: "Goods Supply & General",
+			Metrics: money(1, 1_000_000, 900_000, 100_000, 700_000, 200_000),
+		},
+		// An empty supplied label falls back to the workbook name; a zero row is
+		// still a supplied row, never dropped or invented.
+		{BusinessCategory: poreport.CategoryOthers, Label: "", Metrics: poreport.Metrics{}},
+		{BusinessCategory: poreport.CategoryUnassigned, Label: "Unassigned", Metrics: poreport.Metrics{}},
+	}
+	return snapshot
+}
+
+func reportCategoryViewFixture(layout string, codes []string) report.ViewEnvelope {
+	overview := reportCategoryFixture()
+	overview.Filter.Category = poreport.CategoryFm
+	facility := overview.Categories[0]
+	overview.Categories = []poreport.Category{facility}
+	overview.Totals = facility.Metrics
+	source := reportCategoryFixture()
+	return report.ViewEnvelope{
+		Version:  report.ViewVersion,
+		Sources:  []poreport.Report{overview, source},
+		Overview: 0,
+		Periods: report.ViewPeriods{
+			Sources: []int{0}, Months: []string{"2025-01"}, Layout: report.ViewLayoutIndividual,
+		},
+		Categories: report.ViewCategories{
+			Source: 1, Codes: codes, Layout: layout,
+		},
+	}
+}
+
+func TestExportPurchaseOrderReportWritesCategoryComparisonViews(t *testing.T) {
+	cases := []struct {
+		name string
+		view report.ViewEnvelope
+	}{
+		{
+			name: "individual subset under a restricted overview",
+			view: reportCategoryViewFixture(report.ViewLayoutIndividual,
+				[]string{poreport.CategoryFm, poreport.CategoryFab, poreport.CategoryUnassigned}),
+		},
+		{
+			name: "empty individual selection",
+			view: reportCategoryViewFixture(report.ViewLayoutIndividual, []string{}),
+		},
+		{
+			name: "full aggregate under a restricted overview",
+			view: reportCategoryViewFixture(report.ViewLayoutAggregate, []string{
+				poreport.CategoryFm, poreport.CategoryFab, poreport.CategorySupplyGeneral,
+				poreport.CategoryOthers, poreport.CategoryUnassigned,
+			}),
+		},
+	}
+	for _, test := range cases {
+		t.Run(test.name, func(t *testing.T) {
+			q := staffQuotation()
+			dir := t.TempDir()
+			path := filepath.Join(dir, "category-view.pdf")
+			previousDialog := saveFileDialog
+			saveFileDialog = func(context.Context, runtime.SaveDialogOptions) (string, error) {
+				return path, nil
+			}
+			t.Cleanup(func() { saveFileDialog = previousDialog })
+			previousClient := apiClient
+			apiClient = nil
+			t.Cleanup(func() { apiClient = previousClient })
+
+			got, err := q.ExportPurchaseOrderReport(viewJSON(t, test.view))
+			if err != nil {
+				t.Fatalf("ExportPurchaseOrderReport(view): %v", err)
+			}
+			if got != path {
+				t.Errorf("returned path = %q, want %q", got, path)
+			}
+			raw, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatalf("read written view: %v", err)
+			}
+			if !strings.HasPrefix(string(raw), "%PDF") {
+				t.Fatalf("written view is not a PDF (%d bytes)", len(raw))
+			}
+		})
+	}
+}
+
+func TestExportPurchaseOrderReportRefusesInvalidCategoryViewsBeforeTheDialog(t *testing.T) {
+	subsetAggregate := reportCategoryViewFixture(report.ViewLayoutAggregate,
+		[]string{poreport.CategoryFm, poreport.CategoryFab})
+	outOfOrder := reportCategoryViewFixture(report.ViewLayoutIndividual,
+		[]string{poreport.CategoryFab, poreport.CategoryFm})
+	duplicate := reportCategoryViewFixture(report.ViewLayoutIndividual,
+		[]string{poreport.CategoryFm, poreport.CategoryFm})
+	unknown := reportCategoryViewFixture(report.ViewLayoutIndividual,
+		[]string{poreport.CategoryFm, "NOPE"})
+
+	foreignCategory := reportCategoryViewFixture(report.ViewLayoutIndividual,
+		[]string{poreport.CategoryFm})
+	foreignCategory.Sources = append([]poreport.Report{}, foreignCategory.Sources...)
+	foreign := foreignCategory.Sources[1]
+	foreign.Filter.Category = poreport.CategoryFab
+	foreignCategory.Sources[1] = foreign
+
+	wrongRange := reportCategoryViewFixture(report.ViewLayoutIndividual,
+		[]string{poreport.CategoryFm})
+	wrongRange.Sources = append([]poreport.Report{}, wrongRange.Sources...)
+	other := wrongRange.Sources[1]
+	other.Filter.From = "2024-01-01"
+	wrongRange.Sources[1] = other
+
+	absentRow := reportCategoryViewFixture(report.ViewLayoutIndividual,
+		[]string{poreport.CategoryOthers})
+	absentRow.Sources = append([]poreport.Report{}, absentRow.Sources...)
+	absentSource := absentRow.Sources[1]
+	kept := make([]poreport.Category, 0, len(absentSource.Categories))
+	for _, category := range absentSource.Categories {
+		if category.BusinessCategory == poreport.CategoryOthers {
+			continue
+		}
+		kept = append(kept, category)
+	}
+	absentSource.Categories = kept
+	absentRow.Sources[1] = absentSource
+
+	cases := []struct {
+		name string
+		view report.ViewEnvelope
+	}{
+		{name: "subset aggregate", view: subsetAggregate},
+		{name: "out-of-order codes", view: outOfOrder},
+		{name: "duplicate code", view: duplicate},
+		{name: "unknown code", view: unknown},
+		{name: "foreign restricted category source", view: foreignCategory},
+		{name: "category source range mismatch", view: wrongRange},
+		{name: "code absent from the source", view: absentRow},
+	}
+
+	q := staffQuotation()
+	dialogOpened := false
+	previousDialog := saveFileDialog
+	saveFileDialog = func(context.Context, runtime.SaveDialogOptions) (string, error) {
+		dialogOpened = true
+		return filepath.Join(t.TempDir(), "never.pdf"), nil
+	}
+	t.Cleanup(func() { saveFileDialog = previousDialog })
+
+	for _, test := range cases {
+		t.Run(test.name, func(t *testing.T) {
+			dialogOpened = false
+			if _, err := q.ExportPurchaseOrderReport(viewJSON(t, test.view)); err == nil {
+				t.Fatal("invalid category view was accepted")
+			}
+			if dialogOpened {
+				t.Fatal("the save dialog opened before the invalid category view was refused")
+			}
+		})
+	}
+}

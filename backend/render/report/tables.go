@@ -183,9 +183,6 @@ func actualTableColumns(labelTitle string) []tableColumn {
 
 func (r *reportRenderer) drawCategoryTable() {
 	source := r.snapshot
-	if r.resolved != nil {
-		source = r.resolved.Categories
-	}
 	if len(source.Categories) == 0 {
 		r.sectionTitle("By business category", "")
 		r.emptyState("No category rows",
@@ -212,14 +209,6 @@ func (r *reportRenderer) drawCategoryTable() {
 	}
 	total := r.totalRowFor(source, "Total")
 	note := "All amounts in " + r.currency() + ". The category rows foot to the total for the selected filter."
-	if r.view != nil {
-		// #643 may reference a category-scoped source under a period overview
-		// with a different category. Name this section's own filter and as-of so
-		// the total cannot be read as the overview's.
-		note = "Category section: " + categoryFilterLabel(source.Filter.Category) +
-			"  ·  As of " + source.AsOf + "  ·  All amounts in " + r.currency() + "." +
-			" The category rows foot to this section's total."
-	}
 	r.drawTable("By business category", note, columns, rows, &total)
 }
 

@@ -102,6 +102,26 @@ func cardTexts(r *reportRenderer, box cardBox) []string {
 	return texts
 }
 
+// cardTextPrims is cardTexts with the text primitives kept, so a test can read
+// the font size of a value that was drawn inside one card.
+func cardTextPrims(r *reportRenderer, box cardBox) []textPrim {
+	if box.Page < 0 || box.Page >= len(r.canvas.pages) {
+		return nil
+	}
+	var prims []textPrim
+	for _, prim := range r.canvas.pages[box.Page].prims {
+		value, ok := prim.(textPrim)
+		if !ok {
+			continue
+		}
+		if value.baseline >= box.Y-0.5 && value.baseline <= box.Y+box.Height+0.5 &&
+			value.x >= box.X-0.5 && value.x <= box.X+box.Width+0.5 {
+			prims = append(prims, value)
+		}
+	}
+	return prims
+}
+
 func TestIndividualComparisonCardsUseTwoColumnsAndAFullWidthOddFinal(t *testing.T) {
 	half := (contentWidth - cardGap) / 2
 	cases := []struct {
@@ -522,4 +542,357 @@ func TestAggregateIgnoresTheCurrentMonthOverrideTotals(t *testing.T) {
 	section := viewPeriodSectionText(strings.Join(binaryPDFText(t, pdf), "\n"))
 	requireText(t, section, "Recorded total", formatMoney("IDR", annual.Totals.AmountMinor))
 	requireNoText(t, "aggregate total", section, formatMoney("IDR", day.Totals.AmountMinor))
+}
+
+// Issue #643: the selected-category section reuses the month card grid. These
+// tests read the renderer's own category boxes and the PDF text: card geometry
+// and page keep-together cannot be proven by text alone.
+
+func TestCategoryComparisonCardsUseTwoColumnsAndAFullWidthOddFinal(t *testing.T) {
+	half := (contentWidth - cardGap) / 2
+	allCodes := viewCodes(categoryComparisonSource(t))
+	cases := []struct {
+		name       string
+		codes      []string
+		wantRowLen []int
+	}{
+		{name: "one category", codes: allCodes[:1], wantRowLen: []int{1}},
+		{name: "two categories", codes: allCodes[:2], wantRowLen: []int{2}},
+		{name: "three categories", codes: allCodes[:3], wantRowLen: []int{2, 1}},
+		{name: "four categories", codes: allCodes[:4], wantRowLen: []int{2, 2}},
+		{name: "five categories", codes: allCodes, wantRowLen: []int{2, 2, 1}},
+	}
+	for _, test := range cases {
+		t.Run(test.name, func(t *testing.T) {
+			renderer := viewRenderer(t, categoryComparisonView(t, ViewLayoutIndividual, test.codes, true))
+			for _, card := range renderer.cards {
+				if card.Section != cardSectionPeriod {
+					t.Errorf("month card evidence carries section %q", card.Section)
+				}
+			}
+			boxes := renderer.categoryCards
+			if len(boxes) != len(test.codes) {
+				t.Fatalf("category cards = %d; want %d", len(boxes), len(test.codes))
+			}
+			rows := cardRows(boxes)
+			if len(rows) != len(test.wantRowLen) {
+				t.Fatalf("rows = %d; want %d", len(rows), len(test.wantRowLen))
+			}
+			for rowIndex, row := range rows {
+				if len(row) != test.wantRowLen[rowIndex] {
+					t.Fatalf("row %d has %d cards; want %d", rowIndex, len(row), test.wantRowLen[rowIndex])
+				}
+				if len(row) == 2 {
+					if row[0].FullWidth || row[1].FullWidth {
+						t.Errorf("row %d is marked full-width in a pair", rowIndex)
+					}
+					if math.Abs(row[0].Width-half) > 0.01 || math.Abs(row[1].Width-half) > 0.01 {
+						t.Errorf("row %d widths = %.2f/%.2f; want %.2f", rowIndex, row[0].Width, row[1].Width, half)
+					}
+					if math.Abs(row[0].Y-row[1].Y) > 0.01 || row[0].Page != row[1].Page {
+						t.Errorf("row %d pair is not on one baseline/page", rowIndex)
+					}
+					wantX := row[0].X + row[0].Width + cardGap
+					if math.Abs(row[1].X-wantX) > 0.01 {
+						t.Errorf("row %d second card x = %.2f; want %.2f", rowIndex, row[1].X, wantX)
+					}
+				} else {
+					if !row[0].FullWidth {
+						t.Errorf("row %d odd final card is not marked full-width", rowIndex)
+					}
+					if math.Abs(row[0].Width-contentWidth) > 0.01 || math.Abs(row[0].X-marginX) > 0.01 {
+						t.Errorf("row %d full-width card = x %.2f w %.2f; want x %.2f w %.2f",
+							rowIndex, row[0].X, row[0].Width, marginX, contentWidth)
+					}
+				}
+				for _, card := range row {
+					if card.Section != cardSectionCategory {
+						t.Errorf("card %s section = %q; want %q", card.Key, card.Section, cardSectionCategory)
+					}
+					if card.Month != "" {
+						t.Errorf("category card %s carries month %q", card.Key, card.Month)
+					}
+					if !cardSurfaceDrawn(renderer, card) {
+						t.Errorf("%s card surface was not drawn at its recorded box", card.Key)
+					}
+				}
+			}
+			for index, card := range boxes {
+				if card.Key != test.codes[index] {
+					t.Errorf("card %d key = %s; want the supplied order's %s", index, card.Key, test.codes[index])
+				}
+			}
+		})
+	}
+}
+
+func TestCategoryComparisonCardsStayOnOnePageAndRepeatContext(t *testing.T) {
+	allCodes := viewCodes(categoryComparisonSource(t))
+	view := categoryComparisonView(t, ViewLayoutIndividual, allCodes, true)
+	if err := ValidateView(view); err != nil {
+		t.Fatalf("validate view: %v", err)
+	}
+	resolved, err := resolveView(view)
+	if err != nil {
+		t.Fatalf("resolve view: %v", err)
+	}
+	loaded := testFonts()
+	renderer := &reportRenderer{
+		snapshot: resolved.Overview, view: &view, resolved: &resolved,
+		faces: loaded, pal: defaultPalette(), canvas: newCanvas(loaded),
+	}
+	// Start near the foot of a page so the five cards must continue.
+	renderer.canvas.y = contentBot - 230
+	renderer.drawIndividualCategories()
+	if len(renderer.canvas.pages) < 2 {
+		t.Fatalf("five category cards fit on %d page(s); want a continuation", len(renderer.canvas.pages))
+	}
+	pagesWithCards := make(map[int]struct{})
+	for _, box := range renderer.categoryCards {
+		if box.Y < marginTop-0.01 || box.Y+box.Height > contentBot+0.01 {
+			t.Errorf("%s card y=%.2f h=%.2f crosses the page content box", box.Key, box.Y, box.Height)
+		}
+		if !cardSurfaceDrawn(renderer, box) {
+			t.Errorf("%s card surface is not on page %d", box.Key, box.Page+1)
+		}
+		texts := cardTexts(renderer, box)
+		if !containsString(texts, "PO margin %") {
+			t.Errorf("%s card does not hold its final metric row on the same page", box.Key)
+		}
+		pagesWithCards[box.Page] = struct{}{}
+	}
+	cardPages := make([]int, 0, len(pagesWithCards))
+	for pageIndex := range pagesWithCards {
+		cardPages = append(cardPages, pageIndex)
+	}
+	sort.Ints(cardPages)
+	for index, pageIndex := range cardPages {
+		text := pageText([]*page{renderer.canvas.pages[pageIndex]})
+		if index == 0 {
+			requireText(t, text, "By business category — All categories (individual)")
+			continue
+		}
+		requireText(t, text,
+			"By business category — All categories (individual) (continued)",
+			"As of 2026-11-19",
+		)
+	}
+	for _, row := range cardRows(renderer.categoryCards) {
+		if len(row) == 2 && row[0].Page != row[1].Page {
+			t.Errorf("pair %s/%s was split across pages", row[0].Key, row[1].Key)
+		}
+	}
+}
+
+func TestCategoryComparisonCardsPrintExactMoneyZeroRowsAndNoGhost(t *testing.T) {
+	max := poreport.MaxExactMinor
+	codes := []string{
+		poreport.CategoryFm, poreport.CategoryFab,
+		poreport.CategoryOthers, poreport.CategoryUnassigned,
+	}
+	view := categoryComparisonView(t, ViewLayoutIndividual, codes, true)
+	source := view.Sources[1]
+	// FM: the largest exact amount and a loss, so exact money and a signed
+	// negative must both survive a half-width card.
+	source.Categories[0].Metrics = poreport.Metrics{
+		PoCount: 1, AmountMinor: max, CostedMinor: 0, UncostedMinor: max,
+		CapitalMinor: max, MarginMinor: -max,
+	}
+	// FAB: the same loss at an ordinary size with a negative ratio.
+	source.Categories[1].Metrics = poreport.Metrics{
+		PoCount: 1, AmountMinor: 7_777_000, CostedMinor: 7_000_000,
+		UncostedMinor: 777_000, CapitalMinor: 9_000_000, MarginMinor: -2_000_000,
+		MarginBps: fixtureRatio(-2_000_000, 9_000_000),
+	}
+	// OTHERS is the supplied zero row; UNASSIGNED keeps its null ratio.
+	view.Sources[1] = source
+
+	renderer := viewRenderer(t, view)
+	if len(renderer.categoryCards) != len(codes) {
+		t.Fatalf("category cards = %d; want %d", len(renderer.categoryCards), len(codes))
+	}
+	wanted := map[string][]string{
+		poreport.CategoryFm: {
+			formatMoney("IDR", max),
+			formatSignedMoney("IDR", -max),
+			"Uncosted " + formatMoney("IDR", max),
+		},
+		poreport.CategoryFab: {
+			formatSignedMoney("IDR", -2_000_000),
+			formatPct(fixtureRatio(-2_000_000, 9_000_000)),
+		},
+		poreport.CategoryOthers:     {"0", formatMoney("IDR", 0), "-"},
+		poreport.CategoryUnassigned: {"-"},
+	}
+	for _, card := range renderer.categoryCards {
+		texts := cardTexts(renderer, card)
+		joined := strings.Join(texts, " ")
+		for _, want := range wanted[card.Key] {
+			if !strings.Contains(joined, want) {
+				t.Errorf("%s card does not print %q; got %v", card.Key, want, texts)
+			}
+		}
+		exactValues := make(map[string]struct{})
+		for _, want := range wanted[card.Key] {
+			if strings.HasPrefix(want, "Rp") {
+				exactValues[want] = struct{}{}
+			}
+		}
+		for _, prim := range cardTextPrims(renderer, card) {
+			if strings.Contains(prim.text, "…") {
+				t.Errorf("%s card truncates %q", card.Key, prim.text)
+			}
+			if _, exact := exactValues[prim.text]; exact && prim.size != tableBodySize {
+				t.Errorf("%s card sets exact money %q at %.2fpt; want %.2fpt",
+					card.Key, prim.text, prim.size, tableBodySize)
+			}
+		}
+		for _, ghost := range []string{"Estimated", "estimated", "Forecast", "forecast", "Projected", "ghost", "Ghost"} {
+			if containsString(texts, ghost) {
+				t.Errorf("%s card prints ghost language %q", card.Key, ghost)
+			}
+		}
+	}
+
+	pdf, err := RenderView(view, os.DirFS("../../assets"))
+	if err != nil {
+		t.Fatalf("RenderView: %v", err)
+	}
+	section := categorySectionText(strings.Join(binaryPDFText(t, pdf), "\n"))
+	requireText(t, section,
+		"By business category — 4 selected categories",
+		formatMoney("IDR", max),
+		formatSignedMoney("IDR", -max),
+		"Uncosted "+formatMoney("IDR", max),
+	)
+	// A subset has no total, invented or server-owned.
+	requireNoText(t, "category subset cards", section,
+		"Total", "Estimated", "Projected",
+		formatMoney("IDR", source.Totals.AmountMinor),
+	)
+}
+
+func TestCategoryComparisonCardLayoutsRenderPDF(t *testing.T) {
+	allCodes := viewCodes(categoryComparisonSource(t))
+	cases := []struct {
+		name  string
+		codes []string
+		title string
+	}{
+		{name: "one", codes: allCodes[:1], title: "By business category — Facility Management"},
+		{name: "three", codes: allCodes[:3], title: "By business category — 3 selected categories"},
+		{name: "four", codes: allCodes[:4], title: "By business category — 4 selected categories"},
+		{name: "five", codes: allCodes, title: "By business category — All categories (individual)"},
+	}
+	for _, test := range cases {
+		t.Run(test.name, func(t *testing.T) {
+			view := categoryComparisonView(t, ViewLayoutIndividual, test.codes, true)
+			pdf, err := RenderView(view, os.DirFS("../../assets"))
+			if err != nil {
+				t.Fatalf("RenderView: %v", err)
+			}
+			section := categorySectionText(strings.Join(binaryPDFText(t, pdf), "\n"))
+			if section == "" {
+				t.Fatal("the rendered PDF has no category section")
+			}
+			requireText(t, section, test.title)
+			headings := categoryHeadings(view.Sources[1].Categories)
+			wants := make([]string, 0, len(test.codes))
+			for _, code := range test.codes {
+				wants = append(wants, headings[code])
+			}
+			requireInOrder(t, section, wants...)
+		})
+	}
+}
+
+func TestCategoryAggregateKeepsTheWideTableAndRepeatsItsHeader(t *testing.T) {
+	allCodes := viewCodes(categoryComparisonSource(t))
+	view := categoryComparisonView(t, ViewLayoutAggregate, allCodes, true)
+	source := view.Sources[1]
+	// Long supplied labels wrap the 86pt category column, which is what makes a
+	// five-row table span two pages so the repeated header can be checked.
+	for index := range source.Categories {
+		source.Categories[index].Label = strings.Repeat(
+			"Long supplied category label ", 3) + source.Categories[index].BusinessCategory
+	}
+	view.Sources[1] = source
+	if err := ValidateView(view); err != nil {
+		t.Fatalf("validate aggregate: %v", err)
+	}
+	resolved, err := resolveView(view)
+	if err != nil {
+		t.Fatalf("resolve aggregate: %v", err)
+	}
+	loaded := testFonts()
+	renderer := &reportRenderer{
+		snapshot: resolved.Overview, view: &view, resolved: &resolved,
+		faces: loaded, pal: defaultPalette(), canvas: newCanvas(loaded),
+	}
+	renderer.canvas.y = contentBot - 200
+	renderer.drawAggregateCategories()
+	if len(renderer.canvas.pages) < 2 {
+		t.Fatalf("category aggregate fit on %d page(s); want a continuation", len(renderer.canvas.pages))
+	}
+	headerPages := 0
+	for _, currentPage := range renderer.canvas.pages {
+		text := pageText([]*page{currentPage})
+		if !strings.Contains(pdfText(text), "CATEGORY") {
+			continue
+		}
+		headerPages++
+		requireText(t, text, "CATEGORY", "POs", "AMOUNT", "COSTED", "CAPITAL", "MARGIN", "MARGIN %")
+	}
+	if headerPages < 2 {
+		t.Fatalf("the category header appears on %d page(s); want a repeated header", headerPages)
+	}
+}
+
+func TestCategoryHeadingsFallBackAndDisambiguate(t *testing.T) {
+	headings := categoryHeadings([]poreport.Category{
+		{BusinessCategory: poreport.CategoryFm, Label: ""},
+		{BusinessCategory: poreport.CategoryFab, Label: "Fabrication"},
+		{BusinessCategory: poreport.CategorySupplyGeneral, Label: ""},
+		{BusinessCategory: poreport.CategoryOthers, Label: "Shared label"},
+		{BusinessCategory: poreport.CategoryUnassigned, Label: "Shared label"},
+	})
+	wants := map[string]string{
+		poreport.CategoryFm:            "Facility Management",
+		poreport.CategoryFab:           "Fabrication",
+		poreport.CategorySupplyGeneral: "Goods Supply & General",
+		poreport.CategoryOthers:        "Shared label (OTHERS)",
+		poreport.CategoryUnassigned:    "Shared label (UNASSIGNED)",
+	}
+	for code, want := range wants {
+		if got := headings[code]; got != want {
+			t.Errorf("%s heading = %q; want %q", code, got, want)
+		}
+	}
+}
+
+func TestCategoryComparisonCardsDisambiguateSuppliedLabels(t *testing.T) {
+	view := categoryComparisonView(t, ViewLayoutIndividual,
+		viewCodes(categoryComparisonSource(t)), true)
+	source := view.Sources[1]
+	source.Categories[0].Label = ""
+	source.Categories[1].Label = "Shared label"
+	source.Categories[2].Label = "Shared label"
+	source.Categories[3].Label = ""
+	source.Categories[4].Label = ""
+	view.Sources[1] = source
+	pdf, err := RenderView(view, os.DirFS("../../assets"))
+	if err != nil {
+		t.Fatalf("RenderView: %v", err)
+	}
+	section := categorySectionText(strings.Join(binaryPDFText(t, pdf), "\n"))
+	requireText(t, section,
+		"By business category — All categories (individual)",
+		"Facility Management",
+		"Shared label (FAB)",
+		"Shared label (SUPPLY_GEN)",
+		"Others",
+		"Unassigned",
+	)
+	requireInOrder(t, section,
+		"Facility Management", "Shared label (FAB)", "Shared label (SUPPLY_GEN)", "Others", "Unassigned")
 }

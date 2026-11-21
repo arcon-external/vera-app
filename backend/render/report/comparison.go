@@ -30,7 +30,19 @@ const (
 	cardEvidencePad = 3.0
 )
 
+// Comparison-card sections. One grid engine draws both; the section decides
+// which layout-evidence slice records the box and is never printed.
+const (
+	cardSectionPeriod   = "period"
+	cardSectionCategory = "category"
+)
+
 type cardBox struct {
+	// Section and Key identify what the card is. Month is retained for the
+	// selected-month evidence tests; a category card leaves it empty and names
+	// its code in Key.
+	Section   string
+	Key       string
 	Month     string
 	Row       int
 	Page      int
@@ -53,7 +65,8 @@ type cardEvidencePlan struct {
 	Height    float64
 }
 
-type monthCardPlan struct {
+type comparisonCardPlan struct {
+	Key      string
 	Month    string
 	Heading  string
 	Scope    []string
@@ -63,7 +76,7 @@ type monthCardPlan struct {
 	Height   float64
 }
 
-func (plan monthCardPlan) measuredHeight() float64 {
+func (plan comparisonCardPlan) measuredHeight() float64 {
 	height := 2*cardPad + 12.5 + float64(len(plan.Scope))*cardScopeLine + 3
 	for _, metric := range plan.Metrics {
 		height += metric.Height
@@ -146,9 +159,9 @@ func (r *reportRenderer) monthPrimary(month resolvedMonth) (*poreport.Metrics, s
 	}
 }
 
-func (r *reportRenderer) planMonthCard(month resolvedMonth, width float64, heading string) monthCardPlan {
+func (r *reportRenderer) planMonthCard(month resolvedMonth, width float64, heading string) comparisonCardPlan {
 	inner := width - 2*cardPad
-	plan := monthCardPlan{Month: month.Month, Heading: heading}
+	plan := comparisonCardPlan{Key: month.Month, Month: month.Month, Heading: heading}
 	plan.Scope = r.faces.wrapCell(r.monthCardScope(month), cardScopeSize, inner, false)
 
 	primary, note := r.monthPrimary(month)
@@ -199,7 +212,7 @@ func (r *reportRenderer) drawIndividualMonths() {
 		plan := r.planMonthCard(months[0], contentWidth, "By period — "+monthHeading(months[0].Month))
 		r.canvas.ensure(plan.Height)
 		top := r.canvas.y
-		r.drawMonthCard(plan, marginX, top, contentWidth, plan.Height, 0, true)
+		r.drawComparisonCard(plan, marginX, top, contentWidth, plan.Height, 0, true, cardSectionPeriod)
 		r.canvas.y = top + plan.Height + cardGap
 		return
 	}
@@ -207,10 +220,30 @@ func (r *reportRenderer) drawIndividualMonths() {
 	title := fmt.Sprintf("By period — %d selected months", len(months))
 	subtitle := r.selectedMonthsScope()
 	half := (contentWidth - cardGap) / 2
-	plans := make([]monthCardPlan, len(months))
+	plans := make([]comparisonCardPlan, len(months))
 	for index, month := range months {
 		plans[index] = r.planMonthCard(month, half, monthHeading(month.Month))
 	}
+	r.drawComparisonCardGrid(title, subtitle, cardSectionPeriod, plans,
+		func(index int, width float64) comparisonCardPlan {
+			return r.planMonthCard(months[index], width, monthHeading(months[index].Month))
+		})
+}
+
+// drawComparisonCardGrid is the one comparison layout engine: at most two cards
+// per row, a final odd card spanning the content width, the section title kept
+// with its first row, and each pair or full-width card kept on one page with the
+// section context repeated when the grid continues. planAt re-plans a card at a
+// new width, which is what makes the odd final card honest at full width.
+func (r *reportRenderer) drawComparisonCardGrid(
+	title, subtitle, section string,
+	plans []comparisonCardPlan,
+	planAt func(index int, width float64) comparisonCardPlan,
+) {
+	if len(plans) == 0 {
+		return
+	}
+	half := (contentWidth - cardGap) / 2
 	firstHeight := plans[0].Height
 	if len(plans) > 1 {
 		firstHeight = math.Max(plans[0].Height, plans[1].Height)
@@ -223,12 +256,12 @@ func (r *reportRenderer) drawIndividualMonths() {
 	row := 0
 	for index := 0; index < len(plans); {
 		if len(plans)-index == 1 {
-			plan := r.planMonthCard(months[index], contentWidth, monthHeading(months[index].Month))
+			plan := planAt(index, contentWidth)
 			if r.canvas.y+plan.Height > contentBot {
 				r.newComparisonPage(title, subtitle)
 			}
 			top := r.canvas.y
-			r.drawMonthCard(plan, marginX, top, contentWidth, plan.Height, row, true)
+			r.drawComparisonCard(plan, marginX, top, contentWidth, plan.Height, row, true, section)
 			r.canvas.y = top + plan.Height + cardGap
 			index++
 			row++
@@ -240,8 +273,8 @@ func (r *reportRenderer) drawIndividualMonths() {
 			r.newComparisonPage(title, subtitle)
 		}
 		top := r.canvas.y
-		r.drawMonthCard(left, marginX, top, half, height, row, false)
-		r.drawMonthCard(right, marginX+half+cardGap, top, half, height, row, false)
+		r.drawComparisonCard(left, marginX, top, half, height, row, false, section)
+		r.drawComparisonCard(right, marginX+half+cardGap, top, half, height, row, false, section)
 		r.canvas.y = top + height + cardGap
 		index += 2
 		row++
@@ -253,12 +286,13 @@ func (r *reportRenderer) newComparisonPage(title, subtitle string) {
 	r.sectionTitle(title+" (continued)", subtitle)
 }
 
-func (r *reportRenderer) drawMonthCard(plan monthCardPlan, x, y, width, surfaceHeight float64, row int, fullWidth bool) {
+func (r *reportRenderer) drawComparisonCard(plan comparisonCardPlan, x, y, width, surfaceHeight float64, row int, fullWidth bool, section string) {
 	c := r.canvas
 	c.rect(x, y, width, surfaceHeight, &r.pal.surface, &r.pal.edge, 0.5)
 	inner := width - 2*cardPad
 
-	c.text(plan.Heading, x+cardPad, y+cardPad+9.5, 10, true, r.pal.emphasis)
+	headingSize := fittedSize(r.faces.width, plan.Heading, inner, 10, 6.2, true)
+	c.text(plan.Heading, x+cardPad, y+cardPad+9.5, headingSize, true, r.pal.emphasis)
 	cursor := y + cardPad + 12.5
 	for _, line := range plan.Scope {
 		c.text(line, x+cardPad, cursor+6.2, cardScopeSize, false, r.pal.muted)
@@ -291,7 +325,9 @@ func (r *reportRenderer) drawMonthCard(plan monthCardPlan, x, y, width, surfaceH
 		cursor += evidence.Height
 	}
 
-	r.cards = append(r.cards, cardBox{
+	box := cardBox{
+		Section:   section,
+		Key:       plan.Key,
 		Month:     plan.Month,
 		Row:       row,
 		Page:      len(c.pages) - 1,
@@ -300,7 +336,12 @@ func (r *reportRenderer) drawMonthCard(plan monthCardPlan, x, y, width, surfaceH
 		Width:     width,
 		Height:    surfaceHeight,
 		FullWidth: fullWidth,
-	})
+	}
+	if section == cardSectionCategory {
+		r.categoryCards = append(r.categoryCards, box)
+		return
+	}
+	r.cards = append(r.cards, box)
 }
 
 func (r *reportRenderer) drawAggregateMonths() {

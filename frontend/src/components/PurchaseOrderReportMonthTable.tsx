@@ -22,6 +22,7 @@ import {
 } from "../poReportPage";
 import type { PurchaseOrderReportMetrics } from "../poReport";
 import { Button, Card, SectionHeading, StatusBanner } from "./ui";
+import { PurchaseOrderReportMetricTable } from "./PurchaseOrderReportMetricTable";
 
 export interface PurchaseOrderReportMonthTableProps {
   readout: PurchaseOrderMonthReadout;
@@ -243,24 +244,6 @@ function MonthReadoutBody({
   anchor: boolean;
 }) {
   const primary = readout.primary;
-  const rows: { label: string; value: string; negative?: boolean }[] = [
-    { label: "POs", value: primary ? formatReportCount(primary.poCount) : "-" },
-    { label: "PO amount", value: primary ? money(entry, primary.amountMinor) : "-" },
-    {
-      label: "Costed amount",
-      value: primary ? money(entry, primary.costedMinor) : "-",
-    },
-    { label: "Capital", value: primary ? money(entry, primary.capitalMinor) : "-" },
-    {
-      label: "PO margin",
-      value: primary ? money(entry, primary.marginMinor) : "-",
-      negative: primary !== null && primary.marginMinor < 0,
-    },
-    {
-      label: "PO margin %",
-      value: primary ? formatReportBps(primary.marginBps) : "-",
-    },
-  ];
 
   return (
     <>
@@ -301,45 +284,18 @@ function MonthReadoutBody({
                 {readout.primaryLabel}
               </p>
             )}
-            <table
-              {...(anchor
-                ? {
-                    id: "report-period-table",
-                    tabIndex: -1,
-                    "aria-label": "Period totals",
-                  }
-                : { "aria-label": `${monthLabel(readout.month)} metrics` })}
-              className="w-full scroll-mt-6 text-left text-body"
-            >
-              <thead>
-                <tr className="border-y border-rule bg-paper-subtle/60 text-micro uppercase tracking-[0.1em] text-ink-500">
-                  <th className="py-2 pr-4 font-medium">Metric</th>
-                  <th className="py-2 text-right font-medium">Value</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-rule">
-                {rows.map((row) => (
-                  <tr key={row.label}>
-                    <th
-                      scope="row"
-                      className="py-2.5 pr-4 text-left align-middle font-medium text-ink-700"
-                    >
-                      {row.label}
-                    </th>
-                    <td
-                      data-month-metric={row.label}
-                      className={`tnum whitespace-nowrap py-2.5 text-right align-middle ${
-                        row.negative
-                          ? "text-danger-700"
-                          : "text-ink-900"
-                      }`}
-                    >
-                      {row.value}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+            <PurchaseOrderReportMetricTable
+              metrics={primary}
+              entry={entry}
+              ariaLabel={
+                anchor
+                  ? "Period totals"
+                  : `${monthLabel(readout.month)} metrics`
+              }
+              id={anchor ? "report-period-table" : undefined}
+              tabIndex={anchor ? -1 : undefined}
+              metricScope="month"
+            />
           </div>
 
           {readout.recordedFuture === null ? null : (

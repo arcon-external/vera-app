@@ -530,3 +530,133 @@ describe("Reports export wiring through the real App (issue #632)", () => {
     expect(view.periods.sources).toEqual([1]);
   });
 });
+
+describe("category comparison export through the real App (issue #643)", () => {
+  async function openCategoryPicker(): Promise<void> {
+    await act(async () => {
+      button("Choose categories").click();
+    });
+    await flush();
+  }
+
+  function categoryPickerKey(code: string): HTMLButtonElement {
+    const found = document.querySelector<HTMLButtonElement>(
+      `[data-picker-key="${code}"]`
+    );
+    if (found === null) throw new Error(`no category picker item ${code}`);
+    return found;
+  }
+
+  async function clickPicker(control: HTMLElement): Promise<void> {
+    await act(async () => {
+      control.click();
+    });
+    await flush();
+  }
+
+  async function closeCategoryPicker(): Promise<void> {
+    const close = document.querySelector<HTMLButtonElement>("[data-picker-close]");
+    if (close === null) throw new Error("no category picker close");
+    await clickPicker(close);
+  }
+
+  async function exportPdf(): Promise<void> {
+    await act(async () => {
+      button("Export PDF").click();
+    });
+    await flush();
+  }
+
+  it("exports a restricted overview with a category=all Individual subset", async () => {
+    await openReports();
+    expect(button("Export PDF").disabled).toBe(false);
+    expect(mocks.getPurchaseOrderReport).toHaveBeenCalledTimes(1);
+
+    await choose("Category", "Facility Management");
+    expect(mocks.getPurchaseOrderReport).toHaveBeenCalledTimes(2);
+    await openCategoryPicker();
+    await clickPicker(categoryPickerKey("FAB"));
+    await closeCategoryPicker();
+
+    expect(button("Export PDF").disabled).toBe(false);
+    await exportPdf();
+
+    expect(mocks.getPurchaseOrderReport).toHaveBeenCalledTimes(2);
+    expect(mocks.exportPurchaseOrderReport).toHaveBeenCalledTimes(1);
+    const view = sentSnapshot();
+    expect(view.version).toBe(1);
+    expect(view.sources).toHaveLength(2);
+    expect(view.sources[0].filter.category).toBe("FM");
+    expect(view.sources[1].filter).toEqual(reportCalls()[0]);
+    expect(view.sources[1].filter.category).toBe("all");
+    expect(view.categories).toEqual({
+      source: 1,
+      codes: ["FAB"],
+      layout: "individual",
+    });
+    expect(view.periods.months).toEqual(["2026-11"]);
+    expect(view.periods.sources).toEqual([0]);
+    expect(view.overview).toBe(0);
+  });
+
+  it("exports All/Individual from the independent all-category snapshot", async () => {
+    await openReports();
+    await choose("Category", "Facility Management");
+    expect(mocks.getPurchaseOrderReport).toHaveBeenCalledTimes(2);
+
+    await openCategoryPicker();
+    await clickPicker(
+      document.querySelector<HTMLButtonElement>("[data-picker-all]")!
+    );
+    await closeCategoryPicker();
+    await act(async () => {
+      button("Individual").click();
+    });
+    await flush();
+    expect(document.querySelectorAll("[data-category-card]")).toHaveLength(5);
+
+    await exportPdf();
+    const view = sentSnapshot();
+    expect(view.categories).toEqual({
+      source: 1,
+      codes: ["FM", "FAB", "SUPPLY_GEN", "OTHERS", "UNASSIGNED"],
+      layout: "individual",
+    });
+    expect(view.sources).toHaveLength(2);
+    expect(view.sources[0].filter.category).toBe("FM");
+    expect(view.sources[1].filter.category).toBe("all");
+    // The whole local journey made no additional API read.
+    expect(mocks.getPurchaseOrderReport).toHaveBeenCalledTimes(2);
+  });
+
+  it("exports an explicit empty category section without a financial source", async () => {
+    await openReports();
+    await choose("Category", "Facility Management");
+    expect(mocks.getPurchaseOrderReport).toHaveBeenCalledTimes(2);
+
+    await openCategoryPicker();
+    await clickPicker(categoryPickerKey("FAB"));
+    await clickPicker(categoryPickerKey("FAB"));
+    await closeCategoryPicker();
+    expect(document.querySelector("[data-category-empty]")).not.toBeNull();
+
+    await exportPdf();
+    const view = sentSnapshot();
+    expect(view.version).toBe(1);
+    expect(view.categories).toEqual({
+      source: 0,
+      codes: [],
+      layout: "individual",
+    });
+    // No extra all-category snapshot is carried for an empty section.
+    expect(view.sources).toHaveLength(1);
+    expect(view.sources[0].filter.category).toBe("FM");
+    expect(view.overview).toBe(0);
+    expect(view.periods).toEqual({
+      sources: [0],
+      months: ["2026-11"],
+      layout: "individual",
+    });
+    expect(mocks.getPurchaseOrderReport).toHaveBeenCalledTimes(2);
+  });
+});

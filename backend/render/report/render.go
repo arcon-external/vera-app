@@ -78,13 +78,20 @@ type reportRenderer struct {
 	// for the geometry tests (pair widths, odd full-width final card, one page
 	// per card); it carries no financial value and is never printed.
 	cards []cardBox
+	// categoryCards records the same boxes for the selected-category section,
+	// kept separate so #642's month geometry stays independently verifiable.
+	categoryCards []cardBox
 }
 
 func (r *reportRenderer) draw() {
 	r.drawHeader()
 	r.drawKPIs()
 	r.drawCharts()
-	r.drawCategoryTable()
+	if r.view != nil {
+		r.drawSelectedCategorySection()
+	} else {
+		r.drawCategoryTable()
+	}
 	if r.view != nil {
 		r.drawSelectedMonthSections()
 	} else {

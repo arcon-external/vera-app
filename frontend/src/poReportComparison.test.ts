@@ -8,21 +8,34 @@ import {
   annualMonthQuery,
   annualSourceKey,
   canonicalMonths,
+  categoryDisplayLabels,
+  categorySelectionSummary,
+  categorySourceMatchesOverview,
+  categorySourceQuery,
+  categorySourceRequest,
   initialPickerYear,
+  isAllCategoriesSelected,
   monthKeyFromDate,
   monthLabel,
   monthSelectionSummary,
   monthSpanCount,
   monthStart,
   monthUnavailableLabel,
+  nextActiveCategory,
   nextActiveMonth,
   nextMonthStart,
+  overviewSuppliesAllCategories,
+  reportSourceKey,
+  resolveCategoryReadout,
   resolveMonthAggregate,
   resolveMonthReadout,
   resolveMonthSource,
+  resolveSelectedCategoryCodes,
+  selectAllCategories,
   selectionLimitViolation,
   shiftMonth,
   sourceScopeMatches,
+  toggleCategoryInSelection,
   toggleMonthInSelection,
 } from "./poReportComparison";
 import {
@@ -32,11 +45,12 @@ import {
   purchaseOrderReportYearWithRecordedFutureFixture,
 } from "./poReportFixtures";
 import type {
+  PurchaseOrderReportCategory,
   PurchaseOrderReportData,
   PurchaseOrderReportMetrics,
   PurchaseOrderReportQuery,
 } from "./poReport";
-import { reportFilterKey } from "./poReportPage";
+import { reportFilterKey, reportRangeLabel } from "./poReportPage";
 
 function clone(report: PurchaseOrderReportData): PurchaseOrderReportData {
   return structuredClone(report);
@@ -724,5 +738,487 @@ describe("month aggregate (issue #642)", () => {
     });
     expect(incomplete.complete).toBe(false);
     expect(incomplete.rows[2].metrics).toBeNull();
+  });
+});
+
+// Issue #643: the independent category comparison's pure decisions.
+const SUPPLIED_CODES = ["FM", "FAB", "SUPPLY_GEN", "OTHERS", "UNASSIGNED"];
+
+function categoryUniverse(
+  overview: PurchaseOrderReportData
+): PurchaseOrderReportData {
+  const source = clone(overview);
+  source.filter = categorySourceQuery(overview.filter);
+  return source;
+}
+
+function restrictedOverview(category: string): {
+  overview: PurchaseOrderReportData;
+  universe: PurchaseOrderReportData;
+} {
+  const base = purchaseOrderReportFixture();
+  const overview = clone(base);
+  overview.filter = { ...base.filter, category };
+  overview.categories = base.categories.filter(
+    (row) => row.businessCategory === category
+  );
+  return { overview, universe: categoryUniverse(base) };
+}
+
+/** The all-category snapshot with one genuine zero-activity supplied row. */
+function withZeroFab(source: PurchaseOrderReportData): PurchaseOrderReportData {
+  const copy = clone(source);
+  copy.categories = copy.categories.map((row): PurchaseOrderReportCategory =>
+    row.businessCategory === "FAB"
+      ? {
+          businessCategory: "FAB",
+          label: "Fabrication",
+          ...zeroMetrics(),
+        }
+      : row
+  );
+  return copy;
+}
+
+function rowFor(
+  source: PurchaseOrderReportData,
+  code: string
+): PurchaseOrderReportCategory {
+  const row = source.categories.find(
+    (category) => category.businessCategory === code
+  );
+  if (row === undefined) throw new Error(`missing category ${code}`);
+  return row;
+}
+
+describe("category source identity (issue #643)", () => {
+  it("builds the exact all-category query at the overview's range and currency", () => {
+    const overview = purchaseOrderReportMonthFixture();
+    const query = categorySourceQuery({
+      ...overview.filter,
+      category: "FAB",
+      currency: " usd ",
+    });
+    expect(query).toEqual({
+      from: "2026-11-01",
+      to: "2026-12-01",
+      bucket: "day",
+      category: "all",
+      currency: "USD",
+    });
+    expect(query.from).toBe(overview.filter.from);
+    expect(query.to).toBe(overview.filter.to);
+    expect(query.bucket).toBe(overview.filter.bucket);
+
+    const request = categorySourceRequest(overview);
+    expect(request.query).toEqual(categorySourceQuery(overview.filter));
+    expect(request.key).toBe(reportSourceKey(request.query, overview.asOf));
+    expect(request.key).toBe(
+      `${reportFilterKey(request.query)}#${overview.asOf}`
+    );
+  });
+
+  it("reuses an all overview and adds one read for a restricted scope, never per code", () => {
+    const all = purchaseOrderReportFixture();
+    expect(overviewSuppliesAllCategories(all)).toBe(true);
+    expect(categorySourceRequest(all).key).toBe(
+      reportSourceKey(all.filter, all.asOf)
+    );
+    // The registry seeds the ready overview under that exact key: 0 reads.
+
+    const { overview: restricted, universe } = restrictedOverview("FM");
+    expect(overviewSuppliesAllCategories(restricted)).toBe(false);
+    const request = categorySourceRequest(restricted);
+    expect(request.key).not.toBe(
+      reportSourceKey(restricted.filter, restricted.asOf)
+    );
+    expect(request.key).toBe(reportSourceKey(universe.filter, universe.asOf));
+
+    // FM -> FAB on the same range/currency addresses the same all-category key.
+    const fab = restrictedOverview("FAB").overview;
+    expect(categorySourceRequest(fab).key).toBe(request.key);
+
+    // Selecting one code or all five never changes the one source identity.
+    const one = toggleCategoryInSelection(null, SUPPLIED_CODES, "FAB");
+    const many = toggleCategoryInSelection(
+      one.explicitCodes,
+      SUPPLIED_CODES,
+      "UNASSIGNED"
+    );
+    expect(one.explicitCodes).toEqual(["FAB"]);
+    expect(many.explicitCodes).toEqual(["FAB", "UNASSIGNED"]);
+    expect(categorySourceRequest(fab).key).toBe(request.key);
+  });
+
+  it("matches only the overview's exact range, bucket, currency and all scope", () => {
+    const { overview, universe } = restrictedOverview("FM");
+    expect(categorySourceMatchesOverview(overview, universe)).toBe(true);
+    expect(
+      categorySourceMatchesOverview(purchaseOrderReportFixture(), universe)
+    ).toBe(true);
+
+    const wrongFrom = clone(universe);
+    wrongFrom.filter.from = "2026-01-02";
+    expect(categorySourceMatchesOverview(overview, wrongFrom)).toBe(false);
+
+    const wrongTo = clone(universe);
+    wrongTo.filter.to = "2026-11-21";
+    expect(categorySourceMatchesOverview(overview, wrongTo)).toBe(false);
+
+    const wrongBucket = clone(universe);
+    wrongBucket.filter.bucket = "year";
+    expect(categorySourceMatchesOverview(overview, wrongBucket)).toBe(false);
+
+    const wrongCurrency = clone(universe);
+    wrongCurrency.filter.currency = "USD";
+    expect(categorySourceMatchesOverview(overview, wrongCurrency)).toBe(false);
+
+    // A restricted FM snapshot is never a substitute for the universe.
+    expect(categorySourceMatchesOverview(overview, overview)).toBe(false);
+
+    const otherAsOf = clone(universe);
+    otherAsOf.asOf = "2026-11-18";
+    expect(categorySourceMatchesOverview(overview, otherAsOf)).toBe(true);
+  });
+});
+
+describe("category labels (issue #643)", () => {
+  it("falls back to the code and disambiguates only colliding labels", () => {
+    const rows: PurchaseOrderReportCategory[] = [
+      {
+        businessCategory: "FM",
+        label: "Facility Management",
+        ...zeroMetrics(),
+      },
+      { businessCategory: "FAB", label: "Fabrication", ...zeroMetrics() },
+      { businessCategory: "SUPPLY_GEN", label: "Fabrication", ...zeroMetrics() },
+      { businessCategory: "OTHERS", label: "", ...zeroMetrics() },
+      { businessCategory: "UNASSIGNED", label: "   ", ...zeroMetrics() },
+    ];
+    const labels = categoryDisplayLabels(rows);
+    expect(labels.get("FM")).toBe("Facility Management");
+    expect(labels.get("FAB")).toBe("Fabrication (FAB)");
+    expect(labels.get("SUPPLY_GEN")).toBe("Fabrication (SUPPLY_GEN)");
+    expect(labels.get("OTHERS")).toBe("OTHERS");
+    expect(labels.get("UNASSIGNED")).toBe("UNASSIGNED");
+  });
+
+  it("does not suffix a colliding row whose fallback label is already its code", () => {
+    const rows: PurchaseOrderReportCategory[] = [
+      { businessCategory: "FM", label: "", ...zeroMetrics() },
+      { businessCategory: "FAB", label: "FM", ...zeroMetrics() },
+    ];
+    const labels = categoryDisplayLabels(rows);
+    expect(labels.get("FM")).toBe("FM");
+    expect(labels.get("FAB")).toBe("FM (FAB)");
+  });
+});
+
+describe("category selection state machine (issue #643)", () => {
+  it("starts from All over every supplied row, including zero and UNASSIGNED", () => {
+    expect(resolveSelectedCategoryCodes(null, SUPPLIED_CODES)).toEqual(
+      SUPPLIED_CODES
+    );
+    expect(
+      isAllCategoriesSelected(SUPPLIED_CODES, SUPPLIED_CODES)
+    ).toBe(true);
+    expect(isAllCategoriesSelected([], SUPPLIED_CODES)).toBe(false);
+    expect(isAllCategoriesSelected([], [])).toBe(false);
+    expect(resolveSelectedCategoryCodes(null, ["FM", "FM", "UNASSIGNED"])).toEqual(
+      ["FM", "UNASSIGNED"]
+    );
+  });
+
+  it("focuses one from All, then toggles membership in supplied order", () => {
+    const focused = toggleCategoryInSelection(null, SUPPLIED_CODES, "OTHERS");
+    expect(focused).toEqual({
+      explicitCodes: ["OTHERS"],
+      activeCode: "OTHERS",
+    });
+
+    const added = toggleCategoryInSelection(
+      focused.explicitCodes,
+      SUPPLIED_CODES,
+      "FM"
+    );
+    expect(added.explicitCodes).toEqual(["FM", "OTHERS"]);
+    expect(added.activeCode).toBe("FM");
+
+    const removed = toggleCategoryInSelection(
+      added.explicitCodes,
+      SUPPLIED_CODES,
+      "FM"
+    );
+    expect(removed.explicitCodes).toEqual(["OTHERS"]);
+    expect(removed.activeCode).toBe("OTHERS");
+
+    const empty = toggleCategoryInSelection(["OTHERS"], SUPPLIED_CODES, "OTHERS");
+    expect(empty).toEqual({ explicitCodes: [], activeCode: null });
+    expect(isAllCategoriesSelected(empty.explicitCodes ?? [], SUPPLIED_CODES)).toBe(
+      false
+    );
+  });
+
+  it("derives All when every supplied row is selected and remembers order", () => {
+    let change = toggleCategoryInSelection(null, SUPPLIED_CODES, "FAB");
+    for (const code of ["UNASSIGNED", "FM", "OTHERS", "SUPPLY_GEN"]) {
+      change = toggleCategoryInSelection(
+        change.explicitCodes,
+        SUPPLIED_CODES,
+        code
+      );
+    }
+    expect(change.explicitCodes).toEqual(SUPPLIED_CODES);
+    expect(
+      isAllCategoriesSelected(change.explicitCodes ?? [], SUPPLIED_CODES)
+    ).toBe(true);
+    expect(selectAllCategories(SUPPLIED_CODES)).toEqual({
+      explicitCodes: null,
+      activeCode: "FM",
+    });
+    expect(selectAllCategories([])).toEqual({
+      explicitCodes: null,
+      activeCode: null,
+    });
+  });
+
+  it("ignores a code the active source does not supply", () => {
+    const specific = toggleCategoryInSelection(["FM"], SUPPLIED_CODES, "NOPE");
+    expect(specific.explicitCodes).toEqual(["FM"]);
+    expect(specific.activeCode).toBe("FM");
+
+    const all = toggleCategoryInSelection(null, SUPPLIED_CODES, "NOPE");
+    expect(all.explicitCodes).toBeNull();
+    expect(all.activeCode).toBe("FM");
+  });
+
+  it("moves single navigation along supplied order with the same clamp as subsets", () => {
+    // Single: the next supplied row replaces the single code, clamped at ends.
+    expect(nextActiveCategory(SUPPLIED_CODES, "FM", -1)).toBe("FM");
+    expect(nextActiveCategory(SUPPLIED_CODES, "FM", 1)).toBe("FAB");
+    expect(nextActiveCategory(SUPPLIED_CODES, "FAB", 1)).toBe("SUPPLY_GEN");
+    expect(nextActiveCategory(SUPPLIED_CODES, "UNASSIGNED", 1)).toBe(
+      "UNASSIGNED"
+    );
+    // Subset focus: moves within the selected codes only.
+    const subset = ["FM", "OTHERS", "UNASSIGNED"];
+    expect(nextActiveCategory(subset, "FM", 1)).toBe("OTHERS");
+    expect(nextActiveCategory(subset, null, 1)).toBe("OTHERS");
+    expect(nextActiveCategory(subset, "UNASSIGNED", 1)).toBe("UNASSIGNED");
+    expect(nextActiveCategory([], null, 1)).toBeNull();
+  });
+});
+
+describe("category readout (issue #643)", () => {
+  it("shows every supplied row and the server total for the all overview", () => {
+    const overview = purchaseOrderReportFixture();
+    const source = withZeroFab(categoryUniverse(overview));
+    const readout = resolveCategoryReadout({
+      overview,
+      source,
+      status: "ready",
+      error: "",
+      explicitCodes: null,
+    });
+
+    expect(readout.status).toBe("ready");
+    expect(readout.error).toBe("");
+    expect(readout.rangeLabel).toBe(reportRangeLabel(overview.filter));
+    expect(readout.rangeLabel).toBe("1 Jan 2026 – 19 Nov 2026");
+    expect(readout.currency).toBe("IDR");
+    expect(readout.asOf).toBe(overview.asOf);
+    expect(readout.generatedAt).toBe(overview.generatedAt);
+    expect(readout.sourceLabel).toBe("Performance snapshot");
+    expect(readout.scopeMatchesOverview).toBe(true);
+    expect(readout.supplied.map((item) => item.code)).toEqual(SUPPLIED_CODES);
+    expect(readout.selected.map((item) => item.code)).toEqual(SUPPLIED_CODES);
+    expect(readout.total).toEqual(source.totals);
+
+    const zeroFab = readout.supplied.find((item) => item.code === "FAB");
+    expect(zeroFab?.metrics).toEqual(zeroMetrics());
+    const unassigned = readout.supplied.find(
+      (item) => item.code === "UNASSIGNED"
+    );
+    expect(unassigned?.metrics.marginBps).toBeNull();
+    expect(unassigned?.metrics.poCount).toBe(
+      rowFor(source, "UNASSIGNED").poCount
+    );
+    expect(unassigned?.metrics.capitalMinor).toBe(0);
+  });
+
+  it("keeps a restricted overview's range while reading the all-category universe", () => {
+    const { overview, universe } = restrictedOverview("FM");
+    const source = withZeroFab(universe);
+    const readout = resolveCategoryReadout({
+      overview,
+      source,
+      status: "ready",
+      error: "",
+      explicitCodes: ["UNASSIGNED", "FAB"],
+    });
+
+    expect(readout.status).toBe("ready");
+    expect(readout.rangeLabel).toBe(reportRangeLabel(overview.filter));
+    expect(readout.sourceLabel).toBe("All-category snapshot");
+    expect(readout.scopeMatchesOverview).toBe(true);
+    expect(readout.supplied.map((item) => item.code)).toEqual(SUPPLIED_CODES);
+    // Selected rows follow supplied order, not click order.
+    expect(readout.selected.map((item) => item.code)).toEqual([
+      "FAB",
+      "UNASSIGNED",
+    ]);
+    expect(readout.total).toEqual(source.totals);
+
+    const empty = resolveCategoryReadout({
+      overview,
+      source,
+      status: "ready",
+      error: "",
+      explicitCodes: [],
+    });
+    expect(empty.selected).toEqual([]);
+    expect(empty.supplied).toHaveLength(SUPPLIED_CODES.length);
+    expect(empty.total).toEqual(source.totals);
+  });
+
+  it("surfaces a range, bucket, currency or restricted-source mismatch as an error", () => {
+    const { overview, universe } = restrictedOverview("FM");
+    const wrongCurrency = clone(universe);
+    wrongCurrency.filter.currency = "USD";
+    const currencyReadout = resolveCategoryReadout({
+      overview,
+      source: wrongCurrency,
+      status: "ready",
+      error: "",
+      explicitCodes: null,
+    });
+    expect(currencyReadout.status).toBe("error");
+    expect(currencyReadout.supplied).toEqual([]);
+    expect(currencyReadout.selected).toEqual([]);
+    expect(currencyReadout.total).toBeNull();
+    expect(currencyReadout.error).toMatch(/does not match/);
+
+    const wrongRange = clone(universe);
+    wrongRange.filter.from = "2026-01-02";
+    expect(
+      resolveCategoryReadout({
+        overview,
+        source: wrongRange,
+        status: "ready",
+        error: "",
+        explicitCodes: null,
+      }).status
+    ).toBe("error");
+
+    const restrictedSource = resolveCategoryReadout({
+      overview,
+      source: overview,
+      status: "ready",
+      error: "",
+      explicitCodes: null,
+    });
+    expect(restrictedSource.status).toBe("error");
+    expect(restrictedSource.total).toBeNull();
+  });
+
+  it("keeps an as-of mismatch visible but marks the scope stale", () => {
+    const { overview, universe } = restrictedOverview("FM");
+    const stale = clone(universe);
+    stale.asOf = "2026-11-18";
+    const readout = resolveCategoryReadout({
+      overview,
+      source: stale,
+      status: "ready",
+      error: "",
+      explicitCodes: null,
+    });
+    expect(readout.status).toBe("ready");
+    expect(readout.scopeMatchesOverview).toBe(false);
+    expect(readout.asOf).toBe("2026-11-18");
+    expect(readout.supplied).toHaveLength(SUPPLIED_CODES.length);
+    expect(readout.total).toEqual(stale.totals);
+    expect(readout.sourceLabel).toBe("All-category snapshot");
+  });
+
+  it("never presents loading or failed data as known zero activity", () => {
+    const all = purchaseOrderReportFixture();
+    const loading = resolveCategoryReadout({
+      overview: all,
+      source: null,
+      status: "loading",
+      error: "",
+      explicitCodes: null,
+    });
+    expect(loading).toMatchObject({
+      status: "loading",
+      supplied: [],
+      selected: [],
+      total: null,
+      scopeMatchesOverview: false,
+      sourceLabel: "Performance snapshot",
+    });
+
+    const failed = resolveCategoryReadout({
+      overview: all,
+      source: null,
+      status: "error",
+      error: "The all-category API is unreachable.",
+      explicitCodes: null,
+    });
+    expect(failed.status).toBe("error");
+    expect(failed.error).toBe("The all-category API is unreachable.");
+    expect(failed.total).toBeNull();
+
+    const readyWithoutSource = resolveCategoryReadout({
+      overview: all,
+      source: null,
+      status: "ready",
+      error: "",
+      explicitCodes: null,
+    });
+    expect(readyWithoutSource.status).toBe("error");
+    expect(readyWithoutSource.error).toMatch(/could not be loaded/);
+    expect(readyWithoutSource.total).toBeNull();
+  });
+
+  it("summarizes the trigger honestly for All, one, subset and empty", () => {
+    const overview = purchaseOrderReportFixture();
+    const readout = resolveCategoryReadout({
+      overview,
+      source: categoryUniverse(overview),
+      status: "ready",
+      error: "",
+      explicitCodes: null,
+    });
+    expect(
+      categorySelectionSummary(
+        readout.selected,
+        readout.supplied.length,
+        "ready"
+      )
+    ).toBe("All categories");
+    expect(
+      categorySelectionSummary(
+        [readout.supplied[0]],
+        readout.supplied.length,
+        "ready"
+      )
+    ).toBe("Facility Management");
+    expect(
+      categorySelectionSummary(
+        readout.supplied.slice(0, 3),
+        readout.supplied.length,
+        "ready"
+      )
+    ).toBe("3 of 5 categories");
+    expect(categorySelectionSummary([], 0, "ready")).toBe(
+      "No categories selected"
+    );
+    expect(categorySelectionSummary([], 0, "loading")).toBe(
+      "Loading categories"
+    );
+    expect(categorySelectionSummary([], 0, "error")).toBe(
+      "Categories unavailable"
+    );
   });
 });

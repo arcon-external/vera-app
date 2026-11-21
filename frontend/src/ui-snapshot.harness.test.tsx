@@ -58,9 +58,11 @@ import {
   allMonthsOfYear,
   allYearForMonths,
   monthLabel,
+  resolveCategoryReadout,
   resolveMonthAggregate,
   resolveMonthReadout,
   type PurchaseOrderMonthReadout,
+  type ReportComparisonLayout,
   type ReportMonthLayout,
 } from "./poReportComparison";
 import { ToastProvider } from "./toast";
@@ -1746,6 +1748,96 @@ function monthComparisonView(
   );
 }
 
+// Issue #643: static evidence for the independent By category comparison. The
+// readout is the same pure selection result the hook passes; every figure is
+// read from a supplied all-category snapshot. These cases cannot show the live
+// modal, focus restoration or request counts — the DOM suites own those.
+function categoryComparisonView(
+  overview: PurchaseOrderReportData,
+  source: PurchaseOrderReportData,
+  explicitCodes: readonly string[] | null,
+  layout: ReportComparisonLayout
+): ReactElement {
+  const readout = resolveCategoryReadout({
+    overview,
+    source,
+    status: "ready",
+    error: "",
+    explicitCodes,
+  });
+  const codes = readout.selected.map((item) => item.code);
+  const allSelected =
+    readout.supplied.length > 0 &&
+    codes.length === readout.supplied.length &&
+    readout.supplied.every((item) => codes.includes(item.code));
+  return (
+    <PurchaseOrderReportsView
+      filters={reportChartFilters(overview)}
+      report={overview}
+      loading={false}
+      stale={false}
+      error=""
+      validation=""
+      catalogue={REPORT_CATALOGUE}
+      exporting={false}
+      canExport={false}
+      onPresetChange={() => undefined}
+      onPeriodChange={() => undefined}
+      onFromChange={() => undefined}
+      onToChange={() => undefined}
+      onBucketChange={() => undefined}
+      onCategoryChange={() => undefined}
+      onCurrencyChange={() => undefined}
+      onRetry={() => undefined}
+      onExport={() => undefined}
+      categoryBrowser={{
+        codes,
+        activeCode: codes[0] ?? null,
+        allSelected,
+        layout,
+        readout,
+        triggerRef: createRef<HTMLButtonElement>(),
+        onOpenPicker: () => undefined,
+        onLayoutChange: () => undefined,
+        onPrevious: () => undefined,
+        onNext: () => undefined,
+        onRetry: () => undefined,
+      }}
+    />
+  );
+}
+
+// The restricted Performance case: an FM snapshot with no purchase orders
+// above a genuine all-category section whose source is the unrestricted
+// fixture at the same range and currency.
+const REPORT_CATEGORY_RESTRICTED = cloneReport(purchaseOrderReportFixture());
+REPORT_CATEGORY_RESTRICTED.filter = {
+  ...REPORT_CATEGORY_RESTRICTED.filter,
+  category: "FM",
+};
+REPORT_CATEGORY_RESTRICTED.totals = zeroMonthMetrics();
+REPORT_CATEGORY_RESTRICTED.periods = [];
+REPORT_CATEGORY_RESTRICTED.categories = [];
+REPORT_CATEGORY_RESTRICTED.categorySeries = [];
+REPORT_CATEGORY_RESTRICTED.currentProjection = {
+  ...REPORT_CATEGORY_RESTRICTED.currentProjection,
+  mode: "none",
+  status: "unavailable",
+  reason: "not_current_period",
+  buckets: [],
+  currentMonth: undefined,
+};
+REPORT_CATEGORY_RESTRICTED.monthSummary = undefined;
+const REPORT_CATEGORY_ALL = purchaseOrderReportFixture();
+const REPORT_CATEGORY_FAB_READOUT = resolveCategoryReadout({
+  overview: REPORT_CATEGORY_ALL,
+  source: REPORT_CATEGORY_ALL,
+  status: "ready",
+  error: "",
+  explicitCodes: ["FAB"],
+});
+
+
 function sharedReportSnapshot(): PurchaseOrderReportData {
   const raw = JSON.parse(
     readFileSync(
@@ -2278,6 +2370,77 @@ const CASES: SnapshotCase[] = [
           onNextPage={() => undefined}
         />
       </div>
+    ),
+  },
+  {
+    // Issue #643: three independently selected Business categories: the
+    // two-column grid's pair plus the full-width odd final card. Cropped to the
+    // section heading so the screenshot frames By category, not the report top.
+    name: "ReportsCategoryComparisonGrid",
+    cropToHeading: "By category",
+    element: categoryComparisonView(
+      REPORT_CATEGORY_ALL,
+      REPORT_CATEGORY_ALL,
+      ["FM", "FAB", "SUPPLY_GEN"],
+      "individual"
+    ),
+  },
+  {
+    // Issue #643: All categories in the remembered Individual display: five
+    // vertical cards, two pairs and the full-width fifth card. The 360 render
+    // is the narrow-window read of the one-column grid and exact money.
+    name: "ReportsCategoryAllIndividual",
+    cropToHeading: "By category",
+    element: categoryComparisonView(
+      REPORT_CATEGORY_ALL,
+      REPORT_CATEGORY_ALL,
+      null,
+      "individual"
+    ),
+  },
+  {
+    // Issue #643: the real open category picker surface (the same controller
+    // surface, statically rendered) over the report. Item clicks, background
+    // updates and focus restoration are DOM behaviour in the page suite; this is
+    // the 360/1280 visual read of supplied labels, the visible check and count,
+    // and the conspicuous X.
+    name: "ReportsCategoryPickerOpen",
+    element: (
+      <div>
+        {categoryComparisonView(
+          REPORT_CATEGORY_ALL,
+          REPORT_CATEGORY_ALL,
+          ["FAB"],
+          "aggregate"
+        )}
+        <PurchaseOrderReportPickerView
+          title="Choose categories"
+          items={REPORT_CATEGORY_FAB_READOUT.supplied.map((item) => ({
+            key: item.code,
+            label: item.label,
+          }))}
+          selectedKeys={["FAB"]}
+          allLabel="All categories"
+          allSelected={false}
+          onSelectAll={() => undefined}
+          onToggle={() => undefined}
+          onClose={() => undefined}
+        />
+      </div>
+    ),
+  },
+  {
+    // Issue #643: Performance is restricted to FM and has no purchase orders,
+    // while By category still shows the genuine all-category universe. The scope
+    // caption names the inherited range/currency/business date and the local All
+    // selection, never FM as if it filtered this section.
+    name: "ReportsCategoryRestrictedPerformance",
+    cropToHeading: "By category",
+    element: categoryComparisonView(
+      REPORT_CATEGORY_RESTRICTED,
+      REPORT_CATEGORY_ALL,
+      null,
+      "aggregate"
     ),
   },
   {

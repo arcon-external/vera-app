@@ -28,7 +28,11 @@ import {
 } from "../poReport";
 import { todayWIB } from "../workspaceSettings";
 import { useToast } from "../toast";
-import { usePOReportMonthComparison } from "../usePOReportSources";
+import {
+  usePOReportCategoryComparison,
+  usePOReportMonthComparison,
+  usePOReportSourceRegistry,
+} from "../usePOReportSources";
 import {
   buildPurchaseOrderReportView,
   type PurchaseOrderReportView,
@@ -43,6 +47,10 @@ import {
   PurchaseOrderReportMonthBrowser,
   type PurchaseOrderReportMonthBrowserProps,
 } from "./PurchaseOrderReportMonthBrowser";
+import {
+  PurchaseOrderReportCategoryBrowser,
+  type PurchaseOrderReportCategoryBrowserProps,
+} from "./PurchaseOrderReportCategoryBrowser";
 import { PurchaseOrderReportOverview } from "./PurchaseOrderReportOverview";
 import { PurchaseOrderReportPicker } from "./PurchaseOrderReportPicker";
 import { Badge, Button, Card, SectionHeading, StatusBanner } from "./ui";
@@ -96,6 +104,11 @@ export interface PurchaseOrderReportsViewProps {
   onRetryMonth?: () => void;
   /** The live #642 comparison; absent for direct fixture/harness callers. */
   monthBrowser?: Omit<PurchaseOrderReportMonthBrowserProps, "entry"> | null;
+  /** The live #643 comparison; absent for direct fixture/harness callers. */
+  categoryBrowser?: Omit<
+    PurchaseOrderReportCategoryBrowserProps,
+    "entry"
+  > | null;
 }
 
 function money(entry: CurrencyInfo | null, minor: number): string {
@@ -318,6 +331,7 @@ export function PurchaseOrderReportsView({
   onNextMonth,
   onRetryMonth,
   monthBrowser,
+  categoryBrowser,
 }: PurchaseOrderReportsViewProps) {
   const reportCurrency = report?.filter.currency ?? filters.currency;
   const entry =
@@ -387,6 +401,18 @@ export function PurchaseOrderReportsView({
       </div>
     );
   const monthSection = monthBrowserSection ?? monthTable;
+  // #643: the category browser is its own section. It renders inside the
+  // figures branch and is deliberately outside Performance's empty gate, so a
+  // restricted overview with no orders still shows the all-category evidence.
+  // Direct fixture/harness callers that pass no categoryBrowser keep the
+  // pre-#643 CategoryTable exactly as it was.
+  const categorySection =
+    categoryBrowser === undefined || categoryBrowser === null ? null : (
+      <PurchaseOrderReportCategoryBrowser
+        {...categoryBrowser}
+        entry={entry}
+      />
+    );
 
   return (
     <section aria-labelledby="reports-heading" className="flex flex-col gap-6">
@@ -467,7 +493,7 @@ export function PurchaseOrderReportsView({
               periods={displayedPeriods}
             />
           )}
-          <CategoryTable report={report} entry={entry} />
+          {categorySection ?? <CategoryTable report={report} entry={entry} />}
           {report.notes.length > 0 ? (
             <Card className="min-w-0 p-5">
               <SectionTitle title="Notes" />
@@ -481,7 +507,12 @@ export function PurchaseOrderReportsView({
         </>
       ) : null}
 
-      {showEmpty && report !== null ? monthSection : null}
+      {showEmpty && report !== null ? (
+        <>
+          {monthSection}
+          {categorySection}
+        </>
+      ) : null}
     </section>
   );
 }
@@ -507,15 +538,33 @@ export function PurchaseOrderReportsPage({
   const [exporting, setExporting] = useState(false);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [pickerYear, setPickerYear] = useState("");
+  const [categoryPickerOpen, setCategoryPickerOpen] = useState(false);
   const pickerTriggerRef = useRef<HTMLButtonElement | null>(null);
-  // The independent month registry lives with this authenticated page mount.
-  // Reports unmounts on sign-out, so no source survives a different session.
-  const monthComparison = usePOReportMonthComparison(report);
+  const categoryTriggerRef = useRef<HTMLButtonElement | null>(null);
+  // The independent month and category registries live with this authenticated
+  // page mount. Reports unmounts on sign-out, so no source survives a different
+  // session. One registry serves both comparisons, which is what lets a
+  // category selection reuse the overview's own all-category snapshot.
+  const sourceRegistry = usePOReportSourceRegistry(report);
+  const monthComparison = usePOReportMonthComparison(report, sourceRegistry);
+  const categoryComparison = usePOReportCategoryComparison(
+    report,
+    sourceRegistry
+  );
 
   const openPicker = useCallback(() => {
+    setCategoryPickerOpen(false);
     setPickerYear(monthComparison.pickerStartYear());
     setPickerOpen(true);
   }, [monthComparison.pickerStartYear]);
+
+  const openCategoryPicker = useCallback(() => {
+    // Only one picker modal may stand at a time. Inertness already prevents
+    // opening the second while the first is up; this keeps the invariant even
+    // if both handlers are ever called in the same tick.
+    setPickerOpen(false);
+    setCategoryPickerOpen(true);
+  }, []);
 
   const shiftPickerYear = useCallback((delta: number) => {
     setPickerYear((current) => {
@@ -534,6 +583,17 @@ export function PurchaseOrderReportsPage({
         label: monthLabel(month),
       })),
     [pickerYear]
+  );
+
+  // Category options come strictly from the ready all-category snapshot in its
+  // supplied order; the picker never invents a value from the static filter map.
+  const categoryPickerItems = useMemo(
+    () =>
+      categoryComparison.readout.supplied.map((item) => ({
+        key: item.code,
+        label: item.label,
+      })),
+    [categoryComparison.readout.supplied]
   );
 
   const validation = reportFilterValidation(filters);
@@ -619,21 +679,27 @@ export function PurchaseOrderReportsPage({
     !loading &&
     !stale &&
     !exporting &&
-    monthComparison.canExport;
+    monthComparison.canExport &&
+    categoryComparison.canExport;
 
   const handleExport = useCallback(() => {
     if (!onExport || report === null || exporting || loading || stale) return;
-    const selection = monthComparison.exportSelection;
-    if (selection === null) return;
+    const monthSelection = monthComparison.exportSelection;
+    const categorySelection = categoryComparison.exportSelection;
+    if (monthSelection === null || categorySelection === null) return;
     // Freeze the whole v1 envelope before the binding call. A later month,
-    // layout or filter change cannot alter the document already being saved.
+    // category, layout or filter change cannot alter the document already
+    // being saved.
     let view: PurchaseOrderReportView;
     try {
-      view = buildPurchaseOrderReportView(report, selection);
+      view = buildPurchaseOrderReportView(report, {
+        ...monthSelection,
+        categories: categorySelection,
+      });
     } catch (caught) {
       pushToast(
         "error",
-        errorMessage(caught, "The selected months cannot be exported.")
+        errorMessage(caught, "The selected comparison cannot be exported.")
       );
       return;
     }
@@ -657,6 +723,7 @@ export function PurchaseOrderReportsPage({
       }
     })();
   }, [
+    categoryComparison.exportSelection,
     exporting,
     loading,
     monthComparison.exportSelection,
@@ -708,6 +775,19 @@ export function PurchaseOrderReportsPage({
           onNext: monthComparison.selectNext,
           onRetryMonth: monthComparison.retryMonth,
         }}
+        categoryBrowser={{
+          codes: categoryComparison.codes,
+          activeCode: categoryComparison.activeCode,
+          allSelected: categoryComparison.allSelected,
+          layout: categoryComparison.layout,
+          readout: categoryComparison.readout,
+          triggerRef: categoryTriggerRef,
+          onOpenPicker: openCategoryPicker,
+          onLayoutChange: categoryComparison.setLayout,
+          onPrevious: categoryComparison.selectPrevious,
+          onNext: categoryComparison.selectNext,
+          onRetry: categoryComparison.retry,
+        }}
       />
       <PurchaseOrderReportPicker
         title={
@@ -729,6 +809,18 @@ export function PurchaseOrderReportsPage({
         pageLabel={pickerYear}
         onPreviousPage={() => shiftPickerYear(-1)}
         onNextPage={() => shiftPickerYear(1)}
+      />
+      <PurchaseOrderReportPicker
+        title="Choose categories"
+        open={categoryPickerOpen}
+        items={categoryPickerItems}
+        selectedKeys={categoryComparison.codes}
+        allLabel="All categories"
+        allSelected={categoryComparison.allSelected}
+        onSelectAll={categoryComparison.selectAll}
+        onToggle={categoryComparison.toggleCategory}
+        onClose={() => setCategoryPickerOpen(false)}
+        returnFocusRef={categoryTriggerRef}
       />
     </>
   );

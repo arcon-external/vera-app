@@ -12,13 +12,15 @@ import {
   allYearForMonths,
   annualSourceCoversMonth,
   canonicalMonths,
+  categorySourceMatchesOverview,
   monthStart,
   sourceScopeMatches,
+  type ReportComparisonLayout,
 } from "./poReportComparison";
 
 export const REPORT_VIEW_VERSION = 1 as const;
 
-export type PurchaseOrderReportViewLayout = "aggregate" | "individual";
+export type PurchaseOrderReportViewLayout = ReportComparisonLayout;
 
 export interface PurchaseOrderReportViewPeriods {
   sources: number[];
@@ -31,7 +33,7 @@ export interface PurchaseOrderReportViewPeriods {
 export interface PurchaseOrderReportViewCategories {
   source: number;
   codes: string[];
-  layout: "aggregate";
+  layout: PurchaseOrderReportViewLayout;
 }
 
 export interface PurchaseOrderReportView {
@@ -55,6 +57,15 @@ export interface PurchaseOrderReportViewMonth {
 export interface PurchaseOrderReportViewSelection {
   /** In any order; the builder canonicalizes it before serializing. */
   months: readonly PurchaseOrderReportViewMonth[];
+  layout: PurchaseOrderReportViewLayout;
+  /** When absent, the legacy full-overview category section is preserved. */
+  categories?: PurchaseOrderReportViewCategorySelection;
+}
+
+/** One explicit local category selection and the snapshot that owns it. */
+export interface PurchaseOrderReportViewCategorySelection {
+  source: PurchaseOrderReportData;
+  codes: readonly string[];
   layout: PurchaseOrderReportViewLayout;
 }
 
@@ -141,19 +152,91 @@ export function buildPurchaseOrderReportView(
     return index;
   };
 
+  const assertSourceCap = (): void => {
+    if (sources.length > 16) {
+      throw new Error("the report view can reference at most 16 sources");
+    }
+  };
+
+  const legacyCategories: PurchaseOrderReportViewCategories = {
+    source: 0,
+    codes: overview.categories.map((row) => row.businessCategory),
+    layout: "aggregate",
+  };
+
+  /**
+   * The explicit category section, canonicalized to the source's supplied
+   * order. An empty selection needs no financial source and prints the
+   * explicit empty section. A non-empty selection must name a snapshot with the
+   * overview's as-of and either the all-category scope or the #641 exact
+   * overview filter; subset Aggregate is refused rather than invented.
+   */
+  const resolveCategories = (): PurchaseOrderReportViewCategories => {
+    const categorySelection = selection.categories;
+    if (categorySelection === undefined) return legacyCategories;
+    const requested = [...categorySelection.codes];
+    if (requested.length === 0) {
+      return { source: 0, codes: [], layout: "individual" };
+    }
+    if (
+      categorySelection.layout !== "aggregate" &&
+      categorySelection.layout !== "individual"
+    ) {
+      throw new Error("the category layout must be aggregate or individual");
+    }
+    const source = categorySelection.source;
+    if (source.asOf !== overview.asOf) {
+      throw new Error(
+        "the category snapshot does not share the overview's as-of"
+      );
+    }
+    if (
+      !categorySourceMatchesOverview(overview, source) &&
+      queryKey(source) !== overviewKey
+    ) {
+      throw new Error(
+        "the category snapshot does not match the overview's range, bucket, currency or all-category scope"
+      );
+    }
+    const unique = new Set(requested);
+    if (unique.size !== requested.length) {
+      throw new Error("a category is selected twice");
+    }
+    const supplied = source.categories.map((row) => row.businessCategory);
+    const suppliedSet = new Set(supplied);
+    for (const code of requested) {
+      if (!suppliedSet.has(code)) {
+        throw new Error(`the category ${code} is not present in the snapshot`);
+      }
+    }
+    const ordered = supplied.filter((code) => unique.has(code));
+    if (
+      categorySelection.layout === "aggregate" &&
+      ordered.length !== supplied.length
+    ) {
+      throw new Error(
+        "Aggregate requires every category the snapshot supplies"
+      );
+    }
+    return {
+      source: sourceIndex(source),
+      codes: ordered,
+      layout: categorySelection.layout,
+    };
+  };
+
+  const categories = resolveCategories();
+
   if (entries.length === 0) {
     // An empty selection has no month display mode; Individual is the honest
     // section shape and the native renderer accepts it with no month source.
+    assertSourceCap();
     return {
       version: REPORT_VIEW_VERSION,
       sources,
       overview: 0,
       periods: { sources: [], months: [], layout: "individual" },
-      categories: {
-        source: 0,
-        codes: overview.categories.map((row) => row.businessCategory),
-        layout: "aggregate",
-      },
+      categories,
     };
   }
 
@@ -178,6 +261,7 @@ export function buildPurchaseOrderReportView(
         `the aggregate year ${year} has no referenced annual/monthly source`
       );
     }
+    assertSourceCap();
     return {
       version: REPORT_VIEW_VERSION,
       sources,
@@ -187,11 +271,7 @@ export function buildPurchaseOrderReportView(
         months: canonical,
         layout: "aggregate",
       },
-      categories: {
-        source: 0,
-        codes: overview.categories.map((row) => row.businessCategory),
-        layout: "aggregate",
-      },
+      categories,
     };
   }
 
@@ -203,6 +283,7 @@ export function buildPurchaseOrderReportView(
     if (entry.usesOverviewMonthSummary) currentMonthSource = index;
   }
 
+  assertSourceCap();
   return {
     version: REPORT_VIEW_VERSION,
     sources,
@@ -213,10 +294,6 @@ export function buildPurchaseOrderReportView(
       layout: "individual",
       ...(currentMonthSource === undefined ? {} : { currentMonthSource }),
     },
-    categories: {
-      source: 0,
-      codes: overview.categories.map((row) => row.businessCategory),
-      layout: "aggregate",
-    },
+    categories,
   };
 }

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   buildPurchaseOrderReportView,
   REPORT_VIEW_VERSION,
+  type PurchaseOrderReportViewCategorySelection,
   type PurchaseOrderReportViewMonth,
 } from "./poReportExport";
 import {
@@ -13,7 +14,7 @@ import type {
   PurchaseOrderReportData,
   PurchaseOrderReportMetrics,
 } from "./poReport";
-import { allMonthsOfYear } from "./poReportComparison";
+import { allMonthsOfYear, categorySourceQuery } from "./poReportComparison";
 
 function clone(report: PurchaseOrderReportData): PurchaseOrderReportData {
   return structuredClone(report);
@@ -311,5 +312,310 @@ describe("version-1 export envelope (issue #641/#642)", () => {
         layout: "individual",
       })
     ).toThrow(/exact annual/);
+  });
+});
+
+// Issue #643: the explicit category selection inside the same version-1
+// envelope. An absent selection preserves the #641/#642 bytes exactly.
+function restrictedCategoryOverview(category: string): {
+  overview: PurchaseOrderReportData;
+  universe: PurchaseOrderReportData;
+} {
+  const base = purchaseOrderReportFixture();
+  const overview = clone(base);
+  overview.filter = { ...base.filter, category };
+  overview.categories = base.categories.filter(
+    (row) => row.businessCategory === category
+  );
+  const universe = clone(base);
+  universe.filter = categorySourceQuery(overview.filter);
+  return { overview, universe };
+}
+
+function categorySelection(
+  source: PurchaseOrderReportData,
+  codes: readonly string[],
+  layout: "aggregate" | "individual"
+): PurchaseOrderReportViewCategorySelection {
+  return { source, codes, layout };
+}
+
+const ALL_CODES = ["FM", "FAB", "SUPPLY_GEN", "OTHERS", "UNASSIGNED"];
+
+describe("category comparison export envelope (issue #643)", () => {
+  it("keeps the legacy full-overview category section when categories is absent", () => {
+    const overview = purchaseOrderReportFixture();
+    const view = buildPurchaseOrderReportView(overview, {
+      months: [],
+      layout: "aggregate",
+    });
+    expect(view.categories).toEqual({
+      source: 0,
+      codes: overview.categories.map((row) => row.businessCategory),
+      layout: "aggregate",
+    });
+    expect(Object.keys(view.categories).sort()).toEqual([
+      "codes",
+      "layout",
+      "source",
+    ]);
+  });
+
+  it("builds an explicit empty category section without a financial source", () => {
+    const { overview, universe } = restrictedCategoryOverview("FM");
+    const wrongCurrency = clone(universe);
+    wrongCurrency.filter.currency = "USD";
+    const view = buildPurchaseOrderReportView(overview, {
+      months: [],
+      layout: "aggregate",
+      categories: categorySelection(wrongCurrency, [], "aggregate"),
+    });
+    expect(view.categories).toEqual({
+      source: 0,
+      codes: [],
+      layout: "individual",
+    });
+    expect(view.sources).toEqual([overview]);
+    expect(view.periods).toEqual({
+      sources: [],
+      months: [],
+      layout: "individual",
+    });
+  });
+
+  it("adds the all-category source once for a single restricted selection", () => {
+    const { overview, universe } = restrictedCategoryOverview("FM");
+    const view = buildPurchaseOrderReportView(overview, {
+      months: [],
+      layout: "aggregate",
+      categories: categorySelection(universe, ["FAB"], "individual"),
+    });
+    expect(view.sources).toEqual([overview, universe]);
+    expect(view.categories).toEqual({
+      source: 1,
+      codes: ["FAB"],
+      layout: "individual",
+    });
+  });
+
+  it("canonicalizes an unsorted subset into supplied source order", () => {
+    const { overview, universe } = restrictedCategoryOverview("FM");
+    const input = ["UNASSIGNED", "FM", "FAB"];
+    const view = buildPurchaseOrderReportView(overview, {
+      months: [],
+      layout: "aggregate",
+      categories: categorySelection(universe, input, "individual"),
+    });
+    expect(view.categories).toEqual({
+      source: 1,
+      codes: ["FM", "FAB", "UNASSIGNED"],
+      layout: "individual",
+    });
+    // The caller's array is never mutated.
+    expect(input).toEqual(["UNASSIGNED", "FM", "FAB"]);
+  });
+
+  it("accepts the full supplied set in Individual layout", () => {
+    const { overview, universe } = restrictedCategoryOverview("FM");
+    const reversed = [...ALL_CODES].reverse();
+    const view = buildPurchaseOrderReportView(overview, {
+      months: [],
+      layout: "aggregate",
+      categories: categorySelection(universe, reversed, "individual"),
+    });
+    expect(view.categories).toEqual({
+      source: 1,
+      codes: ALL_CODES,
+      layout: "individual",
+    });
+  });
+
+  it("accepts the full supplied set in Aggregate layout", () => {
+    const { overview, universe } = restrictedCategoryOverview("FM");
+    const shuffled = ["OTHERS", "FM", "UNASSIGNED", "FAB", "SUPPLY_GEN"];
+    const view = buildPurchaseOrderReportView(overview, {
+      months: [],
+      layout: "aggregate",
+      categories: categorySelection(universe, shuffled, "aggregate"),
+    });
+    expect(view.categories).toEqual({
+      source: 1,
+      codes: ALL_CODES,
+      layout: "aggregate",
+    });
+    expect(view.sources).toHaveLength(2);
+  });
+
+  it("reuses source 0 when the all-category source is the overview itself", () => {
+    const overview = purchaseOrderReportFixture();
+    const duplicate = clone(overview);
+    const view = buildPurchaseOrderReportView(overview, {
+      months: [],
+      layout: "aggregate",
+      categories: categorySelection(duplicate, ["FAB"], "individual"),
+    });
+    expect(view.sources).toEqual([overview]);
+    expect(view.categories).toEqual({
+      source: 0,
+      codes: ["FAB"],
+      layout: "individual",
+    });
+  });
+
+  it("accepts a #641 restricted overview as its own full-row category source", () => {
+    const { overview } = restrictedCategoryOverview("FM");
+    const view = buildPurchaseOrderReportView(overview, {
+      months: [],
+      layout: "aggregate",
+      categories: categorySelection(overview, ["FM"], "aggregate"),
+    });
+    expect(view.sources).toEqual([overview]);
+    expect(view.categories).toEqual({
+      source: 0,
+      codes: ["FM"],
+      layout: "aggregate",
+    });
+  });
+
+  it("refuses a subset in Aggregate layout", () => {
+    const { overview, universe } = restrictedCategoryOverview("FM");
+    expect(() =>
+      buildPurchaseOrderReportView(overview, {
+        months: [],
+        layout: "aggregate",
+        categories: categorySelection(universe, ["FM", "FAB"], "aggregate"),
+      })
+    ).toThrow(/Aggregate requires every category/);
+  });
+
+  it("refuses duplicate, unknown and non-canonical codes", () => {
+    const { overview, universe } = restrictedCategoryOverview("FM");
+    expect(() =>
+      buildPurchaseOrderReportView(overview, {
+        months: [],
+        layout: "aggregate",
+        categories: categorySelection(universe, ["FM", "FM"], "individual"),
+      })
+    ).toThrow(/selected twice/);
+    expect(() =>
+      buildPurchaseOrderReportView(overview, {
+        months: [],
+        layout: "aggregate",
+        categories: categorySelection(universe, ["FM", "NOPE"], "individual"),
+      })
+    ).toThrow(/not present/);
+    // Non-canonical order is canonicalized, never silently dropped; an
+    // Aggregate subset remains refused after canonicalization.
+    expect(() =>
+      buildPurchaseOrderReportView(overview, {
+        months: [],
+        layout: "aggregate",
+        categories: categorySelection(
+          universe,
+          ["FAB", "FM"],
+          "aggregate"
+        ),
+      })
+    ).toThrow(/Aggregate requires every category/);
+  });
+
+  it("refuses a foreign scope or as-of", () => {
+    const { overview, universe } = restrictedCategoryOverview("FM");
+
+    const stale = clone(universe);
+    stale.asOf = "2026-11-18";
+    expect(() =>
+      buildPurchaseOrderReportView(overview, {
+        months: [],
+        layout: "aggregate",
+        categories: categorySelection(stale, ["FAB"], "individual"),
+      })
+    ).toThrow(/as-of/);
+
+    const wrongCurrency = clone(universe);
+    wrongCurrency.filter.currency = "USD";
+    expect(() =>
+      buildPurchaseOrderReportView(overview, {
+        months: [],
+        layout: "aggregate",
+        categories: categorySelection(wrongCurrency, ["FAB"], "individual"),
+      })
+    ).toThrow(/does not match/);
+
+    const wrongRange = clone(universe);
+    wrongRange.filter.from = "2026-01-02";
+    expect(() =>
+      buildPurchaseOrderReportView(overview, {
+        months: [],
+        layout: "aggregate",
+        categories: categorySelection(wrongRange, ["FAB"], "individual"),
+      })
+    ).toThrow(/does not match/);
+
+    const foreign = clone(universe);
+    foreign.filter.category = "FAB";
+    expect(() =>
+      buildPurchaseOrderReportView(overview, {
+        months: [],
+        layout: "aggregate",
+        categories: categorySelection(foreign, ["FAB"], "individual"),
+      })
+    ).toThrow(/does not match/);
+
+    const restrictedSource = restrictedCategoryOverview("FAB").overview;
+    expect(() =>
+      buildPurchaseOrderReportView(overview, {
+        months: [],
+        layout: "aggregate",
+        categories: categorySelection(
+          restrictedSource,
+          ["FAB"],
+          "individual"
+        ),
+      })
+    ).toThrow(/does not match/);
+  });
+
+  it("refuses more than sixteen sources", () => {
+    const overview = purchaseOrderReportFixture();
+    const years = Array.from({ length: 16 }, (_, index) => 2000 + index);
+    const months = years.map((year) => {
+      const source = annualSourceFor(year, overview);
+      return monthEntry(`${year}-06`, source);
+    });
+    expect(() =>
+      buildPurchaseOrderReportView(overview, {
+        months,
+        layout: "individual",
+      })
+    ).toThrow(/16 sources/);
+  });
+
+  it("serializes exactly the frozen category keys with no version bump", () => {
+    const { overview, universe } = restrictedCategoryOverview("FM");
+    const view = buildPurchaseOrderReportView(overview, {
+      months: [],
+      layout: "aggregate",
+      categories: categorySelection(universe, ["FAB"], "individual"),
+    });
+    const parsed = JSON.parse(JSON.stringify(view)) as Record<string, unknown>;
+    expect(parsed.version).toBe(1);
+    expect(parsed.categories).toEqual({
+      source: 1,
+      codes: ["FAB"],
+      layout: "individual",
+    });
+    expect(Object.keys(parsed.categories as object).sort()).toEqual([
+      "codes",
+      "layout",
+      "source",
+    ]);
+    expect(Object.keys(parsed).sort()).toEqual([
+      "categories",
+      "overview",
+      "periods",
+      "sources",
+      "version",
+    ]);
   });
 });

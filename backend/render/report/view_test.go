@@ -323,9 +323,9 @@ func TestValidateViewEnforcesScopeAndReferences(t *testing.T) {
 			t.Fatal("accepted a single month as an aggregate")
 		}
 		view = base
-		view.Categories.Layout = ViewLayoutIndividual
+		view.Categories.Layout = "sideways"
 		if err := ValidateView(view); err == nil {
-			t.Fatal("accepted an unsupported individual category layout")
+			t.Fatal("accepted an unknown category layout")
 		}
 	})
 	t.Run("category codes", func(t *testing.T) {
@@ -654,11 +654,20 @@ func TestRenderViewCategorySectionUsesItsOwnSource(t *testing.T) {
 		t.Fatalf("RenderView: %v", err)
 	}
 	text := strings.Join(binaryPDFText(t, pdf), "\n")
-	requireText(t, text, "Category section: All categories (all)")
-	if !strings.Contains(text, "Facility Management (FM)") ||
-		!strings.Contains(text, "Fabrication (FAB)") {
-		t.Error("the category section did not print its own category-scoped source rows")
+	section := categorySectionText(text)
+	if section == "" {
+		t.Fatal("the rendered PDF has no category section")
 	}
+	requireText(t, section,
+		"All categories (5)",
+		"Facility",
+		"Fabrication",
+		"Total",
+		formatMoney("IDR", categories.Totals.AmountMinor),
+	)
+	// The section's caption names its own all-category source, never
+	// Performance's restricted FM filter.
+	requireNoText(t, "category section", section, "Facility Management (FM)")
 }
 
 func TestValidateSnapshotRefusesAnIncoherentMonthSummary(t *testing.T) {
@@ -1243,4 +1252,378 @@ func TestResolveViewUsesTheCurrentMonthOverrideOnce(t *testing.T) {
 	if err := ValidateView(mismatch); err == nil {
 		t.Fatal("accepted a current-month override with no matching summary")
 	}
+}
+
+// Issue #643: the category section is one v1 envelope selection, not a version
+// bump and not a second report. These tests pin the two category displays, the
+// category source's inherited scope, the canonical supplied order and the
+// rendered empty / individual / aggregate sections.
+
+// categoryComparisonSource is the all-category snapshot the category section
+// reads. It keeps the five supplied rows in their canonical order, makes OTHERS
+// a supplied zero row and FAB a row discounted below cost, so exact money, a
+// zero row and a negative margin are all printable from supplied evidence.
+func categoryComparisonSource(t *testing.T) poreport.Report {
+	t.Helper()
+	source := currentYearReport()
+	source.Categories[3].Metrics = poreport.Metrics{}
+	fab := &source.Categories[1]
+	fab.Metrics.CapitalMinor = fab.Metrics.CostedMinor + 5_000_000
+	fab.Metrics.MarginMinor = -5_000_000
+	fab.Metrics.MarginBps = fixtureRatio(-5_000_000, fab.Metrics.CapitalMinor)
+	return source
+}
+
+// restrictedCategoryOverview is a Performance snapshot filtered to FM. Its
+// category section still reads its own category=all source.
+func restrictedCategoryOverview() poreport.Report {
+	overview := currentYearReport()
+	overview.Filter.Category = poreport.CategoryFm
+	facility := overview.Categories[0]
+	overview.Categories = []poreport.Category{facility}
+	overview.Totals = facility.Metrics
+	return overview
+}
+
+func categoryComparisonView(t *testing.T, layout string, codes []string, restrictedOverview bool) ViewEnvelope {
+	t.Helper()
+	source := categoryComparisonSource(t)
+	overview := currentYearReport()
+	sources := []poreport.Report{source}
+	sourceIndex := 0
+	if restrictedOverview {
+		overview = restrictedCategoryOverview()
+		sources = []poreport.Report{overview, source}
+		sourceIndex = 1
+	}
+	return ViewEnvelope{
+		Version:  ViewVersion,
+		Sources:  sources,
+		Overview: 0,
+		Periods: ViewPeriods{
+			Sources: []int{0}, Months: []string{"2026-10"}, Layout: ViewLayoutIndividual,
+		},
+		Categories: ViewCategories{Source: sourceIndex, Codes: codes, Layout: layout},
+	}
+}
+
+// categorySectionText isolates the printed category section so a figure
+// assertion cannot be satisfied by the KPI strip, the chart or the month cards.
+func categorySectionText(text string) string {
+	start := strings.Index(text, "By business category")
+	if start < 0 {
+		return ""
+	}
+	rest := text[start:]
+	end := len(rest)
+	for _, marker := range []string{"By period", "Current-period projection", "Report notes", "Definitions"} {
+		if index := strings.Index(rest, marker); index >= 0 && index < end {
+			end = index
+		}
+	}
+	return rest[:end]
+}
+
+func TestValidateViewAcceptsCategoryComparisons(t *testing.T) {
+	allCodes := viewCodes(categoryComparisonSource(t))
+	cases := []struct {
+		name     string
+		layout   string
+		codes    []string
+		restrict bool
+	}{
+		{name: "empty aggregate", layout: ViewLayoutAggregate, codes: []string{}},
+		{name: "empty individual under a restricted overview", layout: ViewLayoutIndividual, codes: []string{}, restrict: true},
+		{name: "one individual", layout: ViewLayoutIndividual, codes: []string{poreport.CategoryFm}, restrict: true},
+		{name: "three individual", layout: ViewLayoutIndividual,
+			codes: []string{poreport.CategoryFm, poreport.CategoryFab, poreport.CategoryUnassigned}, restrict: true},
+		{name: "four individual", layout: ViewLayoutIndividual,
+			codes: []string{poreport.CategoryFm, poreport.CategoryFab, poreport.CategorySupplyGeneral, poreport.CategoryOthers}, restrict: true},
+		{name: "five individual", layout: ViewLayoutIndividual, codes: allCodes, restrict: true},
+		{name: "five aggregate under a restricted overview", layout: ViewLayoutAggregate, codes: allCodes, restrict: true},
+		{name: "five aggregate on the overview source", layout: ViewLayoutAggregate, codes: allCodes},
+	}
+	for _, test := range cases {
+		t.Run(test.name, func(t *testing.T) {
+			view := categoryComparisonView(t, test.layout, test.codes, test.restrict)
+			if err := ValidateView(view); err != nil {
+				t.Fatalf("valid category comparison refused: %v", err)
+			}
+			raw, err := json.Marshal(view)
+			if err != nil {
+				t.Fatalf("marshal view: %v", err)
+			}
+			document, err := DecodeExport(raw)
+			if err != nil {
+				t.Fatalf("DecodeExport: %v", err)
+			}
+			if document.View == nil || document.Legacy != nil {
+				t.Fatalf("category comparison did not decode through the v1 path: %+v", document)
+			}
+		})
+	}
+}
+
+func TestValidateViewRefusesCategoryScopeAndOrder(t *testing.T) {
+	allCodes := viewCodes(categoryComparisonSource(t))
+	base := categoryComparisonView(t, ViewLayoutIndividual,
+		[]string{poreport.CategoryFm, poreport.CategoryFab, poreport.CategoryUnassigned}, true)
+
+	t.Run("noncanonical order", func(t *testing.T) {
+		view := base
+		view.Categories.Codes = []string{poreport.CategoryFab, poreport.CategoryFm}
+		if err := ValidateView(view); err == nil {
+			t.Fatal("accepted category codes out of the supplied source order")
+		}
+	})
+	t.Run("duplicate code", func(t *testing.T) {
+		view := base
+		view.Categories.Codes = []string{poreport.CategoryFm, poreport.CategoryFm}
+		if err := ValidateView(view); err == nil {
+			t.Fatal("accepted a duplicate category code")
+		}
+	})
+	t.Run("unknown code", func(t *testing.T) {
+		view := base
+		view.Categories.Codes = []string{poreport.CategoryFm, "NOPE"}
+		if err := ValidateView(view); err == nil {
+			t.Fatal("accepted a non-canonical category code")
+		}
+	})
+	t.Run("code absent from the source", func(t *testing.T) {
+		view := base
+		view.Sources = append([]poreport.Report{}, base.Sources...)
+		source := view.Sources[1]
+		kept := make([]poreport.Category, 0, len(source.Categories))
+		for _, category := range source.Categories {
+			if category.BusinessCategory == poreport.CategoryOthers {
+				continue
+			}
+			kept = append(kept, category)
+		}
+		source.Categories = kept
+		view.Sources[1] = source
+		view.Categories.Codes = []string{poreport.CategoryOthers}
+		if err := ValidateView(view); err == nil {
+			t.Fatal("accepted a category code the source does not supply")
+		}
+	})
+	t.Run("subset aggregate", func(t *testing.T) {
+		view := base
+		view.Categories.Layout = ViewLayoutAggregate
+		view.Categories.Codes = []string{poreport.CategoryFm, poreport.CategoryFab}
+		if err := ValidateView(view); err == nil {
+			t.Fatal("accepted an aggregate of a category subset")
+		}
+	})
+	t.Run("category source range differs", func(t *testing.T) {
+		view := base
+		view.Sources = append([]poreport.Report{}, base.Sources...)
+		source := view.Sources[1]
+		source.Filter.From = "2024-01-01"
+		view.Sources[1] = source
+		if err := ValidateView(view); err == nil {
+			t.Fatal("accepted a category source with a range other than the overview's")
+		}
+	})
+	t.Run("category source bucket differs", func(t *testing.T) {
+		view := base
+		view.Sources = append([]poreport.Report{}, base.Sources...)
+		source := view.Sources[1]
+		source.Filter.Bucket = poreport.BucketYear
+		source.Periods = nil
+		source.CategorySeries = nil
+		view.Sources[1] = source
+		if err := ValidateView(view); err == nil {
+			t.Fatal("accepted a category source with a bucket other than the overview's")
+		}
+	})
+	t.Run("foreign restricted category", func(t *testing.T) {
+		// The overview is FM; a FAB category source would make the section's
+		// rows and its caption disagree with the report it was exported from.
+		view := base
+		view.Sources = append([]poreport.Report{}, base.Sources...)
+		source := view.Sources[1]
+		source.Filter.Category = poreport.CategoryFab
+		view.Sources[1] = source
+		if err := ValidateView(view); err == nil {
+			t.Fatal("accepted a category source restricted to a foreign category")
+		}
+	})
+	t.Run("all codes in aggregate order", func(t *testing.T) {
+		view := categoryComparisonView(t, ViewLayoutAggregate, allCodes, true)
+		if err := ValidateView(view); err != nil {
+			t.Fatalf("full aggregate refused: %v", err)
+		}
+	})
+}
+
+func TestRenderViewEmptyCategorySectionPrintsNoFiguresOrTotal(t *testing.T) {
+	for _, layout := range []string{ViewLayoutIndividual, ViewLayoutAggregate} {
+		t.Run(layout, func(t *testing.T) {
+			view := categoryComparisonView(t, layout, []string{}, true)
+			if err := ValidateView(view); err != nil {
+				t.Fatalf("empty category selection refused: %v", err)
+			}
+			pdf, err := RenderView(view, os.DirFS("../../assets"))
+			if err != nil {
+				t.Fatalf("RenderView: %v", err)
+			}
+			section := categorySectionText(strings.Join(binaryPDFText(t, pdf), "\n"))
+			if section == "" {
+				t.Fatal("the rendered PDF has no category section")
+			}
+			requireText(t, section,
+				"By business category",
+				"0 categories selected",
+				"No categories selected",
+				"Choose at least one business category to print a category comparison.",
+				"2026-01-01 → 2027-01-01 (exclusive)",
+				"IDR",
+				"As of 2026-11-19",
+				"Snapshot 19 Nov 2026 08:30:00 UTC",
+			)
+			requireNoText(t, "empty category section", section,
+				"PO amount", "Costed amount", "Capital", "PO margin",
+				"Total", "Estimated", "Forecast", "Projected", formatMoney("IDR", 0),
+			)
+		})
+	}
+}
+
+func TestRenderViewPrintsOneIndividualCategoryCard(t *testing.T) {
+	view := categoryComparisonView(t, ViewLayoutIndividual, []string{poreport.CategoryFm}, true)
+	row := view.Sources[1].Categories[0]
+	pdf, err := RenderView(view, os.DirFS("../../assets"))
+	if err != nil {
+		t.Fatalf("RenderView: %v", err)
+	}
+	section := categorySectionText(strings.Join(binaryPDFText(t, pdf), "\n"))
+	requireText(t, section,
+		"By business category — Facility Management",
+		"POs", formatCount(row.PoCount),
+		"PO amount", formatMoney("IDR", row.AmountMinor),
+		"Costed amount", formatMoney("IDR", row.CostedMinor),
+		"Capital", formatMoney("IDR", row.CapitalMinor),
+		"PO margin", formatSignedMoney("IDR", row.MarginMinor),
+		"PO margin %", formatPct(row.MarginBps),
+		"Uncosted "+formatMoney("IDR", row.UncostedMinor)+" is not counted as profit",
+		"2026-01-01 → 2027-01-01 (exclusive)",
+		"As of 2026-11-19",
+		"Snapshot 19 Nov 2026 08:30:00 UTC",
+	)
+	// The card names the selected category, never Performance's restricted
+	// filter, and it prints no total and no ghost estimate.
+	requireNoText(t, "one-category card", section,
+		"Facility Management (FM)", "Total", "Estimated", "Forecast", "Projected",
+	)
+}
+
+func TestRenderViewPrintsAnIndividualCategorySubsetWithoutAnInventedTotal(t *testing.T) {
+	codes := []string{poreport.CategoryFm, poreport.CategoryFab, poreport.CategoryUnassigned}
+	view := categoryComparisonView(t, ViewLayoutIndividual, codes, true)
+	source := view.Sources[1]
+	var subsetAmount int64
+	for _, code := range codes {
+		for _, category := range source.Categories {
+			if category.BusinessCategory == code {
+				subsetAmount += category.AmountMinor
+			}
+		}
+	}
+	if subsetAmount == source.Totals.AmountMinor {
+		t.Fatal("fixture error: the subset sum and the server total are indistinguishable")
+	}
+	pdf, err := RenderView(view, os.DirFS("../../assets"))
+	if err != nil {
+		t.Fatalf("RenderView: %v", err)
+	}
+	section := categorySectionText(strings.Join(binaryPDFText(t, pdf), "\n"))
+	requireText(t, section,
+		"By business category — 3 selected categories",
+		"Facility Management", "Fabrication", "Unassigned",
+		formatSignedMoney("IDR", -5_000_000),
+		"PO margin %",
+	)
+	requireInOrder(t, section, "Facility Management", "Fabrication", "Unassigned")
+	// A subset has no total of its own, invented or otherwise, and the section
+	// never reprints the whole source's server total.
+	requireNoText(t, "category subset", section,
+		"Total", "Estimated", "Forecast", "Projected",
+		formatMoney("IDR", subsetAmount), formatMoney("IDR", source.Totals.AmountMinor),
+	)
+}
+
+func TestRenderViewAggregateCategoriesUseTheServerTotalNotARowSum(t *testing.T) {
+	allCodes := viewCodes(categoryComparisonSource(t))
+	view := categoryComparisonView(t, ViewLayoutAggregate, allCodes, true)
+	source := view.Sources[1]
+	source.Totals = poreport.Metrics{
+		PoCount: 37, AmountMinor: 1_200_777_777, CostedMinor: 1_000_000_000,
+		UncostedMinor: 200_777_777, CapitalMinor: 800_000_000, MarginMinor: 200_000_000,
+		MarginBps:   fixtureRatio(200_000_000, 800_000_000),
+		CoverageBps: fixtureRatio(1_000_000_000, 1_200_777_777),
+	}
+	view.Sources[1] = source
+	var rowSum int64
+	for _, category := range source.Categories {
+		rowSum += category.AmountMinor
+	}
+	if rowSum == source.Totals.AmountMinor {
+		t.Fatal("fixture error: the row sum and the server total are indistinguishable")
+	}
+	pdf, err := RenderView(view, os.DirFS("../../assets"))
+	if err != nil {
+		t.Fatalf("RenderView: %v", err)
+	}
+	section := categorySectionText(strings.Join(binaryPDFText(t, pdf), "\n"))
+	requireText(t, section,
+		"By business category",
+		"All categories (5)",
+		"2026-01-01 → 2027-01-01 (exclusive)",
+		"IDR",
+		"As of 2026-11-19",
+		"Snapshot 19 Nov 2026 08:30:00 UTC",
+		"Total",
+		formatMoney("IDR", source.Totals.AmountMinor),
+		"not a sum of the printed rows",
+		"Facility", "Fabrication", "Goods Supply &", "Others", "Unassigned",
+	)
+	// The category column is 86pt wide, so the long labels wrap across lines and
+	// a row's words are separated by the row's figures in extracted text. The
+	// row order is still the source's supplied order.
+	requireInOrder(t, section, "Facility", "Fabrication", "Goods Supply &", "Others", "Unassigned")
+	// The caption names the all-category source, never Performance's FM filter;
+	// and the printed total is the server's, not the row sum.
+	requireNoText(t, "category aggregate", section,
+		"Facility Management (FM)", formatMoney("IDR", rowSum),
+	)
+}
+
+func TestRenderViewRestrictedCategorySourceNamesItsOwnFilter(t *testing.T) {
+	// #641 compatibility: a category source may be restricted to the overview's
+	// own category. It is printed, and the section names that filter honestly
+	// instead of claiming to be an all-category comparison.
+	overview := restrictedCategoryOverview()
+	view := ViewEnvelope{
+		Version:  ViewVersion,
+		Sources:  []poreport.Report{overview},
+		Overview: 0,
+		Periods: ViewPeriods{
+			Sources: []int{0}, Months: []string{"2026-10"}, Layout: ViewLayoutIndividual,
+		},
+		Categories: ViewCategories{
+			Source: 0, Codes: []string{poreport.CategoryFm}, Layout: ViewLayoutAggregate,
+		},
+	}
+	if err := ValidateView(view); err != nil {
+		t.Fatalf("restricted category source refused: %v", err)
+	}
+	pdf, err := RenderView(view, os.DirFS("../../assets"))
+	if err != nil {
+		t.Fatalf("RenderView: %v", err)
+	}
+	section := categorySectionText(strings.Join(binaryPDFText(t, pdf), "\n"))
+	requireText(t, section, "Facility Management (FM)", "Total")
+	requireNoText(t, "restricted category source", section, "All categories (5)")
 }

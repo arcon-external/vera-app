@@ -64,8 +64,14 @@ type ViewPeriods struct {
 	CurrentMonthSource *int     `json:"currentMonthSource,omitempty"`
 }
 
-// ViewCategories is the selected category section. In this ticket it is the
-// legacy-equivalent aggregate row set from the overview source.
+// ViewCategories is the selected category section. Source names the immutable
+// snapshot the rows are read from; it must share the overview's from/to/bucket
+// and is either the unrestricted all-category source or the overview's own
+// restricted category (the #641 compatibility envelope). Layout is the display:
+// "aggregate" prints the wide table over every supplied row, "individual" prints
+// one card per selected row. Codes are canonical business codes in the source's
+// supplied order; an empty list is an explicit empty section, not a zero-valued
+// comparison.
 type ViewCategories struct {
 	Source int      `json:"source"`
 	Codes  []string `json:"codes"`
@@ -204,7 +210,9 @@ func ValidateView(view ViewEnvelope) error {
 	if view.Periods.Layout != ViewLayoutIndividual && view.Periods.Layout != ViewLayoutAggregate {
 		return fmt.Errorf("purchase order report view: periods layout %q is not supported by this build", view.Periods.Layout)
 	}
-	if view.Categories.Layout != ViewLayoutAggregate {
+	switch view.Categories.Layout {
+	case ViewLayoutAggregate, ViewLayoutIndividual:
+	default:
 		return fmt.Errorf("purchase order report view: categories layout %q is not supported by this build", view.Categories.Layout)
 	}
 	if _, err := resolveView(view); err != nil {
@@ -249,12 +257,22 @@ type resolvedAggregate struct {
 	IncludesFutureDated bool
 }
 
+type resolvedCategory struct {
+	Code    string
+	Metrics poreport.Metrics
+}
+
 type resolvedView struct {
 	View       ViewEnvelope
 	Overview   poreport.Report
 	Months     []resolvedMonth
 	Categories poreport.Report
-	Aggregate  *resolvedAggregate
+	// ResolvedCategories is the selected category rows in the category source's
+	// supplied order. It is empty for an explicit empty selection and holds one
+	// entry per code otherwise; the renderer prints these rows and never
+	// re-orders them.
+	ResolvedCategories []resolvedCategory
+	Aggregate          *resolvedAggregate
 }
 
 func (resolved resolvedView) currentMonthKey() string {
@@ -429,7 +447,43 @@ func resolveView(view ViewEnvelope) (resolvedView, error) {
 	}
 
 	categories := view.Sources[view.Categories.Source]
+	categoriesQuery, err := poreport.NormalizeQuery(categories.Filter)
+	if err != nil {
+		return resolvedView{}, fmt.Errorf("purchase order report view: categories source %d filter: %w",
+			view.Categories.Source, err)
+	}
+	if categoriesQuery.From != overviewQuery.From ||
+		categoriesQuery.To != overviewQuery.To ||
+		categoriesQuery.Bucket != overviewQuery.Bucket {
+		return resolvedView{}, fmt.Errorf(
+			"purchase order report view: categories source %d is %s..%s by %s; the overview is %s..%s by %s",
+			view.Categories.Source,
+			categoriesQuery.From, categoriesQuery.To, categoriesQuery.Bucket,
+			overviewQuery.From, overviewQuery.To, overviewQuery.Bucket)
+	}
+	// The category section may read the unrestricted all-category universe under
+	// a Performance-restricted overview, or inherit the overview's own category
+	// (#641 compatibility). Any other category would print rows that answer a
+	// different question than the caption claims, so it is refused.
+	if categoriesQuery.Category != poreport.CategoryAll &&
+		categoriesQuery.Category != overviewQuery.Category {
+		return resolvedView{}, fmt.Errorf(
+			"purchase order report view: categories source %d category %s is neither all nor the overview's %s",
+			view.Categories.Source, categoriesQuery.Category, overviewQuery.Category)
+	}
+
+	rowByCode := make(map[string]int, len(categories.Categories))
+	for index, category := range categories.Categories {
+		if _, duplicate := rowByCode[category.BusinessCategory]; duplicate {
+			return resolvedView{}, fmt.Errorf("purchase order report view: categories source %d lists %s twice",
+				view.Categories.Source, category.BusinessCategory)
+		}
+		rowByCode[category.BusinessCategory] = index
+	}
+
+	selected := make([]resolvedCategory, 0, len(view.Categories.Codes))
 	seenCodes := make(map[string]struct{}, len(view.Categories.Codes))
+	previousRow := -1
 	for index, code := range view.Categories.Codes {
 		if !canonicalCategoryCode(code) {
 			return resolvedView{}, fmt.Errorf("purchase order report view: categories.codes[%d] = %q is not a canonical business code",
@@ -439,28 +493,41 @@ func resolveView(view ViewEnvelope) (resolvedView, error) {
 			return resolvedView{}, fmt.Errorf("purchase order report view: category %s is selected twice", code)
 		}
 		seenCodes[code] = struct{}{}
-		if !categoryPresent(categories, code) {
+		row, present := rowByCode[code]
+		if !present {
 			return resolvedView{}, fmt.Errorf("purchase order report view: category %s is not present in source %d",
 				code, view.Categories.Source)
 		}
-	}
-	if len(view.Categories.Codes) != len(categories.Categories) {
-		return resolvedView{}, fmt.Errorf("purchase order report view: aggregate categories select %d codes for %d rows",
-			len(view.Categories.Codes), len(categories.Categories))
-	}
-	for index, category := range categories.Categories {
-		if view.Categories.Codes[index] != category.BusinessCategory {
-			return resolvedView{}, fmt.Errorf("purchase order report view: aggregate category %d is %s; want %s",
-				index, view.Categories.Codes[index], category.BusinessCategory)
+		// The supplied order is the report's own order. A caller that reorders a
+		// selection is refused rather than silently re-sorted: the export must
+		// print what the source says, not an order the reader cannot find again.
+		if row <= previousRow {
+			return resolvedView{}, fmt.Errorf(
+				"purchase order report view: categories are not in the source's supplied order at %s", code)
 		}
+		previousRow = row
+		category := categories.Categories[row]
+		selected = append(selected, resolvedCategory{
+			Code:    code,
+			Metrics: category.Metrics,
+		})
+	}
+	// An aggregate is the whole supplied row set or nothing. A non-empty subset
+	// under aggregate would print a wide table whose total is the server's
+	// whole-source total; that combination would read as a subset total.
+	if len(view.Categories.Codes) > 0 && view.Categories.Layout == ViewLayoutAggregate &&
+		len(selected) != len(categories.Categories) {
+		return resolvedView{}, fmt.Errorf("purchase order report view: aggregate categories select %d codes for %d rows",
+			len(selected), len(categories.Categories))
 	}
 
 	return resolvedView{
-		View:       view,
-		Overview:   overview,
-		Months:     resolved,
-		Categories: categories,
-		Aggregate:  aggregate,
+		View:               view,
+		Overview:           overview,
+		Months:             resolved,
+		Categories:         categories,
+		ResolvedCategories: selected,
+		Aggregate:          aggregate,
 	}, nil
 }
 
@@ -650,13 +717,4 @@ func canonicalCategoryCode(code string) bool {
 	default:
 		return false
 	}
-}
-
-func categoryPresent(source poreport.Report, code string) bool {
-	for _, category := range source.Categories {
-		if category.BusinessCategory == code {
-			return true
-		}
-	}
-	return false
 }

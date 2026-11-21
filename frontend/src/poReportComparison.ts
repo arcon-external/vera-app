@@ -8,12 +8,13 @@
 // points.
 
 import type {
+  PurchaseOrderReportCategory,
   PurchaseOrderReportCurrentProjectionRemainder,
   PurchaseOrderReportData,
   PurchaseOrderReportMetrics,
   PurchaseOrderReportQuery,
 } from "./poReport";
-import { reportFilterKey } from "./poReportPage";
+import { reportFilterKey, reportRangeLabel } from "./poReportPage";
 
 export type MonthSourceStatus = "loading" | "error" | "ready";
 export type MonthSourceLabel = "Performance snapshot" | "Monthly snapshot" | "";
@@ -99,8 +100,10 @@ export const MAX_COMPARISON_MONTHS = 120;
 /** The inclusive first-to-last month span the native view enforces. */
 export const MAX_COMPARISON_MONTH_SPAN = 120;
 
-/** The All display preference; subset/single always use individual cards. */
-export type ReportMonthLayout = "aggregate" | "individual";
+/** The shared All display preference; subset/single always use individual cards. */
+export type ReportComparisonLayout = "aggregate" | "individual";
+/** The #642 month shape's historical name for the same union. */
+export type ReportMonthLayout = ReportComparisonLayout;
 
 /** Valid canonical months, deduplicated and chronological. */
 export function canonicalMonths(months: readonly string[]): string[] {
@@ -287,7 +290,7 @@ export function annualSourceKey(
   query: PurchaseOrderReportQuery,
   asOf: string
 ): string {
-  return `${reportFilterKey(query)}#${asOf}`;
+  return reportSourceKey(query, asOf);
 }
 
 /** True when a source is exactly a complete calendar-year monthly query. */
@@ -967,4 +970,354 @@ export function resolveMonthAggregate(input: {
     }
   }
   return aggregate;
+}
+
+// Issue #643: the independent business-category comparison.
+//
+// Performance's category filter is not this section's filter. The section owns
+// one source identity — the overview's exact from/to/bucket/currency with
+// `category=all` — and one local selection over the rows that source supplies.
+// All supplied rows are selectable, including zero-activity rows and
+// `UNASSIGNED`; nothing is invented from the client dropdown or from click
+// order. The aggregate total is always the server's own `totals`; no row sum is
+// ever computed here.
+
+export type CategorySourceStatus = MonthSourceStatus;
+export type CategorySourceLabel =
+  | "Performance snapshot"
+  | "All-category snapshot"
+  | "";
+
+export interface CategorySourceRequest {
+  /** The overview's exact from/to/bucket/currency with category "all". */
+  query: PurchaseOrderReportQuery;
+  /** reportSourceKey(query, overview.asOf). */
+  key: string;
+}
+
+export interface CategorySelectionChange {
+  /** null means explicit All (all supplied rows of the active source). */
+  explicitCodes: string[] | null;
+  activeCode: string | null;
+}
+
+export interface PurchaseOrderCategoryItem {
+  code: string;
+  /** Row label trimmed, falling back to the code; disambiguated on collision. */
+  label: string;
+  metrics: PurchaseOrderReportMetrics;
+}
+
+export interface PurchaseOrderCategoryReadout {
+  status: CategorySourceStatus;
+  error: string;
+  /** The inherited overview range label (from-to inclusive). */
+  rangeLabel: string;
+  currency: string;
+  asOf: string;
+  generatedAt: string;
+  sourceLabel: CategorySourceLabel;
+  /** Every row the category=all source supplies, in supplied order. */
+  supplied: PurchaseOrderCategoryItem[];
+  /** Selected rows in supplied order; [] for an explicit empty selection. */
+  selected: PurchaseOrderCategoryItem[];
+  /** The server-owned totals row; null whenever the source is not ready. */
+  total: PurchaseOrderReportMetrics | null;
+  scopeMatchesOverview: boolean;
+}
+
+/** One stable source identity: the exact query plus its as-of generation. */
+export function reportSourceKey(
+  query: PurchaseOrderReportQuery,
+  asOf: string
+): string {
+  return `${reportFilterKey(query)}#${asOf}`;
+}
+
+/**
+ * The exact all-category source for the overview's inherited scope. The range
+ * is never rounded to a calendar month, and the category is always "all" even
+ * when Performance is restricted.
+ */
+export function categorySourceQuery(
+  overviewFilter: PurchaseOrderReportQuery
+): PurchaseOrderReportQuery {
+  return {
+    from: overviewFilter.from,
+    to: overviewFilter.to,
+    bucket: overviewFilter.bucket,
+    category: "all",
+    currency: overviewFilter.currency.trim().toUpperCase(),
+  };
+}
+
+/** The one all-category read the section may need, and its registry key. */
+export function categorySourceRequest(
+  overview: PurchaseOrderReportData
+): CategorySourceRequest {
+  const query = categorySourceQuery(overview.filter);
+  return { query, key: reportSourceKey(query, overview.asOf) };
+}
+
+/** True when the overview itself is the unrestricted all-category snapshot. */
+export function overviewSuppliesAllCategories(
+  overview: PurchaseOrderReportData
+): boolean {
+  return normalizedCategory(overview.filter.category) === "all";
+}
+
+/**
+ * Exact from/to/bucket/currency equality plus an all-category source. A
+ * restricted snapshot is never accepted as the independent universe.
+ * The as-of check is separate: a stale as-of is a notice, not a scope mismatch.
+ */
+export function categorySourceMatchesOverview(
+  overview: PurchaseOrderReportData,
+  source: PurchaseOrderReportData
+): boolean {
+  return (
+    source.filter.from === overview.filter.from &&
+    source.filter.to === overview.filter.to &&
+    source.filter.bucket === overview.filter.bucket &&
+    normalizedCategory(source.filter.category) === "all" &&
+    source.filter.currency.trim().toUpperCase() ===
+      overview.filter.currency.trim().toUpperCase()
+  );
+}
+
+/**
+ * The displayed label per supplied code. An empty row label falls back to the
+ * code. Duplicate labels gain their code in parentheses only where needed, so
+ * codes stay the identity even when two labels collide.
+ */
+export function categoryDisplayLabels(
+  rows: readonly PurchaseOrderReportCategory[]
+): Map<string, string> {
+  const bases = rows.map((row) => row.label.trim() || row.businessCategory);
+  const counts = new Map<string, number>();
+  for (const base of bases) {
+    counts.set(base, (counts.get(base) ?? 0) + 1);
+  }
+  const labels = new Map<string, string>();
+  rows.forEach((row, index) => {
+    const base = bases[index];
+    const duplicated = (counts.get(base) ?? 0) > 1;
+    labels.set(
+      row.businessCategory,
+      duplicated && base !== row.businessCategory
+        ? `${base} (${row.businessCategory})`
+        : base
+    );
+  });
+  return labels;
+}
+
+function uniqueCodes(codes: readonly string[]): string[] {
+  return Array.from(new Set(codes));
+}
+
+/**
+ * The effective selection in supplied source order. An explicit list is
+ * filtered to codes the source actually supplied; null is All, which includes
+ * every supplied row (zero rows and UNASSIGNED included).
+ */
+export function resolveSelectedCategoryCodes(
+  explicitCodes: readonly string[] | null,
+  suppliedCodes: readonly string[]
+): string[] {
+  const supplied = uniqueCodes(suppliedCodes);
+  if (explicitCodes === null) return supplied;
+  const explicit = new Set(explicitCodes);
+  return supplied.filter((code) => explicit.has(code));
+}
+
+/** All is exactly every supplied row; an empty universe is never "All". */
+export function isAllCategoriesSelected(
+  selectedCodes: readonly string[],
+  suppliedCodes: readonly string[]
+): boolean {
+  const supplied = uniqueCodes(suppliedCodes);
+  if (supplied.length === 0) return false;
+  const selected = new Set(selectedCodes);
+  return (
+    selected.size === supplied.length &&
+    supplied.every((code) => selected.has(code))
+  );
+}
+
+/**
+ * One specific-category click. While All is selected a click focuses that
+ * category (Q643-4); afterwards clicks toggle membership, canonicalized to
+ * supplied order. Removing the last code leaves the explicit empty state.
+ */
+export function toggleCategoryInSelection(
+  explicitCodes: readonly string[] | null,
+  suppliedCodes: readonly string[],
+  code: string
+): CategorySelectionChange {
+  const supplied = uniqueCodes(suppliedCodes);
+  const selected = resolveSelectedCategoryCodes(explicitCodes, supplied);
+  const preservedExplicit =
+    explicitCodes === null ? null : resolveSelectedCategoryCodes(explicitCodes, supplied);
+  if (!supplied.includes(code)) {
+    return {
+      explicitCodes: preservedExplicit,
+      activeCode: selected[0] ?? null,
+    };
+  }
+  if (isAllCategoriesSelected(selected, supplied)) {
+    return { explicitCodes: [code], activeCode: code };
+  }
+  if (selected.includes(code)) {
+    const removedIndex = selected.indexOf(code);
+    const remaining = selected.filter((current) => current !== code);
+    return {
+      explicitCodes: remaining,
+      activeCode:
+        remaining[Math.min(removedIndex, remaining.length - 1)] ?? null,
+    };
+  }
+  const candidate = supplied.filter(
+    (current) => current === code || selected.includes(current)
+  );
+  return { explicitCodes: candidate, activeCode: code };
+}
+
+/** All is a select-all action; the remembered layout preference is untouched. */
+export function selectAllCategories(
+  suppliedCodes: readonly string[]
+): CategorySelectionChange {
+  const supplied = uniqueCodes(suppliedCodes);
+  return { explicitCodes: null, activeCode: supplied[0] ?? null };
+}
+
+/**
+ * Moves active focus within the selected set without changing membership.
+ * Callers use it only for subset and All/Individual navigation; a single
+ * selection replaces membership instead.
+ */
+export function nextActiveCategory(
+  codes: readonly string[],
+  activeCode: string | null,
+  delta: number
+): string | null {
+  if (codes.length === 0) return null;
+  const current = codes.indexOf(activeCode ?? codes[0]);
+  const nextIndex = Math.min(
+    codes.length - 1,
+    Math.max(0, (current < 0 ? 0 : current) + delta)
+  );
+  return codes[nextIndex];
+}
+
+/** A concise, honest name for the trigger and the picker's selected count. */
+export function categorySelectionSummary(
+  selected: readonly PurchaseOrderCategoryItem[],
+  suppliedCount: number,
+  status: CategorySourceStatus
+): string {
+  if (status === "loading") return "Loading categories";
+  if (status === "error") return "Categories unavailable";
+  if (selected.length === 0) return "No categories selected";
+  if (suppliedCount > 0 && selected.length === suppliedCount) {
+    return "All categories";
+  }
+  if (selected.length === 1) return selected[0].label;
+  return `${selected.length} of ${suppliedCount} categories`;
+}
+
+function copyCategoryMetrics(
+  metrics: PurchaseOrderReportMetrics
+): PurchaseOrderReportMetrics {
+  return {
+    poCount: metrics.poCount,
+    amountMinor: metrics.amountMinor,
+    costedMinor: metrics.costedMinor,
+    uncostedMinor: metrics.uncostedMinor,
+    capitalMinor: metrics.capitalMinor,
+    marginMinor: metrics.marginMinor,
+    marginBps: metrics.marginBps,
+    coverageBps: metrics.coverageBps,
+  };
+}
+
+/**
+ * The category section's readout. A ready source must match the overview's
+ * exact range/bucket/currency and be unrestricted; otherwise the section is an
+ * error, never a zero. An as-of mismatch keeps the supplied evidence visible
+ * but marks the scope stale so export is blocked and the UI can show a notice.
+ */
+export function resolveCategoryReadout(input: {
+  overview: PurchaseOrderReportData;
+  source: PurchaseOrderReportData | null;
+  status: CategorySourceStatus;
+  error: string;
+  explicitCodes: readonly string[] | null;
+}): PurchaseOrderCategoryReadout {
+  const { overview, source, status, error, explicitCodes } = input;
+  const inheritedLabel: CategorySourceLabel = overviewSuppliesAllCategories(
+    overview
+  )
+    ? "Performance snapshot"
+    : "All-category snapshot";
+  const readout: PurchaseOrderCategoryReadout = {
+    status,
+    error,
+    rangeLabel: reportRangeLabel(overview.filter),
+    currency: overview.filter.currency,
+    asOf: "",
+    generatedAt: "",
+    sourceLabel: inheritedLabel,
+    supplied: [],
+    selected: [],
+    total: null,
+    scopeMatchesOverview: false,
+  };
+  if (status !== "ready" || source === null) {
+    if (status === "ready") {
+      return {
+        ...readout,
+        status: "error",
+        error:
+          error === ""
+            ? "The all-category snapshot could not be loaded."
+            : error,
+      };
+    }
+    return readout;
+  }
+  if (!categorySourceMatchesOverview(overview, source)) {
+    return {
+      ...readout,
+      status: "error",
+      error:
+        "The loaded snapshot does not match this report's range, bucket, currency or all-category scope.",
+    };
+  }
+
+  const labels = categoryDisplayLabels(source.categories);
+  const supplied = source.categories.map((row) => ({
+    code: row.businessCategory,
+    label: labels.get(row.businessCategory) ?? row.businessCategory,
+    metrics: copyCategoryMetrics(row),
+  }));
+  const byCode = new Map(supplied.map((item) => [item.code, item]));
+  const selectedCodes = resolveSelectedCategoryCodes(
+    explicitCodes,
+    supplied.map((item) => item.code)
+  );
+  readout.asOf = source.asOf;
+  readout.generatedAt = source.generatedAt;
+  readout.sourceLabel =
+    reportSourceKey(source.filter, source.asOf) ===
+    reportSourceKey(overview.filter, overview.asOf)
+      ? "Performance snapshot"
+      : "All-category snapshot";
+  readout.supplied = supplied;
+  readout.selected = selectedCodes
+    .map((code) => byCode.get(code))
+    .filter((item): item is PurchaseOrderCategoryItem => item !== undefined);
+  readout.total = copyCategoryMetrics(source.totals);
+  readout.scopeMatchesOverview = source.asOf === overview.asOf;
+  return readout;
 }
