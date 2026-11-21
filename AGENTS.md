@@ -516,9 +516,12 @@ session and is forbidden for messaging. Continue an existing agy conversation wi
 5. Read the artifact from disk. The pane transcript is status, never the
    deliverable. Planner ends with `PLAN-READY <path>`; Judge ends with
    `VERDICT PASS|NOT PASS <path>`.
-6. **Completion ping.** As soon as the artifact is written, the Planner/Judge
-   enqueues one short line into the orchestrator session so it wakes and reads the
-   artifact on its next step:
+6. **Completion.** End the pane reply with `PLAN-READY <path>` or
+   `VERDICT PASS|NOT PASS <path>` and write the artifact. The orchestrator's
+   watcher polls both panes and detects those markers, so **no separate ping is
+   needed**. If the orchestrator explicitly asks for one, or the marker cannot be
+   shown, the fallback is the non-blocking API call below (never blocking
+   `opencode run`):
 
    ```bash
    $HOME/.local/bin/opencode api POST \
@@ -526,11 +529,7 @@ session and is forbidden for messaging. Continue an existing agy conversation wi
      -d '{"text":"PING <planner|judge> DONE <artifact path>","delivery":"queue"}'
    ```
 
-   This returns immediately (it enqueues, it does not wait for a reply) and must
-   not be replaced by a blocking `opencode run`. The ping is a trigger, never the
-   deliverable; it must not replace or summarize the artifact. If the command is
-   blocked or unavailable, the role still stops and the artifact stands — the
-   orchestrator will read it on the next capture.
+   The artifact is the deliverable, never a summary or the ping.
 7. **Questions.** If a decision is needed mid-task, print a single line
    `QUESTION: <one sentence>` in the pane and stop there. Never guess an
    ambiguous requirement. The orchestrator watches both panes for that marker,
