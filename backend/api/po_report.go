@@ -37,6 +37,11 @@ const (
 	// exact JSON range. Failing closed is deliberate: a wrapped figure would be
 	// a wrong report that looks valid.
 	reportErrorValueOutOfRange = "report_value_out_of_range"
+	// reportErrorMonthSummary is the 500 for a current-month readout the server
+	// cannot derive from the snapshot it already read. The filter was validated
+	// before the read, so no request field can fix it; the stable code still
+	// separates it from an untyped internal failure.
+	reportErrorMonthSummary = "report_month_summary_failed"
 	// reportErrorLegacyAdjustment is the note code attached when a filtered PO
 	// still carries a retired nonzero whole-order discount or adjustment.
 	reportErrorLegacyAdjustment = "legacy_order_adjustment"
@@ -141,10 +146,7 @@ func (s *Server) getPurchaseOrderReport(context echo.Context) error {
 		snapshot.DailyOutOfRange,
 	)
 	if err != nil {
-		if errors.Is(err, poreport.ErrValueOutOfRange) {
-			return reportError(context, http.StatusUnprocessableEntity, reportErrorValueOutOfRange, err)
-		}
-		return context.JSON(http.StatusInternalServerError, map[string]string{"error": "derive current month summary"})
+		return reportMonthSummaryError(context, err)
 	}
 	report := poreport.Report{
 		GeneratedAt: now.UTC().Format(time.RFC3339),
@@ -179,4 +181,15 @@ func reportError(context echo.Context, status int, code string, err error) error
 		"error": err.Error(),
 		"code":  code,
 	})
+}
+
+// reportMonthSummaryError writes the typed refusal for a failed current-month
+// readout. A value outside the exact range is the same 422 every other
+// aggregate failure uses; any other failure is server-side, so it keeps the
+// 500 while still carrying a stable code instead of a bare error body.
+func reportMonthSummaryError(context echo.Context, err error) error {
+	if errors.Is(err, poreport.ErrValueOutOfRange) {
+		return reportError(context, http.StatusUnprocessableEntity, reportErrorValueOutOfRange, err)
+	}
+	return reportError(context, http.StatusInternalServerError, reportErrorMonthSummary, err)
 }

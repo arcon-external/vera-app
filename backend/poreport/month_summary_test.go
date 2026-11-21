@@ -2,6 +2,7 @@ package poreport
 
 import (
 	"encoding/json"
+	"errors"
 	"math/big"
 	"testing"
 	"time"
@@ -445,6 +446,52 @@ func TestBuildMonthSummaryIsAbsentWhenTheDailySampleIsCorrupt(t *testing.T) {
 	}
 	if summary != nil {
 		t.Errorf("summary = %+v; want nil when the daily sample could not be represented exactly", summary)
+	}
+}
+
+// Issue #646: a query that cannot be normalized is refused, never folded into
+// the absent readout. A valid shape outside the exact current periods still
+// returns nil (pinned above), so "not this report" and "corrupt filter" stay
+// distinguishable to the API.
+func TestBuildMonthSummaryRefusesACorruptQuery(t *testing.T) {
+	asOf := monthTestDate(t, "2026-11-19")
+	daily := dailySample(t)
+	current := ProjectCurrent(nil, daily, currentMonthDayQuery(), asOf, false, false)
+
+	cases := []struct {
+		name  string
+		query Query
+	}{
+		{
+			name: "malformed from",
+			query: func() Query {
+				query := currentMonthDayQuery()
+				query.From = "2026-11-1"
+				return query
+			}(),
+		},
+		{
+			name: "unknown bucket",
+			query: func() Query {
+				query := currentMonthDayQuery()
+				query.Bucket = "week"
+				return query
+			}(),
+		},
+	}
+	for _, test := range cases {
+		t.Run(test.name, func(t *testing.T) {
+			summary, err := BuildMonthSummary(nil, daily, current, test.query, asOf, false)
+			if err == nil {
+				t.Fatal("BuildMonthSummary accepted a corrupt query; want a refusal")
+			}
+			if !errors.Is(err, ErrInvalid) {
+				t.Errorf("error = %v; want ErrInvalid", err)
+			}
+			if summary != nil {
+				t.Errorf("summary = %+v; want nil alongside the refusal", summary)
+			}
+		})
 	}
 }
 

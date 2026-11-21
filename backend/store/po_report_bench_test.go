@@ -85,7 +85,8 @@ func benchmarkPurchaseOrderReport(b *testing.B, total int) {
 		Category: poreport.CategoryAll, Currency: "IDR",
 	}
 	now := time.Date(2026, 1, 15, 5, 0, 0, 0, time.UTC)
-	historyTo := reportHistoryCutoff(time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC), companyToday(now))
+	asOf := companyToday(now)
+	historyTo := reportHistoryCutoff(time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC), asOf)
 
 	b.ResetTimer()
 	var snapshot PurchaseOrderReportSnapshot
@@ -164,7 +165,7 @@ func benchmarkPurchaseOrderReport(b *testing.B, total int) {
 	// plan evidence the ticket requires. It runs after the timed loop; the
 	// smaller sizes get the same measurement because their plan choice is the
 	// question (seq scan versus the report index), not just their latency.
-	explainBenchmarkReport(b, database, org.ID, query, historyTo)
+	explainBenchmarkReport(b, database, org.ID, query, historyTo, asOf)
 }
 
 // reportQuantile is the nearest-rank percentile of an already sorted sample:
@@ -285,7 +286,7 @@ func seedReportBenchmark(b *testing.B, database *Store, orgID string, userID int
 	}
 }
 
-func explainBenchmarkReport(b *testing.B, database *Store, orgID string, query poreport.Query, historyTo time.Time) {
+func explainBenchmarkReport(b *testing.B, database *Store, orgID string, query poreport.Query, historyTo, asOf time.Time) {
 	b.Helper()
 	pool, err := database.poolOrError()
 	if err != nil {
@@ -294,7 +295,7 @@ func explainBenchmarkReport(b *testing.B, database *Store, orgID string, query p
 	rows, err := pool.Query(context.Background(),
 		"EXPLAIN (ANALYZE, BUFFERS, FORMAT TEXT) "+purchaseOrderReportSQL(database.configSchema()),
 		orgID, query.Currency, query.From, query.To, query.Category,
-		historyTo.Format(time.DateOnly), query.Bucket)
+		historyTo.Format(time.DateOnly), query.Bucket, asOf.Format(time.DateOnly))
 	if err != nil {
 		b.Fatalf("explain report: %v", err)
 	}

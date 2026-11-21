@@ -13,9 +13,11 @@ import (
 // screen and the PDF select these values and never recompute them.
 //
 // The summary exists only for a query that is exactly the current month bucketed
-// by day, or exactly the current year bucketed by month. Any other shape, and a
-// corrupt daily sample, yields nil: a readout invented from a different scope
-// would be a second report, not this one.
+// by day, or exactly the current year bucketed by month. Any other valid shape,
+// and a corrupt daily sample, yields nil: a readout invented from a different
+// scope would be a second report, not this one. A query that cannot be
+// normalized is refused with an error instead, so a corrupt filter never reads
+// as "no summary".
 //
 // Actual comes from the elapsed-day sample, so it excludes a future-dated saved
 // order even though the report's Totals include it. RecordedFuture carries that
@@ -36,7 +38,7 @@ func BuildMonthSummary(
 	}
 	normalized, err := NormalizeQuery(query)
 	if err != nil {
-		return nil, nil
+		return nil, fmt.Errorf("current month summary query: %w", err)
 	}
 	asOfDate := companyDate(asOf)
 	monthStart := firstOfMonth(asOfDate)

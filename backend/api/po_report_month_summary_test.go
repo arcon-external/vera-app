@@ -1,10 +1,14 @@
 package api
 
 import (
+	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/http/httptest"
 	"testing"
 	"time"
+
+	"github.com/labstack/echo/v4"
 
 	"vera-app/backend/poreport"
 )
@@ -13,6 +17,56 @@ import (
 // domain arithmetic is pinned in backend/poreport; these tests prove the API
 // wires the same snapshot, keeps actual-to-date independent of the forecast
 // guard, and never lets a future-dated saved order enter the elapsed sample.
+
+// Issue #646: the month readout's failure path is a typed refusal like every
+// other report failure, not a bare {"error": ...} body. The mapping is exercised
+// directly because reaching it through the endpoint needs a corrupt snapshot
+// shape the public surface never produces.
+func TestPurchaseOrderReportMonthSummaryFailureCarriesItsCode(t *testing.T) {
+	cases := []struct {
+		name       string
+		err        error
+		wantStatus int
+		wantCode   string
+	}{
+		{
+			name:       "internal shape failure",
+			err:        fmt.Errorf("%w: current projection status %q", poreport.ErrInvalid, "mystery"),
+			wantStatus: http.StatusInternalServerError,
+			wantCode:   "report_month_summary_failed",
+		},
+		{
+			name:       "value out of range",
+			err:        fmt.Errorf("current month actual: %w", poreport.ErrValueOutOfRange),
+			wantStatus: http.StatusUnprocessableEntity,
+			wantCode:   "report_value_out_of_range",
+		},
+	}
+	for _, test := range cases {
+		t.Run(test.name, func(t *testing.T) {
+			instance := echo.New()
+			recorder := httptest.NewRecorder()
+			context := instance.NewContext(
+				httptest.NewRequest(http.MethodGet, "/", nil), recorder)
+			if err := reportMonthSummaryError(context, test.err); err != nil {
+				t.Fatalf("reportMonthSummaryError returned %v", err)
+			}
+			if recorder.Code != test.wantStatus {
+				t.Fatalf("status = %d; want %d", recorder.Code, test.wantStatus)
+			}
+			var body map[string]string
+			if err := json.Unmarshal(recorder.Body.Bytes(), &body); err != nil {
+				t.Fatalf("decode refusal body: %v", err)
+			}
+			if body["code"] != test.wantCode {
+				t.Errorf("code = %q; want %q", body["code"], test.wantCode)
+			}
+			if body["error"] == "" {
+				t.Error("error = empty; want the human explanation")
+			}
+		})
+	}
+}
 
 func TestPurchaseOrderReportMonthSummaryFootsTheDailyBuckets(t *testing.T) {
 	today := apiReportToday()

@@ -13,12 +13,16 @@ import {
   annualSourceCoversMonth,
   canonicalMonths,
   categorySourceMatchesOverview,
+  monthKeyFromDate,
   monthStart,
   sourceScopeMatches,
   type ReportComparisonLayout,
 } from "./poReportComparison";
 
 export const REPORT_VIEW_VERSION = 1 as const;
+
+/** The native renderer's bound on the sources one envelope may reference. */
+const REPORT_VIEW_SOURCE_CAP = 16;
 
 export type PurchaseOrderReportViewLayout = ReportComparisonLayout;
 
@@ -73,11 +77,6 @@ function queryKey(report: PurchaseOrderReportData): string {
   return reportFilterKey(report.filter);
 }
 
-function currentMonthKey(overview: PurchaseOrderReportData): string {
-  const asOf = overview.asOf.trim();
-  return /^\d{4}-\d{2}-\d{2}$/.test(asOf) ? asOf.slice(0, 7) : "";
-}
-
 /**
  * Builds the envelope for the visible selection. The overview is always
  * source 0; each exact-duplicate month source reuses its index. Every selected
@@ -94,7 +93,7 @@ export function buildPurchaseOrderReportView(
   selection: PurchaseOrderReportViewSelection
 ): PurchaseOrderReportView {
   const overviewKey = queryKey(overview);
-  const currentKey = currentMonthKey(overview);
+  const currentKey = monthKeyFromDate(overview.asOf);
   const entries = [...selection.months].sort((left, right) =>
     left.month < right.month ? -1 : left.month > right.month ? 1 : 0
   );
@@ -153,8 +152,10 @@ export function buildPurchaseOrderReportView(
   };
 
   const assertSourceCap = (): void => {
-    if (sources.length > 16) {
-      throw new Error("the report view can reference at most 16 sources");
+    if (sources.length > REPORT_VIEW_SOURCE_CAP) {
+      throw new Error(
+        `the report view can reference at most ${REPORT_VIEW_SOURCE_CAP} sources`
+      );
     }
   };
 
