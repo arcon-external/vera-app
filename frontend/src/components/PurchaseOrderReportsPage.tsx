@@ -4,17 +4,9 @@ import { errorMessage } from "../errors";
 import type { CurrencyInfo } from "../format";
 import { formatMoney } from "../format";
 import {
-  REPORT_BUCKET_OPTIONS,
-  REPORT_KPI_GRID_CLASS,
-  REPORT_KPI_VALUE_CLASS,
-  REPORT_PRESET_OPTIONS,
-  categoryFilterOptions,
   formatReportBps,
   formatReportCount,
-  formatReportDate,
   initialReportFilters,
-  reportCurrencyOptions,
-  reportCategoryLabel,
   reportFilterKey,
   reportFilterValidation,
   reportMatchesFilter,
@@ -22,7 +14,6 @@ import {
   reportPeriodLabel,
   reportPeriodRange,
   reportPresetRange,
-  reportRangeLabel,
   toReportQuery,
   type ReportBucket,
   type ReportFilterState,
@@ -47,16 +38,14 @@ import {
   monthLabel,
   type PurchaseOrderMonthReadout,
 } from "../poReportComparison";
-import { PurchaseOrderReportChart } from "./PurchaseOrderReportChart";
 import { PurchaseOrderReportMonthTable } from "./PurchaseOrderReportMonthTable";
 import {
   PurchaseOrderReportMonthBrowser,
   type PurchaseOrderReportMonthBrowserProps,
 } from "./PurchaseOrderReportMonthBrowser";
+import { PurchaseOrderReportOverview } from "./PurchaseOrderReportOverview";
 import { PurchaseOrderReportPicker } from "./PurchaseOrderReportPicker";
-import { PurchaseOrderReportPeriodToggle } from "./PurchaseOrderReportPeriod";
-import { Select } from "./Select";
-import { Badge, Button, Card, SectionHeading, StatusBanner, fieldClass } from "./ui";
+import { Badge, Button, Card, SectionHeading, StatusBanner } from "./ui";
 
 // Issue #630: the global Reports workspace. It turns the #629 report endpoint
 // into a screen and nothing more: one normalized snapshot is fetched per
@@ -282,111 +271,6 @@ function PeriodTable({
   );
 }
 
-function KpiStrip({
-  report,
-  entry,
-  period,
-}: {
-  report: PurchaseOrderReportData;
-  entry: CurrencyInfo | null;
-  period: ReportPeriodMode | null;
-}) {
-  const totals = report.totals;
-  const periodContext =
-    period === "month"
-      ? "Current month to date"
-      : period === "year"
-        ? "Current year to date"
-        : "Selected range";
-  const kpis: { label: string; value: string; negative?: boolean }[] = [
-    { label: "PO count", value: formatReportCount(totals.poCount) },
-    { label: "PO amount", value: money(entry, totals.amountMinor) },
-    { label: "Capital", value: money(entry, totals.capitalMinor) },
-    {
-      label: "PO margin",
-      value: money(entry, totals.marginMinor),
-      negative: totals.marginMinor < 0,
-    },
-    { label: "PO margin %", value: formatReportBps(totals.marginBps) },
-  ];
-  return (
-    <Card className="min-w-0 p-5">
-      <p
-        data-report-period-context={period ?? "custom"}
-        className="mb-3 text-caption font-medium uppercase tracking-[0.12em] text-ink-500"
-      >
-        {periodContext}
-      </p>
-      <dl
-        aria-label="Report KPIs"
-        className={REPORT_KPI_GRID_CLASS}
-      >
-        {kpis.map((kpi) => (
-          <div key={kpi.label}>
-            <dt className="text-caption font-medium uppercase tracking-[0.12em] text-ink-500">
-              {kpi.label}
-            </dt>
-            <dd
-              className={`${REPORT_KPI_VALUE_CLASS} ${
-                kpi.negative ? "text-danger-700" : "text-ink-950"
-              }`}
-            >
-              {kpi.value}
-            </dd>
-          </div>
-        ))}
-      </dl>
-      {totals.uncostedMinor > 0 ? (
-        <p className="mt-4 border-t border-rule pt-3 text-small leading-relaxed text-ink-600">
-          Coverage: {formatReportBps(totals.coverageBps)} of the amount is
-          costed; {money(entry, totals.uncostedMinor)} of{" "}
-          {money(entry, totals.amountMinor)} is uncosted.
-        </p>
-      ) : null}
-    </Card>
-  );
-}
-
-function LoadingSkeleton() {
-  return (
-    <div className="space-y-4" aria-label="Loading report">
-      <div className="h-32 animate-pulse rounded-xl border border-rule bg-paper-muted" />
-      <div className="h-64 animate-pulse rounded-xl border border-rule bg-paper-muted" />
-      <div className="h-64 animate-pulse rounded-xl border border-rule bg-paper-muted" />
-    </div>
-  );
-}
-
-function EmptyReport({
-  report,
-  period,
-  onPeriodChange,
-}: {
-  report: PurchaseOrderReportData;
-  period: ReportPeriodMode | null;
-  onPeriodChange: (period: ReportPeriodMode | null) => void;
-}) {
-  return (
-    <Card className="min-w-0 p-8">
-      <div className="mb-4">
-        <PurchaseOrderReportPeriodToggle
-          period={period}
-          onPeriodChange={onPeriodChange}
-        />
-      </div>
-      <h2 className="text-title font-semibold text-ink-950">
-        No purchase orders in this range
-      </h2>
-      <p className="mt-1.5 max-w-2xl text-body leading-relaxed text-ink-500">
-        {reportRangeLabel(report.filter)} ·{" "}
-        {reportCategoryLabel(report.filter.category)} ·{" "}
-        {report.filter.currency}. Choose a wider date range or a different
-        category.
-      </p>
-    </Card>
-  );
-}
-
 function ErrorCard({ error, onRetry }: { error: string; onRetry: () => void }) {
   return (
     <Card className="min-w-0 p-8">
@@ -438,34 +322,13 @@ export function PurchaseOrderReportsView({
   const reportCurrency = report?.filter.currency ?? filters.currency;
   const entry =
     catalogue?.find((item) => item.code === reportCurrency) ?? null;
-  const categoryOptions = categoryFilterOptions(
-    report?.population.hasUnassigned ?? false,
-    filters.category
-  );
-  const currencyOptions = reportCurrencyOptions(
-    report?.population.availableCurrencies ?? [],
-    filters.currency
-  );
-  const showSkeleton = report === null && error === "" && validation === "";
   const showEmpty = report !== null && report.totals.poCount === 0;
   const showFigures = report !== null && report.totals.poCount > 0;
-  const unresolvedCurrency = report !== null && entry === null;
-  const monthSection =
-    monthBrowser !== undefined && monthBrowser !== null ? (
-      <PurchaseOrderReportMonthBrowser {...monthBrowser} entry={entry} />
-    ) : monthReadout !== undefined && monthReadout !== null ? (
-      <PurchaseOrderReportMonthTable
-        readout={monthReadout}
-        entry={entry}
-        onPrevious={onPreviousMonth ?? (() => undefined)}
-        onNext={onNextMonth ?? (() => undefined)}
-        onRetry={onRetryMonth ?? onRetry}
-      />
-    ) : null;
-
   // The report materializes the whole current month/year, including days and
   // months that have not happened. Those are ghost territory, not actual table
-  // rows: the table stops at today and the chart carries the projection.
+  // rows: the table stops at today and the chart carries the projection. This
+  // fallback period table is used only by direct fixture/harness callers that
+  // do not supply an independent month section.
   const asOfMonth = report === null ? "" : `${report.asOf.slice(0, 7)}-01`;
   const displayedPeriods =
     report === null
@@ -475,6 +338,55 @@ export function PurchaseOrderReportsView({
         : filters.period === "year"
           ? report.periods.filter((period) => period.periodStart <= asOfMonth)
           : report.periods;
+  // Issue #644 F5: the embedded chart's "Selected month" anchor always names
+  // #report-period-table, but the section owns that id only on its ready
+  // branch. A stable wrapper carries the id (and the fragment focus/scroll
+  // contract) while the selected month is loading or errored, so a fetch or
+  // month switch can never leave the anchor dead. The ready branch keeps the
+  // table's own id, so the document never has two.
+  const monthSectionReady = monthReadout?.status === "ready";
+  const monthTable =
+    monthReadout === undefined || monthReadout === null ? null : (
+      <div
+        id={monthSectionReady ? undefined : "report-period-table"}
+        tabIndex={monthSectionReady ? undefined : -1}
+        className={
+          monthSectionReady ? "min-w-0" : "min-w-0 scroll-mt-6"
+        }
+      >
+        <PurchaseOrderReportMonthTable
+          readout={monthReadout}
+          entry={entry}
+          onPrevious={onPreviousMonth ?? (() => undefined)}
+          onNext={onNextMonth ?? (() => undefined)}
+          onRetry={onRetryMonth ?? onRetry}
+        />
+      </div>
+    );
+  // The #642 browser anchors its own table in the empty state, the single
+  // card, the first grid card or the aggregate. Its loading and error cards
+  // render no table, so the same stable wrapper carries the anchor there.
+  const monthBrowserPresent = monthBrowser !== undefined && monthBrowser !== null;
+  const monthBrowserOwnsAnchor =
+    monthBrowserPresent &&
+    (monthBrowser.months.length === 0 ||
+      (monthBrowser.months.length === 1
+        ? monthBrowser.readouts[0]?.status === "ready"
+        : monthBrowser.allYear !== null &&
+            monthBrowser.layout === "aggregate"
+          ? monthBrowser.aggregate?.status === "ready"
+          : monthBrowser.readouts[0]?.status === "ready"));
+  const monthBrowserSection =
+    monthBrowser === undefined || monthBrowser === null ? null : (
+      <div
+        id={monthBrowserOwnsAnchor ? undefined : "report-period-table"}
+        tabIndex={monthBrowserOwnsAnchor ? undefined : -1}
+        className={monthBrowserOwnsAnchor ? "min-w-0" : "min-w-0 scroll-mt-6"}
+      >
+        <PurchaseOrderReportMonthBrowser {...monthBrowser} entry={entry} />
+      </div>
+    );
+  const monthSection = monthBrowserSection ?? monthTable;
 
   return (
     <section aria-labelledby="reports-heading" className="flex flex-col gap-6">
@@ -492,11 +404,6 @@ export function PurchaseOrderReportsView({
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-3">
-          {report !== null ? (
-            <span className="tnum text-caption text-ink-500">
-              As of {formatReportDate(report.asOf)}
-            </span>
-          ) : null}
           <Button
             aria-label="Export PDF"
             disabled={!canExport || exporting}
@@ -512,179 +419,55 @@ export function PurchaseOrderReportsView({
         </div>
       </header>
 
-      <Card className="min-w-0 p-4">
-        <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
-          {filters.period === null ? (
-            <>
-              <label className="grid gap-1.5">
-                <span className="text-small font-medium text-ink-700">
-                  Date range
-                </span>
-                <Select
-                  ariaLabel="Date range preset"
-                  value={filters.preset}
-                  options={REPORT_PRESET_OPTIONS}
-                  onChange={(value) => onPresetChange(value as ReportPreset)}
-                />
-              </label>
-              <label className="grid gap-1.5">
-                <span className="text-small font-medium text-ink-700">
-                  From date
-                </span>
-                <input
-                  type="date"
-                  aria-label="From date"
-                  className={fieldClass}
-                  value={filters.from}
-                  onChange={(event) => onFromChange(event.target.value)}
-                />
-              </label>
-              <label className="grid gap-1.5">
-                <span className="text-small font-medium text-ink-700">
-                  To date
-                </span>
-                <input
-                  type="date"
-                  aria-label="To date"
-                  className={fieldClass}
-                  value={filters.to}
-                  onChange={(event) => onToChange(event.target.value)}
-                />
-              </label>
-              <label className="grid gap-1.5">
-                <span className="text-small font-medium text-ink-700">
-                  Bucket
-                </span>
-                <Select
-                  ariaLabel="Bucket"
-                  value={filters.bucket}
-                  options={REPORT_BUCKET_OPTIONS}
-                  onChange={(value) => onBucketChange(value as ReportBucket)}
-                />
-              </label>
-            </>
-          ) : (
-            <div
-              data-report-current-period=""
-              className="rounded-md border border-rule bg-paper-subtle/60 px-3 py-2 sm:col-span-2 xl:col-span-3"
-            >
-              <span className="text-small font-semibold text-ink-900">
-                {filters.period === "month" ? "Current month" : "Current year"}
-              </span>
-              <span className="ml-2 text-small text-ink-600">
-                {formatReportDate(filters.from)} to {formatReportDate(filters.to)}
-                {" · "}
-                {filters.period === "month" ? "daily" : "monthly"}
-              </span>
-            </div>
-          )}
-          <label className="grid gap-1.5">
-            <span className="text-small font-medium text-ink-700">
-              Category
-            </span>
-            <Select
-              ariaLabel="Category"
-              value={filters.category}
-              options={categoryOptions}
-              onChange={(value) => onCategoryChange(String(value))}
-            />
-          </label>
-          {currencyOptions.length > 1 ? (
-            <label className="grid gap-1.5">
-              <span className="text-small font-medium text-ink-700">
-                Currency
-              </span>
-              <Select
-                ariaLabel="Currency"
-                value={filters.currency}
-                options={currencyOptions.map((code) => ({
-                  value: code,
-                  label: code,
-                }))}
-                onChange={(value) => onCurrencyChange(String(value))}
-              />
-            </label>
-          ) : (
-            <div className="grid gap-1.5">
-              <span className="text-small font-medium text-ink-700">
-                Currency
-              </span>
-              <span className="tnum flex min-h-10 items-center rounded-md border border-rule bg-paper-subtle px-3 text-body text-ink-700">
-                {filters.currency || "-"}
-              </span>
-            </div>
-          )}
-        </div>
-        {validation !== "" ? (
-          <div className="mt-3">
-            <StatusBanner tone="danger">{validation}</StatusBanner>
+      {/*
+        Root-owned notices keep a stable slot so a refresh error appearing or
+        clearing cannot remount the Overview or its chart.
+      */}
+      <div
+        className={error === "" ? "hidden" : ""}
+        data-report-root-error=""
+      >
+        {error !== "" && report === null ? (
+          <ErrorCard error={error} onRetry={onRetry} />
+        ) : error !== "" ? (
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <StatusBanner tone="danger">
+              The report could not be refreshed: {error} Showing the previous
+              figures.
+            </StatusBanner>
+            <Button aria-label="Retry report" onClick={onRetry}>
+              Retry
+            </Button>
           </div>
         ) : null}
-      </Card>
+      </div>
 
-      {loading && report !== null ? (
-        <p role="status" className="text-small text-ink-500">
-          Updating the report…
-        </p>
-      ) : null}
-      {!loading && stale && error === "" && validation === "" ? (
-        <StatusBanner tone="info">
-          Showing the previous filter's figures while this one has no report.
-        </StatusBanner>
-      ) : null}
-      {error !== "" && report === null ? (
-        <ErrorCard error={error} onRetry={onRetry} />
-      ) : error !== "" ? (
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <StatusBanner tone="danger">
-            The report could not be refreshed: {error} Showing the previous
-            figures.
-          </StatusBanner>
-          <Button aria-label="Retry report" onClick={onRetry}>
-            Retry
-          </Button>
-        </div>
-      ) : null}
+      <PurchaseOrderReportOverview
+        filters={filters}
+        report={report}
+        catalogue={catalogue}
+        loading={loading}
+        stale={stale}
+        validation={validation}
+        onPresetChange={onPresetChange}
+        onPeriodChange={onPeriodChange}
+        onFromChange={onFromChange}
+        onToChange={onToChange}
+        onBucketChange={onBucketChange}
+        onCategoryChange={onCategoryChange}
+        onCurrencyChange={onCurrencyChange}
+      />
 
-      {unresolvedCurrency ? (
-        <StatusBanner tone="info">
-          {reportCurrency} is not in this app's currency catalogue, so monetary
-          figures are shown as “-” and no other currency is substituted.
-        </StatusBanner>
-      ) : null}
-
-      {showSkeleton ? <LoadingSkeleton /> : null}
-      {showEmpty && report !== null ? (
-        <>
-          <EmptyReport
-            report={report}
-            period={filters.period}
-            onPeriodChange={onPeriodChange}
-          />
-          {monthSection}
-        </>
-      ) : null}
       {showFigures && report !== null ? (
         <>
-          <KpiStrip report={report} entry={entry} period={filters.period} />
-          <PurchaseOrderReportChart
-            report={report}
-            currency={entry}
-            period={filters.period}
-            onPeriodChange={onPeriodChange}
-          />
+          {monthSection ?? (
+            <PeriodTable
+              report={report}
+              entry={entry}
+              periods={displayedPeriods}
+            />
+          )}
           <CategoryTable report={report} entry={entry} />
-          {monthBrowser !== undefined && monthBrowser !== null
-            ? monthSection
-            : monthReadout !== undefined
-              ? monthSection
-              : (
-                  <PeriodTable
-                    report={report}
-                    entry={entry}
-                    periods={displayedPeriods}
-                  />
-                )}
           {report.notes.length > 0 ? (
             <Card className="min-w-0 p-5">
               <SectionTitle title="Notes" />
@@ -697,6 +480,8 @@ export function PurchaseOrderReportsView({
           ) : null}
         </>
       ) : null}
+
+      {showEmpty && report !== null ? monthSection : null}
     </section>
   );
 }

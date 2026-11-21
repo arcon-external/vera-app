@@ -24,6 +24,16 @@ import { Badge } from "./ui";
 export interface PurchaseOrderReportProjectionSummaryProps {
   report: PurchaseOrderReportData;
   currency: CurrencyInfo | null;
+  /**
+   * Issue #644: render as disclosure content without a nested card. The
+   * default keeps the standalone summary's panel styling for every existing
+   * caller.
+   */
+  plain?: boolean;
+}
+
+export interface PurchaseOrderReportProjectionStatusProps {
+  report: PurchaseOrderReportData;
 }
 
 function money(currency: CurrencyInfo | null, minor: number): string {
@@ -38,7 +48,8 @@ function modeLabel(mode: string): string {
 
 function basisLabel(
   report: PurchaseOrderReportData,
-  units: string
+  units: string,
+  includeAsOf = true
 ): string {
   const basis = report.currentProjection.basis;
   const unitText =
@@ -53,9 +64,9 @@ function basisLabel(
     basis.poCount === 1 ? "PO" : "POs"
   } observed`;
   const asOf =
-    basis.asOf.trim() === ""
-      ? ""
-      : `, as of ${formatReportDate(basis.asOf)}`;
+    includeAsOf && basis.asOf.trim() !== ""
+      ? `, as of ${formatReportDate(basis.asOf)}`
+      : "";
   return `${unitText}, ${observed}${asOf}.`;
 }
 
@@ -148,9 +159,54 @@ function remainderRange(
   );
 }
 
+/**
+ * Issue #644: the one compact forecast readout the overview keeps visible. It
+ * carries the server's status, mode and stable reason; every basis, method,
+ * range and update sentence stays in the full summary inside Details.
+ */
+export function PurchaseOrderReportProjectionStatus({
+  report,
+}: PurchaseOrderReportProjectionStatusProps) {
+  const current = report.currentProjection;
+  const available = current.status === "available" && current.mode !== "none";
+  const detail = available
+    ? basisLabel(report, current.mode === "month" ? "month" : "day", false)
+    : current.mode === "none"
+      ? ""
+      : projectionReasonLabel(current.reason);
+
+  return (
+    <div
+      data-report-forecast-status=""
+      data-projection-status={current.status}
+      data-projection-mode={current.mode}
+      data-projection-reason={current.reason ?? ""}
+      className="mb-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-caption leading-relaxed text-ink-500"
+    >
+      <span className="text-micro font-medium uppercase tracking-[0.12em] text-ink-500">
+        Forecast
+      </span>
+      <Badge
+        tone={available ? "accent" : "neutral"}
+      >
+        {available
+          ? "Projected"
+          : current.mode === "none"
+            ? "Not applicable"
+            : "Unavailable"}
+      </Badge>
+      <span>
+        {modeLabel(current.mode)}
+        {detail === "" ? "" : ` · ${detail}`}
+      </span>
+    </div>
+  );
+}
+
 export function PurchaseOrderReportProjectionSummary({
   report,
   currency,
+  plain = false,
 }: PurchaseOrderReportProjectionSummaryProps) {
   const current = report.currentProjection;
   const available = current.status === "available";
@@ -164,7 +220,11 @@ export function PurchaseOrderReportProjectionSummary({
       data-projection-status={current.status}
       data-projection-mode={current.mode}
       data-projection-reason={current.reason ?? ""}
-      className="mt-4 rounded-xl border border-rule bg-paper-subtle/50 p-4"
+      className={
+        plain
+          ? "mt-0"
+          : "mt-4 rounded-xl border border-rule bg-paper-subtle/50 p-4"
+      }
     >
       <div className="flex flex-wrap items-center gap-2">
         <h3 className="text-small font-semibold text-ink-900">

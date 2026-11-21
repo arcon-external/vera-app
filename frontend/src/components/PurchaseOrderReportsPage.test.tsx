@@ -2,7 +2,10 @@
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { PurchaseOrderReportsPage } from "./PurchaseOrderReportsPage";
+import {
+  PurchaseOrderReportsPage,
+  PurchaseOrderReportsView,
+} from "./PurchaseOrderReportsPage";
 import {
   purchaseOrderReportFixture,
   purchaseOrderReportMaxFixture,
@@ -217,6 +220,61 @@ async function renderPage(options: RenderOptions = {}): Promise<void> {
   await flush();
 }
 
+/** The embedded chart's one "Selected month" link. */
+function exactValuesLink(): HTMLAnchorElement {
+  const found = document.querySelector<HTMLAnchorElement>(
+    'a[href="#report-period-table"]'
+  );
+  if (found === null) throw new Error("no exact-value anchor");
+  return found;
+}
+
+/** The chart's accessible description, which travels with the anchor. */
+function exactValuesDescription(): string {
+  return (
+    document.querySelector("svg[data-chart-svg] desc")?.textContent ?? ""
+  );
+}
+
+/**
+ * Issue #644 F5: the exact-value anchor must name a real node at every month
+ * state. jsdom implements no fragment navigation, so the browser contract is
+ * pinned on the target itself — exactly one node, inside this page and the
+ * selected-month section, focusable, and carrying the scroll margin that keeps
+ * fragment scrolling below the sticky chrome. The focus call proves the
+ * tabindex contract is real rather than a string.
+ */
+function assertExactValuesTarget(
+  state: string,
+  browser: HTMLElement | null
+): HTMLElement {
+  const link = exactValuesLink();
+  expect(link.textContent, `${state}: anchor label`).toContain(
+    "Selected month"
+  );
+
+  const targets = document.querySelectorAll("#report-period-table");
+  expect(targets, `${state}: exactly one target`).toHaveLength(1);
+  const target = targets[0] as HTMLElement;
+  expect(container.contains(target), `${state}: target is in this page`).toBe(
+    true
+  );
+  if (browser !== null) {
+    expect(
+      target === browser ||
+        target.contains(browser) ||
+        browser.contains(target),
+      `${state}: target is the selected-month section`
+    ).toBe(true);
+  }
+  expect(target.getAttribute("tabindex"), `${state}: focusable`).toBe("-1");
+  expect(target.className, `${state}: scroll margin`).toContain("scroll-mt-6");
+
+  target.focus();
+  expect(document.activeElement, `${state}: focus lands`).toBe(target);
+  return target;
+}
+
 describe("Reports filters (issue #630)", () => {
   it("fetches the initial current-year filter once", async () => {
     await renderPage();
@@ -338,9 +396,16 @@ describe("Reports filters (issue #630)", () => {
     });
     await flush();
 
-    // The slower month request must not repaint the year table.
+    // The slower month request must not repaint the year view. The new
+    // Overview scope legitimately prints "2026" in its range, so the chart's
+    // own bucket labels are the precise marker: a repaint would relabel them
+    // with months, while the year bucket keeps the year vocabulary.
     expect(document.body.textContent).toContain("2026");
-    expect(document.body.textContent).not.toContain("Jan 2026");
+    const axisLabels = Array.from(
+      document.querySelectorAll('[data-chart-axis="x"] text')
+    ).map((node) => node.textContent);
+    expect(axisLabels.length).toBeGreaterThan(0);
+    expect(axisLabels.every((label) => label === "2026")).toBe(true);
   });
 
   it("shows a validation alarm and sends no request for an invalid range", async () => {
@@ -522,6 +587,9 @@ describe("Reports figures (issue #630)", () => {
     expect(document.body.textContent).toContain("No purchase orders");
     expect(document.body.textContent).toContain(reportRangeLabel(calls()[0]));
     expect(document.querySelector('[aria-label="Report KPIs"]')).toBeNull();
+    expect(
+      document.querySelectorAll("[data-report-period-toggle]")
+    ).toHaveLength(1);
     // The independent month browser is not hidden by the empty overview.
     expect(
       document.querySelector("[data-month-browser]")
@@ -536,6 +604,9 @@ describe("Reports figures (issue #630)", () => {
     expect(document.body.textContent).toContain("The API is unreachable.");
     expect(document.body.textContent).not.toContain("PO amount");
     expect(document.body.textContent).not.toContain("Rp0");
+    expect(
+      document.querySelectorAll("[data-report-period-toggle]")
+    ).toHaveLength(1);
 
     await act(async () => {
       button("Retry report").click();
@@ -544,6 +615,9 @@ describe("Reports figures (issue #630)", () => {
 
     expect(reportMock).toHaveBeenCalledTimes(2);
     expect(document.body.textContent).toContain("PO amount");
+    expect(
+      document.querySelectorAll("[data-report-period-toggle]")
+    ).toHaveLength(1);
   });
 
   it("shows a skeleton for the first load", async () => {
@@ -561,6 +635,9 @@ describe("Reports figures (issue #630)", () => {
     await flush();
 
     expect(document.querySelector('[aria-label="Loading report"]')).not.toBeNull();
+    expect(
+      document.querySelectorAll("[data-report-period-toggle]")
+    ).toHaveLength(1);
   });
 
   it("renders - rather than a fake IDR figure when the currency is unknown", async () => {
@@ -617,6 +694,9 @@ describe("Reports performance chart placement (issue #631)", () => {
 
     expect(document.body.textContent).toContain("No purchase orders");
     expect(document.querySelector("[data-report-chart]")).toBeNull();
+    expect(
+      document.querySelectorAll("[data-report-period-toggle]")
+    ).toHaveLength(1);
   });
 
   it("keeps the previous chart on the previous snapshot while a refresh fails", async () => {
@@ -1563,6 +1643,122 @@ describe("independent month browser (issue #641)", () => {
     expect(monthBrowser().textContent).toContain("beyond the current year");
   });
 
+  it("resolves the exact-value anchor to the ready selected-month table", async () => {
+    await renderPage();
+
+    expect(monthBrowser().textContent).toContain("November 2026");
+    expect(monthBrowser().textContent).toContain("Actual to date");
+    const target = assertExactValuesTarget("ready", monthBrowser());
+    expect(target.tagName).toBe("TABLE");
+    expect(target.getAttribute("aria-label")).toBe("Period totals");
+  });
+
+  it("keeps the exact-value anchor target present while the selected month loads", async () => {
+    const pending = deferred<PurchaseOrderReportData>();
+    reportMock.mockImplementation(async (query: Query) => respond(query));
+    await renderPage();
+
+    // December 2026 is already in the cached annual source; January 2027 is a
+    // new year whose annual read stays in flight.
+    await act(async () => {
+      button("Next month").click();
+    });
+    await flush();
+    reportMock.mockImplementationOnce(() => pending.promise);
+    await act(async () => {
+      button("Next month").click();
+    });
+    await flush();
+
+    expect(monthBrowser().textContent).toContain("Loading January 2027");
+    expect(monthBrowser().textContent).toContain("January 2027");
+    assertExactValuesTarget("loading", monthBrowser());
+    // The description no longer promises a ready table while the section is
+    // still fetching.
+    expect(exactValuesDescription()).toContain(
+      "the selected month section after this chart lists every exact value once it loads"
+    );
+    expect(exactValuesDescription()).not.toContain("selected month table");
+  });
+
+  it("keeps the exact-value anchor target present when the selected month fails", async () => {
+    reportMock.mockImplementation(async (query: Query) => respond(query));
+    await renderPage();
+
+    await act(async () => {
+      button("Next month").click();
+    });
+    await flush();
+    reportMock.mockRejectedValueOnce(
+      new Error("The monthly API is unreachable.")
+    );
+    await act(async () => {
+      button("Next month").click();
+    });
+    await flush();
+
+    expect(monthBrowser().textContent).toContain(
+      "The monthly API is unreachable."
+    );
+    expect(monthBrowser().textContent).toContain("Retry");
+    assertExactValuesTarget("error", monthBrowser());
+    expect(exactValuesDescription()).toContain(
+      "the selected month section after this chart lists every exact value once it loads"
+    );
+    expect(exactValuesDescription()).not.toContain("selected month table");
+  });
+
+  it("points a direct view caller's anchor at a table that exists without a month readout", async () => {
+    const filters = initialReportFilters(PINNED_TODAY, "IDR");
+    const report = purchaseOrderReportFixture();
+    report.filter = toReportQuery(filters);
+    const noop = () => undefined;
+    const view = (monthReadout: undefined | null) => (
+      <PurchaseOrderReportsView
+        filters={filters}
+        report={report}
+        loading={false}
+        stale={false}
+        error=""
+        validation=""
+        catalogue={CATALOGUE}
+        exporting={false}
+        canExport={false}
+        onPresetChange={noop}
+        onPeriodChange={noop}
+        onFromChange={noop}
+        onToChange={noop}
+        onBucketChange={noop}
+        onCategoryChange={noop}
+        onCurrencyChange={noop}
+        onRetry={noop}
+        onExport={noop}
+        monthReadout={monthReadout}
+      />
+    );
+
+    await act(async () => {
+      root.render(view(undefined));
+    });
+    await flush();
+
+    // No independent month browser in this legacy shape: the embedded anchor
+    // falls back to the legacy period table rather than dangling.
+    expect(document.querySelector("[data-month-browser]")).toBeNull();
+    const target = assertExactValuesTarget("no month readout", null);
+    expect(target.tagName).toBe("TABLE");
+    expect(target.getAttribute("aria-label")).toBe("Period totals");
+
+    // An explicit null readout takes the same legacy path instead of dropping
+    // the table and leaving the anchor with nothing to name.
+    await act(async () => {
+      root.render(view(null));
+    });
+    await flush();
+    expect(document.querySelector("[data-month-browser]")).toBeNull();
+    expect(assertExactValuesTarget("null month readout", null)).toBe(target);
+  });
+
   it("keeps the zero month browser visible under an empty overview", async () => {
     reportMock.mockImplementation(async (query: Query) => {
       const report = zeroYearReport();
@@ -1574,6 +1770,9 @@ describe("independent month browser (issue #641)", () => {
     expect(document.body.textContent).toContain("No purchase orders");
     expect(document.querySelector('[aria-label="Report KPIs"]')).toBeNull();
     expect(document.querySelector("[data-chart-marks]")).toBeNull();
+    expect(
+      document.querySelectorAll("[data-report-period-toggle]")
+    ).toHaveLength(1);
     expect(monthBrowser().textContent).toContain("November 2026");
     expect(monthBrowser().textContent).toContain("Actual to date");
     expect(
@@ -2747,5 +2946,160 @@ describe("month comparison (issue #642)", () => {
     expect(individualView.periods.months).toHaveLength(12);
     expect(individualView.periods.sources).toEqual([0]);
     expect(reportMock).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("Performance overview integration (issue #644)", () => {
+  it("renders one Overview, one period toggle and one chart, with root actions and tables outside", async () => {
+    await renderPage({ onExport: async () => "/tmp/opencode/overview.pdf" });
+    const overview = document.querySelector<HTMLElement>(
+      "[data-report-overview]"
+    );
+    expect(overview).not.toBeNull();
+    expect(document.querySelectorAll("[data-report-overview]")).toHaveLength(1);
+    expect(
+      document.querySelectorAll("[data-report-period-toggle]")
+    ).toHaveLength(1);
+    expect(document.querySelectorAll("[data-report-chart]")).toHaveLength(1);
+    expect(document.querySelector("[data-report-chart-embedded]")).not.toBeNull();
+    expect(document.querySelectorAll('[aria-label="Report KPIs"]')).toHaveLength(
+      1
+    );
+    expect(
+      document.querySelectorAll('[aria-label="Chart legend"]')
+    ).toHaveLength(1);
+    expect(
+      document.querySelectorAll("[data-report-forecast-status]")
+    ).toHaveLength(1);
+    expect(
+      document.querySelector("[data-report-forecast-status]")?.closest("details")
+    ).toBeNull();
+    expect(
+      document
+        .querySelector("[data-report-projection-summary]")
+        ?.closest("details")
+    ).not.toBeNull();
+
+    const details = document.querySelector<HTMLDetailsElement>("details");
+    expect(details).not.toBeNull();
+    expect(details?.open).toBe(false);
+    expect(details?.querySelector("summary")?.textContent).toContain(
+      "Method and chart details"
+    );
+    expect(
+      document.querySelector("[data-report-coverage]")?.closest("details")
+    ).toBeNull();
+    const bodyText = document.body.textContent ?? "";
+    // The default fixture is a historical range, so the current-period
+    // basis/method prose does not exist at all — certainly not duplicated in
+    // the visible page.
+    expect(bodyText.match(/Basis:/g) ?? []).toHaveLength(0);
+    expect(bodyText.match(/Method:/g) ?? []).toHaveLength(0);
+
+    const heading = document.getElementById("reports-heading");
+    const notes = Array.from(document.querySelectorAll("h2")).find(
+      (node) => node.textContent === "Notes"
+    );
+    const category = document.querySelector(
+      'table[aria-label="Category totals"]'
+    );
+    const month = document.querySelector("[data-month-browser]");
+    const periodTable = document.querySelector(
+      'table[aria-label="Period totals"]'
+    );
+    expect(heading).not.toBeNull();
+    expect(notes).not.toBeNull();
+    expect(category).not.toBeNull();
+    expect(month).not.toBeNull();
+    expect(periodTable).not.toBeNull();
+    for (const outside of [
+      heading!,
+      notes!,
+      category!,
+      month!,
+      periodTable!,
+      button("Export PDF"),
+    ] as Element[]) {
+      expect(overview?.contains(outside)).toBe(false);
+    }
+  });
+
+  it("keeps current-year basis and method once, inside the closed Details region", async () => {
+    reportMock.mockImplementation(async (query: Query) => {
+      const report = purchaseOrderReportYearFixture();
+      report.filter = { ...query };
+      return report;
+    });
+    await renderPage();
+
+    const details = document.querySelector<HTMLDetailsElement>("details");
+    expect(details).not.toBeNull();
+    expect(details?.open).toBe(false);
+    expect(details?.textContent).toContain("Basis:");
+    expect(details?.textContent).toContain("Method:");
+    expect(details?.textContent).toContain("Updates as data arrives");
+
+    const bodyText = document.body.textContent ?? "";
+    expect(bodyText.match(/Basis:/g) ?? []).toHaveLength(1);
+    expect(bodyText.match(/Method:/g) ?? []).toHaveLength(1);
+    expect(bodyText.match(/Updates as data arrives/g) ?? []).toHaveLength(1);
+    expect(
+      document.querySelector("[data-report-forecast-status]")?.closest("details")
+    ).toBeNull();
+  });
+
+  it("keeps the chart marks through month browsing, Details and an unrelated parent re-render", async () => {
+    await renderPage();
+    const chart = document.querySelector("[data-report-chart]");
+    const marks = document.querySelector("[data-chart-marks]");
+    expect(chart).not.toBeNull();
+    expect(marks).not.toBeNull();
+
+    await act(async () => {
+      button("Previous month").click();
+    });
+    await flush();
+    expect(document.querySelector("[data-report-chart]")).toBe(chart);
+    expect(document.querySelector("[data-chart-marks]")).toBe(marks);
+
+    const details = document.querySelector<HTMLDetailsElement>("details");
+    await act(async () => {
+      details?.querySelector("summary")?.click();
+    });
+    await flush();
+    expect(details?.open).toBe(true);
+    expect(document.querySelector("[data-report-chart]")).toBe(chart);
+    expect(document.querySelector("[data-chart-marks]")).toBe(marks);
+
+    const callsBefore = reportMock.mock.calls.length;
+    await act(async () => {
+      root.render(
+        <ToastProvider>
+          <PurchaseOrderReportsPage
+            defaultCurrency="IDR"
+            currencyCatalogue={[...CATALOGUE]}
+          />
+        </ToastProvider>
+      );
+    });
+    await flush();
+    expect(reportMock.mock.calls.length).toBe(callsBefore);
+    expect(document.querySelector("[data-report-chart]")).toBe(chart);
+    expect(document.querySelector("[data-chart-marks]")).toBe(marks);
+  });
+
+  it("points the chart's exact-value anchor at the selected month table", async () => {
+    await renderPage();
+    const link = document.querySelector<HTMLAnchorElement>(
+      '[data-report-overview] a[href="#report-period-table"]'
+    );
+    expect(link).not.toBeNull();
+    expect(link?.textContent).toContain("Selected month");
+    const table = assertExactValuesTarget(
+      "overview ready",
+      document.querySelector("[data-month-browser]")
+    );
+    expect(table.closest("[data-month-browser]")).not.toBeNull();
+    expect(table.getAttribute("aria-label")).toBe("Period totals");
   });
 });
