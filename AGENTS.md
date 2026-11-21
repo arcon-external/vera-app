@@ -613,9 +613,16 @@ Section 10, and its scope must match the issue. Unsupported claims go back to th
 Planner with the evidence named; they are not quietly fixed in the relay.
 
 The orchestrator then explains the technical plan to the user in **simpler terms**.
-That relay is a translation, not a summary: every requirement, file, risk, test and
-decision appears, in language the user can judge. **The user is the final validator
-of every plan**; implementation waits for explicit approval.
+Write for an intelligent manager who does not write code: lead with what changes
+for the people using the app, then what the system will do, what can go wrong and
+what will be tested. Replace internal names with a plain description the first
+time (“the shared report cache”, “the Reports screen”); keep a file, type or
+model name only where the decision genuinely depends on it. Expand acronyms on
+first use and avoid chains of internal jargon. Do not talk down or use childish
+analogies — the reader is smart, just not close to the code. The relay is still a
+translation, not a summary: every requirement, file group, risk, test and
+decision appears. **The user is the final validator of every plan**;
+implementation waits for explicit approval.
 
 #### 12.1.5 Judge verdicts
 
