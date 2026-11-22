@@ -116,6 +116,18 @@ _Avoid_: Quotation year
 The most recent issued revision of a quotation; its verification code is valid.
 _Avoid_: Current version
 
+**Open quotation**:
+An issued quotation with no explicit close, so its unbought quantity still reports as Unsold and stays orderable.
+_Avoid_: Active quotation, live quotation
+
+**Closed quotation**:
+A quotation an admin explicitly closed with a reason; its unbought quantity moves from Unsold to **Closed loss** until an admin reopens it.
+_Avoid_: Cancelled quotation, expired quotation
+
+**Expired (unclosed)**:
+A quotation past its validity that no one closed; it still carries Unsold with a report badge and is not an automatic loss.
+_Avoid_: Lapsed, written off
+
 **Prepare**:
 The validation and pricing of a quotation before export; it produces the review figures but issues no revision.
 _Avoid_: Validate, calculate
@@ -172,9 +184,13 @@ _Avoid_: Row, product
 An optional child line that breaks down a line item's price.
 _Avoid_: Child item, detail
 
+**Quotation depth**:
+A quotation's presentation level (item, sub-item or sub-sub-item), preserved by an aggregate PO line for its quotation-backed children.
+_Avoid_: Level, indent
+
 **Unit**:
-The unit of measure for a line item, such as a lot or a piece; a new line defaults to the company's canonical unit.
-_Avoid_: UoM, measure
+The unit of measure for a line item, such as a lot or a piece; a new line defaults to the company's canonical unit. The workspace labels the field UoM; in prose, use unit.
+_Avoid_: Measure, unit type
 
 **Quantity**:
 The number of units on a line, possibly fractional.
@@ -202,12 +218,24 @@ _Avoid_: Marginalized price, marked-up price
 A percentage off a line's list price; it never changes the line's cost.
 _Avoid_: Row discount, markdown
 
+**Quotation price baseline**:
+The row-discounted quotation unit price frozen on an allocation when its PO line is allocated, stored as `quoted_unit_price_minor`. It is the basis for price variance and for valuing extra and unbought quantity; it is neither the list price before the line discount nor the supplier cost.
+_Avoid_: Quoted price, list price, unit cost
+
 **Quotation discount**:
-A percentage off the subtotal, applied after all line discounts; it never changes cost.
+The retired whole-order percentage off the subtotal, applied after all line discounts; it never changes cost. New quotations use row-only discounts. A **Legacy header discount** is a stored instance on an older revision, and that stored form still blocks a new PO.
 _Avoid_: Whole discount, global discount
 
+**Row-only discount**:
+The pricing model for new quotations: only line discounts exist. The quotation total and margin are the exact sums of the line totals and line margins; there is no whole-order discount input.
+_Avoid_: Whole discount, header discount
+
+**Legacy header discount**:
+The stored whole-order quotation discount on an older issued revision. Its presence blocks a new allocation-backed PO until the quotation is revised to row-only pricing.
+_Avoid_: Quotation discount (for new data), global discount
+
 **Discount**:
-A price reduction, either per line or on the quotation; it never changes cost.
+A price reduction on a line; it never changes cost. A new row-only quotation has no whole-order discount; the whole-order form is legacy only.
 _Avoid_: Markdown, rebate
 
 **Sell price**:
@@ -218,12 +246,16 @@ _Avoid_: Net price
 The sell price of a line multiplied by its quantity.
 _Avoid_: Net line
 
+**Quotation total**:
+The quotation's sell total before PPN. On a new row-only quotation it is the exact sum of the line totals; a legacy revision subtracts its stored whole-order discount below that sum.
+_Avoid_: Grand total (that includes PPN), whole total
+
 **Subtotal**:
-The sum of line totals before the quotation discount.
+The sum of line totals before any whole-order quotation discount; on a new row-only quotation it equals the quotation total and the sell total. Only a legacy revision's stored discount sits between its subtotal and its sell total.
 _Avoid_: Sell subtotal
 
 **Sell total**:
-The subtotal after the quotation discount, before PPN.
+The quotation's amount before PPN, after any whole-order discount. A new row-only quotation has no such discount, so it equals the quotation total; a legacy revision subtracts its stored discount here.
 _Avoid_: Net total
 
 **Customer total**:
@@ -281,7 +313,7 @@ _Avoid_: Dollar, USD
 ### Purchase orders
 
 **Purchase order (PO)**:
-Vera's record of a customer's order; it may be entered before a source exists, shows Source missing until one is linked, and is finalized only after review with a live source.
+Vera's record of a customer's order. A new PO is a set of allocations against an issued quotation revision plus any explicit extra expense lines; a legacy PO may still be source-missing and keep its own entered values.
 _Avoid_: Order, customer order
 
 **Customer PO**:
@@ -369,15 +401,63 @@ The Archive tab of the Purchase Order workspace; the list of finalized purchase 
 _Avoid_: History, records
 
 **PO line**:
-One line of the customer's order, matched to a quotation line or added, with an ordered quantity and price.
+One priced leaf of the customer's order: either quotation-backed (one allocation to a quotation item or sub-item) or an explicit extra expense line. It has a customer-facing description, ordered quantity, unit label and negotiated price. An **Aggregate PO line** is a presentation group of leaves, not a third priced kind.
 _Avoid_: Item, row
+
+**Quotation-backed PO line**:
+A PO line that fulfils one quotation item or sub-item. It owns exactly one allocation and drives bought state, Unsold and quotation variance.
+_Avoid_: Matched line, linked line
+
+**Extra expense line**:
+A PO line that was never on the quotation. It has no allocation, is a pass-through (customer charge equals expense), and has zero margin. It never affects ghosts, bought state, Unsold, Pipeline or quotation variance.
+_Avoid_: Free line, manual line, extra item
+
+**Allocation**:
+The canonical link between one quotation-backed PO line and one quotation revision item or sub-item. It records the source quantity, the **Source unit** and **Ordered unit**, the **Quotation price baseline**, the actual PO revenue and the frozen supplier cost.
+_Avoid_: Match, reference, link (alone)
+
+**Bought state**:
+The derived state of a quotation item after saved PO allocations are counted. It is not a manual flag and not affected by drafts.
+_Avoid_: Ordered flag, purchased flag
+
+**Remaining quantity**:
+The latest issued revision's quotation quantity minus the saved PO allocation quantity for an item or sub-item, matched across revisions. It never goes below zero: an item removed from the latest revision is absent rather than negative, and when the latest revision's quantity is below the bought quantity the difference clamps to zero and reports as **Over-bought**. It is the quantity a ghost may offer for a later PO.
+_Avoid_: Leftover, balance, unsold quantity
+
+**Aggregate PO line**:
+A customer-facing PO line that groups one or more quotation-backed lines of any quotation depth and optionally extra lines. It is a presentation group, not itself a priced leaf. The group has its own title and derived total; its children remain the priced truth. There is one aggregate level only.
+_Avoid_: Aggregate display (the report layout), package, bundle
+
+**Aggregate child**:
+One priced leaf inside an aggregate PO line. A quotation-backed child keeps its own description, quantity, unit, price, **Quotation depth** and allocation; an extra child has no allocation and no quotation depth.
+_Avoid_: Sub-item (a quotation depth), child line
+
+**Source unit**:
+The unit the quotation states for the source item or sub-item, stored on the allocation as the quotation-side label. Like the ordered unit it is a display label; quantity is the numeric truth and there is no conversion.
+_Avoid_: Quotation UoM, original unit
+
+**Ordered unit**:
+The unit label on a PO line as the customer's order states it. Quantity is the numeric truth and the ordered unit is a display label only; there is no conversion between source and ordered units.
+_Avoid_: Converted unit, PO UoM
 
 **Ordered quantity**:
 The quantity the customer ordered on a PO line; it may differ from the quotation.
 _Avoid_: Order quantity, qty
 
+**Ghost**:
+A quotation item or sub-item offered in the PO workspace while it has remaining quantity; choosing it creates a pre-filled quotation-backed line. A draft does not remove one.
+_Avoid_: Remaining item, shortcut
+
+**All bought**:
+The derived state of a quotation whose latest issued revision has no remaining quantity on any leaf; Create PO is disabled until the quotation is revised.
+_Avoid_: Fully ordered, exhausted
+
+**Over-bought**:
+The state of an item or sub-item whose saved allocations exceed the latest revision's quantity; the excess is quantity extra income and a further PO may not buy it without a quotation revision.
+_Avoid_: Over-order (alone), excess stock
+
 **Source**:
-The issued quotation revision a purchase order is linked to. A purchase order may be entered before a source exists; the customer PO document is attached evidence, not the source.
+The issued quotation revision a purchase order is linked to. A new allocation-backed PO cannot be created without one; entering a purchase order before a source exists is a legacy path. The customer PO document is attached evidence, not the source.
 _Avoid_: Origin, reference, parent, customer PO document
 
 **Source revision**:
@@ -389,11 +469,11 @@ The page where staff choose the quotation revision for a purchase order, a sourc
 _Avoid_: Picker, dropdown
 
 **Used revision**:
-A quotation revision already linked to a purchase order; the source selector shows it disabled.
+A quotation revision that already carries saved PO allocations. It stays selectable while any leaf has remaining quantity; it is not disabled merely because a PO points at it.
 _Avoid_: Taken quotation
 
 **Manual entry**:
-Typing purchase-order values, with or without a linked source; it is the only way to enter a purchase order.
+Typing purchase-order values without a quotation source. It is a legacy path for historical POs and older desktop versions; a new PO is created from remaining quotation items, with an explicit extra expense line for anything not quoted.
 _Avoid_: Manual PO, standalone PO
 
 **Source missing**:
@@ -459,7 +539,7 @@ The mandatory comparison of the source revision and the customer PO, where every
 _Avoid_: Reconciliation, comparison
 
 **Line match**:
-The link between a quotation line and a customer PO line during the difference review.
+The legacy review-time name for the link between a quotation line and a customer PO line. New records persist that link as an **Allocation**, never as a line match.
 _Avoid_: Mapping, pairing
 
 **Difference**:
@@ -467,15 +547,15 @@ A field or line where the customer PO and the source quotation disagree.
 _Avoid_: Discrepancy, conflict (the version conflict is separate)
 
 **Choice**:
-A staff decision on a difference: keep the quotation value, take the customer PO value, or adjust.
+A staff decision on a difference: keep the quotation value or take the customer PO value. Adjusting is a legacy path; a new allocation-backed PO has no adjustment input.
 _Avoid_: Selection, resolution
 
 **Adjustment**:
-A deliberate signed money correction to a purchase order, with a written reason.
+A deliberate signed money correction on a legacy purchase order, with a written reason. A new allocation-backed PO has no adjustment input.
 _Avoid_: Override, manual price, correction (the PO correction is the saved edit)
 
 **PO totals**:
-The finalized purchase order's own subtotal, discount, PPN, adjustment and grand total; they are not copied from the quotation.
+The finalized purchase order's own totals. For an allocation-backed PO they are derived from the lines (quantity × negotiated price, PPN and grand total) with zero discount or adjustment; legacy POs keep their stored totals. They are not copied from the quotation.
 _Avoid_: Copied totals, quotation totals
 
 **Printed totals**:
@@ -488,6 +568,18 @@ _Avoid_: Skip upload, PDF waiver
 
 ### Purchase order reporting
 
+**Actual**:
+The reporting view of saved purchase orders: the revenue, cost, capital and margin actually recorded. It excludes drafts, Unsold and every estimate.
+_Avoid_: Real revenue, booked revenue
+
+**Pipeline**:
+The reporting view of Unsold quantity on open quotations. It is still orderable and is never added to Actual.
+_Avoid_: Forecast, expected revenue
+
+**Quotation variance**:
+The comparison of saved PO prices and quantities against the **Quotation price baseline**: quantity extra income, price extra income, price loss and closed loss. Open Unsold is excluded from its net total.
+_Avoid_: PO variance, forecast error
+
 **Business category**:
 The reporting line a purchase order belongs to: FM (Facility Management), FAB (Fabrication), SUPPLY_GEN (Goods Supply & General) or OTHERS. It is chosen on the PO and required before final save; it is never inferred from the subject or the customer.
 _Avoid_: Report category, cost category, tax category
@@ -497,15 +589,15 @@ The report bucket for a saved purchase order with no business category: a record
 _Avoid_: Unknown category, empty category
 
 **PO amount**:
-A purchase order's sell total for reporting: subtotal minus discount plus adjustment, excluding PPN. It is not the customer total, which includes PPN.
+A purchase order's sell total for reporting: its subtotal less any legacy discount plus any legacy adjustment, excluding PPN. An allocation-backed PO has neither, so its PO amount is its subtotal. It is not the customer total, which includes PPN.
 _Avoid_: Revenue, grand total, customer total
 
 **Costed amount**:
-The part of the PO amount carried by lines whose exact source cost resolved. An order with a deleted or unresolved source still contributes its sell amount but no costed amount.
+The part of the PO amount carried by lines whose exact source cost resolved. An allocation-backed line keeps its frozen cost snapshot after its quotation is deleted, so its historical cost remains known. A live source that no longer matches the allocation is not trusted; a legacy or unresolved line with no allocation or no readable cost contributes no costed amount.
 _Avoid_: Known revenue, matched amount
 
 **Uncosted amount**:
-The PO amount minus the costed amount. It is disclosed as incomplete evidence and is never counted as margin.
+The PO amount minus the costed amount and the extra expense. It is disclosed as incomplete evidence and is never counted as margin.
 _Avoid_: Pure profit, missing cost, unknown revenue
 
 **Capital**:
@@ -513,7 +605,7 @@ The pinned source revision's cost for the PO's ordered quantity: a line's origin
 _Avoid_: Cost total, quotation cost, supplier value
 
 **PO margin**:
-The costed amount minus Capital; it is signed and can be negative when a discount cuts below cost. PPH23 is not subtracted because this is a purchase-order margin, not the quotation's nett profit.
+The costed amount minus Capital; it is signed and can be negative when the negotiated price falls below the cost. A new allocation-backed PO has no discount or adjustment, so no whole-order step sits between its line margins and the PO margin; PPH23 is not subtracted because this is a purchase-order margin, not the quotation's nett profit.
 _Avoid_: Nett profit, gross profit, quotation margin
 
 **PO margin %**:
@@ -521,8 +613,32 @@ PO margin divided by Capital, weighted across the period and expressed in basis 
 _Avoid_: Markup, profit rate, average of line percentages
 
 **Coverage**:
-The costed amount divided by the PO amount, showing how much of the reported sell value has a known cost; it is null when the PO amount is zero.
+The costed amount divided by the non-extra PO amount: the PO amount minus extra expense, because extra expense is an intentional zero-margin pass-through. It shows how much of that sell value has a known cost, and it is null when the denominator is zero or below.
 _Avoid_: Confidence, completeness score
+
+**Unsold**:
+The value and margin of quoted quantity not yet bought on an **Open quotation**, valued at the **Quotation price baseline** and its frozen cost. It stays orderable in the ghost list, is never added to Actual and is never a loss; a later PO may buy it.
+_Avoid_: Loss, shortfall (while open), unbought profit
+
+**Quantity extra income**:
+The value and margin of quantity bought above the quotation quantity. The excess is valued at the **Quotation price baseline** and its frozen cost; the item becomes **Over-bought** and needs a quotation revision for more.
+_Avoid_: Over-order profit, surplus revenue
+
+**Price extra income**:
+The amount by which the negotiated PO price of sold quantity exceeds the **Quotation price baseline**. It has no cost effect and is pure margin.
+_Avoid_: Markup, discount reversal
+
+**Price loss**:
+The amount by which the negotiated PO price of sold quantity is below the **Quotation price baseline**. It is realized on those sold units and does not disappear if the remaining quantity is bought later.
+_Avoid_: Discount, markdown
+
+**Closed loss**:
+The value and margin of unbought quantity after a quotation is explicitly closed, valued at the **Quotation price baseline** and its frozen cost. Unlike Unsold it is a loss, and it stays final until an admin explicitly reopens the quotation.
+_Avoid_: Unsold, expired loss, automatic write-off
+
+**Extra expense**:
+The customer charge of an extra expense line, which is also its expense; margin is zero. It is reported separately and never enters quotation margin, Unsold, Pipeline or quotation variance.
+_Avoid_: Extra income, free profit, unquoted margin
 
 **Complete month**:
 A calendar month that has ended before both the report end month and the as-of month in WIB. Months between the first observed PO month and the last complete month count even when they contain no orders; earlier months are not invented.
@@ -541,8 +657,8 @@ A saved purchase order dated after the report's as-of day but inside its month. 
 _Avoid_: Future actual, forecast, expected order
 
 **Aggregate display**:
-A reporting layout that shows the selected section's combined rows from the server-supplied snapshot. It is a display selection, not a newly calculated total and not a change to the money definitions.
-_Avoid_: Aggregate total, summed view, combined actual
+A reporting layout that shows the selected section's combined rows from the server-supplied snapshot. It is a display selection, not a newly calculated total and not a change to the money definitions. It is not the **Aggregate PO line**, which is a customer-facing PO grouping.
+_Avoid_: Aggregate total, summed view, combined actual, aggregate PO line
 
 ### Verification and retention
 
