@@ -101,7 +101,7 @@ func TestSampleReportPrintsTheFrozenSnapshot(t *testing.T) {
 		"12.35%",
 		"Costed Rp910.000.000 of Rp1.234.567.890 (73.71%)",
 		"Uncosted Rp324.567.890",
-		"2 purchase order(s) in this range have a deleted source quotation; their amount is uncosted.",
+		"2 purchase order(s) in this range have no live source link; unresolved cost is shown as uncosted.",
 	)
 }
 

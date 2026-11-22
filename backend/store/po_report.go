@@ -839,7 +839,8 @@ func purchaseOrderReportSQL(schema string) string {
 WITH base_population AS (
     SELECT po.id, po.received_date, po.business_category,
            po.subtotal_minor, po.discount_minor, po.adjustment_minor,
-           po.quotation_id, po.source_revision, po.currency,
+           po.quotation_id, po.source_revision,
+           po.former_quotation_id, po.former_source_revision, po.currency,
            (po.received_date >= $3::date AND po.received_date < $4::date) AS is_actual,
            (po.received_date < $6::date) AS is_history
     FROM %[1]s.purchase_orders po
@@ -853,22 +854,66 @@ WITH base_population AS (
           OR po.business_category = $5
       )
 ),
-po_metrics AS (
-    SELECT po.id,
-           po.received_date,
-           po.business_category,
-           po.subtotal_minor::numeric - po.discount_minor + po.adjustment_minor AS amount,
-           COALESCE(SUM(poi.net_minor::numeric)
-                    FILTER (WHERE resolved.cost_unit IS NOT NULL), 0) AS costed,
-           ROUND(COALESCE(SUM(poi.quantity_scaled::numeric * resolved.cost_unit), 0) / 10000) AS capital,
-           (po.discount_minor <> 0 OR po.adjustment_minor <> 0) AS legacy_adjustment,
-           (po.quotation_id IS NULL) AS source_missing,
-           po.is_actual,
-           po.is_history
+item_alloc_agg AS (
+    -- Allocation-backed lines resolve cost from the stored snapshot. The
+    -- allocation's revenue is the actual PO line net, not a re-priced quotation
+    -- amount; a missing cost snapshot leaves the line uncosted.
+    --
+    -- The snapshot is trusted while the allocation still names the PO's current
+    -- or former source leaf. A permanently deleted quotation clears the revision
+    -- pointer (the column-list SET NULL) but keeps the frozen cost, and that
+    -- snapshot is already in the PO's currency, so the line stays costed on its
+    -- historical basis. A live source must still resolve in this partition and
+    -- agree with the allocation: a detached or foreign link is not trusted and
+    -- falls back to the legacy join below instead of inventing profit from an
+    -- unreadable basis.
+    SELECT a.purchase_order_item_id,
+           COUNT(*) AS alloc_count,
+           COALESCE(SUM(a.revenue_minor::numeric)
+                    FILTER (WHERE a.cost_unit_minor IS NOT NULL), 0) AS alloc_costed,
+           COALESCE(SUM(a.quantity_scaled::numeric * a.cost_unit_minor), 0) AS alloc_capital_scaled
+    FROM %[1]s.purchase_order_allocations a
+    JOIN base_population bp ON bp.id = a.purchase_order_id
+    LEFT JOIN %[1]s.quotation_revisions source
+      ON source.id = a.source_revision_id
+    WHERE a.quotation_id = COALESCE(bp.quotation_id, bp.former_quotation_id)
+      AND a.source_revision = COALESCE(bp.source_revision, bp.former_source_revision)
+      AND (
+          -- A deleted quotation clears only source_revision_id. The cost
+          -- snapshot is already in the PO's currency and remains the historical
+          -- basis, so a source-missing allocation stays costed.
+          a.source_revision_id IS NULL
+          -- A live source must still agree with the allocation and the PO's
+          -- currency partition; a detached or foreign link is not trusted.
+          OR (
+              source.id IS NOT NULL
+              AND source.currency = bp.currency
+              AND source.quotation_id = a.quotation_id
+              AND source.revision_number = a.source_revision
+          )
+      )
+    GROUP BY a.purchase_order_item_id
+),
+item_metrics AS (
+    -- Resolve each item independently so a mixed historical PO keeps the cost
+    -- of allocated lines, matched legacy lines, and uncosted null-ref lines.
+    SELECT po.id AS po_id,
+           CASE
+               WHEN ia.alloc_count > 0 THEN ia.alloc_costed
+               WHEN resolved.cost_unit IS NOT NULL THEN poi.net_minor::numeric
+               ELSE 0::numeric
+           END AS item_costed,
+           CASE
+               WHEN ia.alloc_count > 0 THEN ia.alloc_capital_scaled
+               WHEN resolved.cost_unit IS NOT NULL THEN poi.quantity_scaled::numeric * resolved.cost_unit
+               ELSE 0::numeric
+           END AS item_capital_scaled
     FROM base_population po
-    LEFT JOIN %[1]s.purchase_order_items poi ON poi.purchase_order_id = po.id
+    JOIN %[1]s.purchase_order_items poi ON poi.purchase_order_id = po.id
+    LEFT JOIN item_alloc_agg ia ON ia.purchase_order_item_id = poi.id
     LEFT JOIN %[1]s.quotation_revisions revision
-           ON revision.quotation_id = po.quotation_id
+           ON ia.alloc_count IS NULL
+          AND revision.quotation_id = po.quotation_id
           AND revision.revision_number = po.source_revision
           AND revision.currency = po.currency
     LEFT JOIN %[1]s.quotation_revision_items item
@@ -884,6 +929,20 @@ po_metrics AS (
             ELSE sub.unit_cost
         END AS cost_unit
     ) resolved
+),
+po_metrics AS (
+    SELECT po.id,
+           po.received_date,
+           po.business_category,
+           po.subtotal_minor::numeric - po.discount_minor + po.adjustment_minor AS amount,
+           COALESCE(SUM(im.item_costed), 0) AS costed,
+           ROUND(COALESCE(SUM(im.item_capital_scaled), 0) / 10000) AS capital,
+           (po.discount_minor <> 0 OR po.adjustment_minor <> 0) AS legacy_adjustment,
+           (po.quotation_id IS NULL) AS source_missing,
+           po.is_actual,
+           po.is_history
+    FROM base_population po
+    LEFT JOIN item_metrics im ON im.po_id = po.id
     GROUP BY po.id, po.received_date, po.business_category,
              po.subtotal_minor, po.discount_minor, po.adjustment_minor,
              po.quotation_id, po.source_revision, po.currency,

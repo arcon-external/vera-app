@@ -27,7 +27,7 @@ Rp120.000.000
 PO MARGIN %
 12.50%
 Costed Rp1.080.000.000 of Rp1.200.000.000 (90.00%) · Uncosted Rp120.000.000
-2 purchase order(s) in this range have a deleted source quotation; their amount is uncosted.
+2 purchase order(s) in this range have no live source link; unresolved cost is shown as uncosted.
 Performance chart
 All amounts in IDR. Columns start at zero; the margin % line uses the right-hand percentage axis. An uncosted part of the amount is hatched, so the
 amount column still foots.

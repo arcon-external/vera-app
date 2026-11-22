@@ -407,11 +407,11 @@ func TestPurchaseOrderReportPinsTheSourceRevisionAndCurrency(t *testing.T) {
 	_ = saved
 }
 
-// TestPurchaseOrderReportKeepsDeletedSourceRevenueButNoProfit proves a
-// surviving PO whose Quotation was permanently deleted still contributes its
-// amount, with zero costed and zero capital: the unknown part is uncosted, never
-// profit.
-func TestPurchaseOrderReportKeepsDeletedSourceRevenueButNoProfit(t *testing.T) {
+// TestPurchaseOrderReportKeepsDeletedSourceCostFromAllocation proves that a
+// surviving allocated PO keeps its frozen cost snapshot after its Quotation is
+// permanently deleted. The old model lost the cost with the source; the
+// allocation is now the historical basis, so revenue, cost and margin survive.
+func TestPurchaseOrderReportKeepsDeletedSourceCostFromAllocation(t *testing.T) {
 	database := openTestSchema(t, "vera_po_report_deleted_source")
 	quotation, saved, _, ctx := savedDeletionPO(t, database, "PT. Survives", "PO-REPORT-DELETED")
 	admin := deletionUser(t, database, "admin")
@@ -434,23 +434,25 @@ func TestPurchaseOrderReportKeepsDeletedSourceRevenueButNoProfit(t *testing.T) {
 		t.Fatalf("deleted-source report = %+v; want one PO worth %d",
 			report.Totals, saved.GrandTotalMinor)
 	}
-	if report.Totals.CostedMinor != 0 || report.Totals.CapitalMinor != 0 {
-		t.Errorf("deleted source invented cost: costed=%d capital=%d",
-			report.Totals.CostedMinor, report.Totals.CapitalMinor)
+	if report.Totals.CostedMinor != saved.GrandTotalMinor || report.Totals.CapitalMinor != saved.GrandTotalMinor {
+		t.Errorf("deleted source lost its allocation snapshot: costed=%d capital=%d; want %d/%d",
+			report.Totals.CostedMinor, report.Totals.CapitalMinor,
+			saved.GrandTotalMinor, saved.GrandTotalMinor)
 	}
 	if report.Totals.MarginMinor != 0 {
-		t.Errorf("deleted source reported margin %d; unknown cost must be zero margin, not revenue",
-			report.Totals.MarginMinor)
+		t.Errorf("deleted source margin = %d; want 0 when cost equals sell", report.Totals.MarginMinor)
 	}
-	if report.Totals.UncostedMinor != saved.GrandTotalMinor {
-		t.Errorf("uncosted = %d; want the full revenue %d",
-			report.Totals.UncostedMinor, saved.GrandTotalMinor)
+	if report.Totals.UncostedMinor != 0 {
+		t.Errorf("uncosted = %d; want 0 with the allocation snapshot", report.Totals.UncostedMinor)
 	}
 	if report.SourceMissingPoCount != 1 {
 		t.Errorf("sourceMissingPoCount = %d; want 1", report.SourceMissingPoCount)
 	}
-	if report.Totals.MarginBps != nil {
-		t.Errorf("margin bps = %v; want null with zero capital", *report.Totals.MarginBps)
+	if report.Totals.MarginBps == nil || *report.Totals.MarginBps != 0 {
+		t.Errorf("margin bps = %v; want 0 with positive capital and zero margin", report.Totals.MarginBps)
+	}
+	if report.Totals.CoverageBps == nil || *report.Totals.CoverageBps != 10000 {
+		t.Errorf("coverage bps = %v; want 10000", report.Totals.CoverageBps)
 	}
 }
 

@@ -892,7 +892,7 @@ func TestRenderViewPrintsAZeroMonthUnderAnEmptyOverview(t *testing.T) {
 	// snapshot.
 	requireNoText(t, "empty month overview", text,
 		"19 purchase orders",
-		"purchase order(s) in this range have a deleted source quotation",
+		"purchase order(s) in this range have no live source link",
 		formatMoney("IDR", 152_000_000),
 	)
 }

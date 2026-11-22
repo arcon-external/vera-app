@@ -191,6 +191,12 @@ type purchaseOrderWriteLock struct {
 	TaxCategory     string
 	Version         int64
 	QuotationID     int64
+	// LiveQuotationID is often the same as QuotationID, but it is zero for a
+	// source-missing record instead of falling back to the former link. The
+	// allocation writers compare it with their unlocked peek to prove the PO
+	// still points at the quotation they locked, rather than at the one it
+	// used to follow.
+	LiveQuotationID int64
 	CustomerID      int64
 	SourceRevision  int16
 	PpnBps          int16
@@ -222,6 +228,7 @@ func lockPurchaseOrderWrite(
 	var sourceRevision pgtype.Int2
 	err := tx.QueryRow(ctx, fmt.Sprintf(`
 		SELECT state, version, COALESCE(quotation_id, former_quotation_id, 0),
+		       COALESCE(quotation_id, 0),
 		       source_revision, customer_id,
 		       customer_name, currency, tax_zone, tax_type, service_category,
 		       tax_category, ppn_bps,
@@ -232,7 +239,8 @@ func lockPurchaseOrderWrite(
 		FROM %s.purchase_orders
 		WHERE id = $1 AND org_id = $2
 		FOR UPDATE`, schema), id, orgID).Scan(
-		&lock.State, &lock.Version, &lock.QuotationID, &sourceRevision,
+		&lock.State, &lock.Version, &lock.QuotationID, &lock.LiveQuotationID,
+		&sourceRevision,
 		&customerID, &lock.CustomerName, &lock.Currency, &lock.TaxZone,
 		&lock.TaxType, &lock.ServiceCategory, &lock.TaxCategory, &lock.PpnBps,
 		&lock.ReceivedDate, &lock.UpdatedBy, &lock.UpdatedAt, &lock.SourceState)
@@ -334,10 +342,21 @@ func (s *Store) CorrectPurchaseOrder(ctx context.Context, input PurchaseOrderCor
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
+	// #650 global lock order: quotation first, then PO.
+	peekedQuotationID, err := peekPurchaseOrderQuotationID(ctx, tx, schema, org.ID, input.ID)
+	if err != nil {
+		return PurchaseOrder{}, err
+	}
+	if err := lockQuotationForAllocation(ctx, tx, schema, peekedQuotationID); err != nil {
+		return PurchaseOrder{}, err
+	}
 	lock, err := lockPurchaseOrderWrite(ctx, tx, schema, org.ID, input.ID,
 		input.ExpectedVersion, PurchaseOrderStateSaved)
 	if err != nil {
 		return PurchaseOrder{}, err
+	}
+	if lock.LiveQuotationID != peekedQuotationID {
+		return PurchaseOrder{}, ErrPurchaseOrderVersionConflict
 	}
 	if err := requirePurchaseOrderSource(lock); err != nil {
 		return PurchaseOrder{}, err
@@ -347,8 +366,17 @@ func (s *Store) CorrectPurchaseOrder(ctx context.Context, input PurchaseOrderCor
 	if err != nil {
 		return PurchaseOrder{}, err
 	}
-	if _, err := insertPurchaseOrderCorrection(ctx, tx, schema, stored, org.ID,
-		PurchaseOrderCorrectionKindCorrection, input.Reason, input.UpdatedBy); err != nil {
+	source, err := loadPurchaseOrderSourceDetail(ctx, tx, schema, lock.QuotationID, lock.SourceRevision)
+	if err != nil {
+		return PurchaseOrder{}, err
+	}
+	correctionID, err := insertPurchaseOrderCorrection(ctx, tx, schema, stored, org.ID,
+		PurchaseOrderCorrectionKindCorrection, input.Reason, input.UpdatedBy)
+	if err != nil {
+		return PurchaseOrder{}, err
+	}
+	if err := snapshotPurchaseOrderCorrectionAllocations(
+		ctx, tx, schema, correctionID, input.ID); err != nil {
 		return PurchaseOrder{}, err
 	}
 	if err := validatePurchaseOrderReferences(ctx, tx, schema,
@@ -366,7 +394,11 @@ func (s *Store) CorrectPurchaseOrder(ctx context.Context, input PurchaseOrderCor
 		input.PurchaseOrderUpdate, calculation, basisFromLock(lock), nil, numberKey); err != nil {
 		return PurchaseOrder{}, err
 	}
-	if _, _, err := replacePurchaseOrderItems(ctx, tx, schema, org.ID, input.ID, lines); err != nil {
+	kept, _, err := replacePurchaseOrderItems(ctx, tx, schema, org.ID, input.ID, lines)
+	if err != nil {
+		return PurchaseOrder{}, err
+	}
+	if err := replacePurchaseOrderAllocations(ctx, tx, schema, org.ID, input.ID, source, kept); err != nil {
 		return PurchaseOrder{}, err
 	}
 
