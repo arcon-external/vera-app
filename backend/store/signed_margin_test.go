@@ -21,7 +21,8 @@ import (
 func TestMarginAmountAcceptsALoss(t *testing.T) {
 	database := openTestSchema(t, "vera_test_signed_margin")
 	ctx := context.Background()
-	schema := "vera_test_signed_margin"
+	// The store's own schema: a clone carries the migrated tables in "public".
+	schema := database.configSchema()
 
 	// Seed the parent rows a revision needs: a customer, a quotation, and one
 	// revision. Direct SQL because the constraint is what is under test, not
