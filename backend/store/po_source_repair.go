@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -50,11 +51,6 @@ var (
 	// the record already follows. It changes nothing, so recording a repair
 	// would only claim work that did not happen.
 	ErrPurchaseOrderSourceUnchanged = errors.New("the purchase order already follows that quotation revision")
-	// ErrPurchaseOrderTargetOccupied refuses a target Quotation that another
-	// active Purchase Order already occupies. The pre-check inside the
-	// transaction answers it normally; the unique quotation index is the
-	// concurrency backstop and maps here too.
-	ErrPurchaseOrderTargetOccupied = errors.New("that quotation already has an active purchase order")
 	// ErrPurchaseOrderConfirmationCustomerLocked refuses a cross-customer
 	// repair once a confirmation number is assigned: the number carries the
 	// original customer's code, so moving the record would make the identifier
@@ -159,9 +155,33 @@ func (s *Store) RepairPurchaseOrderSource(ctx context.Context, input PurchaseOrd
 	if err := requirePurchaseOrderRepairAdmin(ctx, tx, schema, input.UpdatedBy); err != nil {
 		return PurchaseOrder{}, err
 	}
-	if _, err := lockPurchaseOrderWrite(ctx, tx, schema, org.ID, input.ID,
-		input.ExpectedVersion, PurchaseOrderStateSaved); err != nil {
+	// #650/#651 global lock order: the current live quotation (when there is
+	// one) and the target quotation, both in ascending id order, then the PO.
+	// A repair must never hold the PO while waiting for a quotation.
+	peekedQuotationID, err := peekPurchaseOrderQuotationID(ctx, tx, schema, org.ID, input.ID)
+	if err != nil {
 		return PurchaseOrder{}, err
+	}
+	quotationIDs := make([]int64, 0, 2)
+	if peekedQuotationID > 0 {
+		quotationIDs = append(quotationIDs, peekedQuotationID)
+	}
+	if input.QuotationID > 0 && input.QuotationID != peekedQuotationID {
+		quotationIDs = append(quotationIDs, input.QuotationID)
+	}
+	sort.Slice(quotationIDs, func(i, j int) bool { return quotationIDs[i] < quotationIDs[j] })
+	for _, quotationID := range quotationIDs {
+		if err := lockQuotationForAllocation(ctx, tx, schema, quotationID); err != nil {
+			return PurchaseOrder{}, err
+		}
+	}
+	lock, err := lockPurchaseOrderWrite(ctx, tx, schema, org.ID, input.ID,
+		input.ExpectedVersion, PurchaseOrderStateSaved)
+	if err != nil {
+		return PurchaseOrder{}, err
+	}
+	if lock.LiveQuotationID != peekedQuotationID {
+		return PurchaseOrder{}, ErrPurchaseOrderVersionConflict
 	}
 	stored, err := getPurchaseOrder(ctx, tx, schema, org.ID, input.ID)
 	if err != nil {
@@ -314,6 +334,13 @@ func (s *Store) RepairPurchaseOrderSource(ctx context.Context, input PurchaseOrd
 	if err != nil {
 		return PurchaseOrder{}, err
 	}
+	// #651: the moved source owns the allocation picture now. The old
+	// allocations are replaced atomically with the lines, so a repaired record
+	// reports against the revision it actually follows.
+	if err := replacePurchaseOrderAllocations(
+		ctx, tx, schema, org.ID, input.ID, source, kept, false); err != nil {
+		return PurchaseOrder{}, err
+	}
 
 	// Seed the terminal reconciliation generation this repair installs. The
 	// comparison, the identity map and the item set are all built in memory
@@ -399,17 +426,6 @@ func checkPurchaseOrderRepairTarget(
 		order.SourceRevision == source.RevisionNumber {
 		return ErrPurchaseOrderSourceUnchanged
 	}
-	var occupied bool
-	if err := q.QueryRow(ctx, fmt.Sprintf(`
-		SELECT EXISTS (
-			SELECT 1 FROM %s.purchase_orders
-			WHERE org_id = $1 AND quotation_id = $2 AND id <> $3
-		)`, schema), orgID, source.QuotationID, order.ID).Scan(&occupied); err != nil {
-		return fmt.Errorf("check the target quotation %d occupancy: %w", source.QuotationID, err)
-	}
-	if occupied {
-		return ErrPurchaseOrderTargetOccupied
-	}
 	if order.Currency != source.Currency {
 		return fmt.Errorf("%w: record is %q, revision is %q",
 			ErrPurchaseOrderSourceCurrencyMismatch, order.Currency, source.Currency)
@@ -474,8 +490,6 @@ func purchaseOrderRepairConflict(err error) error {
 		return nil
 	}
 	switch pgErr.ConstraintName {
-	case "purchase_orders_active_quotation_idx":
-		return ErrPurchaseOrderTargetOccupied
 	case "purchase_orders_saved_number_idx":
 		return ErrPurchaseOrderNumberTaken
 	}

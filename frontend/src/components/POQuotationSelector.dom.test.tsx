@@ -3,11 +3,13 @@ import { act, useState } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type {
+  POSourceAvailability,
   POSourcePage,
   POSourceQuotation,
   POSourceQuery,
   POSourceRevision,
   POSourceSelection,
+  POSourceSelectionItem,
   POSourceValidation,
 } from "../poSelector";
 import { POQuotationSelector } from "./POQuotationSelector";
@@ -32,6 +34,12 @@ const QUOTATION = {
   latestRevision: 1,
   issuedRevisionCount: 2,
   activePO: null,
+  allBought: false,
+  leafCount: 2,
+  remainingLeafCount: 2,
+  savedPoCount: 0,
+  draftPoCount: 0,
+  legacyHeaderDiscount: false,
 };
 
 const OTHER = {
@@ -42,6 +50,12 @@ const OTHER = {
   latestRevision: 0,
   issuedRevisionCount: 1,
   activePO: null,
+  allBought: false,
+  leafCount: 2,
+  remainingLeafCount: 2,
+  savedPoCount: 0,
+  draftPoCount: 0,
+  legacyHeaderDiscount: false,
 };
 
 const DRAFT_ROW = {
@@ -49,12 +63,64 @@ const DRAFT_ROW = {
   id: 14,
   quoteNumber: "1502260003",
   activePO: { id: 20, state: "draft" as const },
+  leafCount: 1,
+  remainingLeafCount: 1,
+  draftPoCount: 1,
+};
+
+const ALL_BOUGHT_ROW = {
+  ...OTHER,
+  id: 15,
+  quoteNumber: "1502260004",
+  activePO: { id: 22, state: "saved" as const },
+  allBought: true,
+  leafCount: 2,
+  remainingLeafCount: 0,
+  savedPoCount: 2,
 };
 
 const TWO_REVISIONS: POSourceRevision[] = [
   { revision: 1, issuedAt: "2026-10-20T10:00:00+07:00" },
   { revision: 0, issuedAt: "2026-10-18T10:00:00+07:00" },
 ];
+
+const AVAILABILITY: POSourceAvailability = {
+  quotationId: 12,
+  revisionNumber: 1,
+  latestRevision: 1,
+  allBought: false,
+  legacyHeaderDiscount: false,
+  savedPoCount: 1,
+  draftPoCount: 0,
+  items: [
+    {
+      quotationItemNo: 1,
+      quotationSubNo: null,
+      label: "1",
+      description: "Electrical installation",
+      uom: "Pc",
+      quotedQuantityScaled: 100000,
+      boughtQuantityScaled: 40000,
+      draftQuantityScaled: 0,
+      remainingQuantityScaled: 60000,
+      overBoughtQuantityScaled: 0,
+      quotedUnitPriceMinor: 5000000,
+    },
+    {
+      quotationItemNo: 2,
+      quotationSubNo: null,
+      label: "2",
+      description: "Cabling",
+      uom: "Lot",
+      quotedQuantityScaled: 10000,
+      boughtQuantityScaled: 10000,
+      draftQuantityScaled: 0,
+      remainingQuantityScaled: 0,
+      overBoughtQuantityScaled: 0,
+      quotedUnitPriceMinor: 2500000,
+    },
+  ],
+};
 
 function page(
   quotations: POSourceQuotation[] = [QUOTATION, OTHER],
@@ -88,7 +154,14 @@ interface HarnessProps {
   loadPage?: (query: POSourceQuery) => Promise<POSourcePage>;
   loadRevisions?: (quotationId: number) => Promise<POSourceRevision[]>;
   validate?: (selection: POSourceSelection) => Promise<POSourceValidation>;
-  onConfirm?: (selection: POSourceSelection) => void;
+  loadAvailability?: (
+    quotationId: number,
+    revision: number
+  ) => Promise<POSourceAvailability>;
+  onConfirm?: (
+    selection: POSourceSelection,
+    items?: POSourceSelectionItem[]
+  ) => void;
   mode?: "entry" | "repair";
   excludePOID?: number;
   tutorial?: boolean;
@@ -99,6 +172,7 @@ function Harness({
   loadPage = async () => page(),
   loadRevisions = async () => TWO_REVISIONS,
   validate = async () => ({ valid: true }),
+  loadAvailability = async () => AVAILABILITY,
   onConfirm = () => {},
   mode = "entry",
   excludePOID,
@@ -122,6 +196,7 @@ function Harness({
         loadPage={loadPage}
         loadRevisions={loadRevisions}
         validate={validate}
+        loadAvailability={loadAvailability}
         tutorial={tutorial}
       />
     </>
@@ -215,6 +290,47 @@ async function reachConfirmation(): Promise<void> {
 }
 
 describe("POQuotationSelector interaction (issue #467 wave 3)", () => {
+  it("shows Open and Partial bought-state badges in the source list", async () => {
+    await renderHarness({ loadPage: async () => page([QUOTATION, DRAFT_ROW]) });
+    expect(document.body.textContent).toContain("Open");
+    expect(document.body.textContent).toContain("Partial");
+    expect(document.body.textContent).toContain("1 in draft");
+  });
+
+  it("disables Create PO for an All bought quotation with revision guidance", async () => {
+    await renderHarness({ loadPage: async () => page([ALL_BOUGHT_ROW]) });
+    const row = button(
+      `Quotation ${ALL_BOUGHT_ROW.quoteNumber}, ${ALL_BOUGHT_ROW.customerName}`
+    ) as HTMLButtonElement;
+    expect(row.disabled).toBe(true);
+    expect(document.body.textContent).toContain("All bought");
+    expect(document.body.textContent).toContain(
+      "Revise the quotation to order more."
+    );
+  });
+
+  it("lists only remaining leaves and confirms their selection", async () => {
+    const onConfirm = vi.fn();
+    await renderHarness({ onConfirm });
+    await reachConfirmation();
+    expect(document.body.textContent).toContain("Electrical installation");
+    expect(document.body.textContent).toContain("Quoted 10");
+    expect(document.body.textContent).toContain("Bought 4");
+    expect(document.body.textContent).toContain("In drafts 0");
+    expect(document.body.textContent).toContain("Remaining 6");
+    // The fully bought second leaf is not offered as a ghost.
+    expect(document.body.textContent).not.toContain("Cabling");
+    const checkbox = document.querySelector<HTMLInputElement>(
+      'input[aria-label^="Quotation item 1"]'
+    );
+    expect(checkbox?.checked).toBe(true);
+    await click(button("Confirm source"));
+    expect(onConfirm).toHaveBeenCalledTimes(1);
+    expect(onConfirm.mock.calls[0][1]).toEqual([
+      { quotationItemNo: 1, quotationSubNo: null },
+    ]);
+  });
+
   it("moves focus into the dialog when it opens", async () => {
     await renderHarness();
     expect(document.activeElement).toBe(dialog());
@@ -388,9 +504,9 @@ describe("POQuotationSelector repair mode (issue #475)", () => {
     expect(queries[0]).toMatchObject({ page: 1, excludePOID: 21 });
     expect(document.body.textContent).toContain("Select the new quotation");
     expect(document.body.textContent).toContain("Step 1 of 3");
-    // The draft row is still non-selectable, and repair mode offers no
-    // "Open draft" shortcut that would leave the saved record behind.
-    expect(document.body.textContent).toContain("Draft purchase order in progress");
+    // The draft row is a normal partial quotation now, and repair mode offers
+    // no "Open draft" shortcut that would leave the saved record behind.
+    expect(document.body.textContent).toContain("1 in draft");
     expect(document.querySelector('button[aria-label^="Open draft"]')).toBeNull();
   });
 

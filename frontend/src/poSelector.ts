@@ -20,8 +20,75 @@ export interface POSourceQuotation {
   customerName: string;
   latestRevision: number;
   issuedRevisionCount: number;
-  /** The PO that occupies this Quotation, or null when it is free. */
+  /**
+   * The newest PO for this Quotation, or null when none exists. A draft may be
+   * reopened; a saved record may be viewed. A quotation may have many POs, so
+   * this is not an occupancy flag.
+   */
   activePO: POSourceActivePO | null;
+  /** Bought-state badges (#651). AllBought disables a new PO. */
+  allBought: boolean;
+  leafCount: number;
+  remainingLeafCount: number;
+  savedPoCount: number;
+  draftPoCount: number;
+  legacyHeaderDiscount: boolean;
+}
+
+/** One priced leaf of the selected revision, from the availability read. */
+export interface POSourceAvailabilityItem {
+  quotationItemNo: number;
+  quotationSubNo: number | null;
+  label: string;
+  description: string;
+  parentDescription?: string;
+  groupKey?: string;
+  descriptionLines?: string[];
+  uom: string;
+  quotedQuantityScaled: number;
+  boughtQuantityScaled: number;
+  draftQuantityScaled: number;
+  remainingQuantityScaled: number;
+  overBoughtQuantityScaled: number;
+  quotedUnitPriceMinor: number;
+}
+
+/** Server-side bought state for one quotation revision (#651). */
+export interface POSourceAvailability {
+  quotationId: number;
+  revisionNumber: number;
+  latestRevision: number;
+  allBought: boolean;
+  legacyHeaderDiscount: boolean;
+  savedPoCount: number;
+  draftPoCount: number;
+  items: POSourceAvailabilityItem[];
+}
+
+/** One leaf the caller wants in the new draft. */
+export interface POSourceSelectionItem {
+  quotationItemNo: number;
+  quotationSubNo: number | null;
+}
+
+/** Stable identity of a quotation leaf inside one revision. */
+export function availabilityLeafKey(item: {
+  quotationItemNo: number;
+  quotationSubNo: number | null;
+}): string {
+  return item.quotationSubNo === null
+    ? `${item.quotationItemNo}.`
+    : `${item.quotationItemNo}.${item.quotationSubNo}`;
+}
+
+/** Leaves the workspace may order: remaining quantity only. */
+export function selectableAvailabilityItems(
+  availability: POSourceAvailability | null
+): POSourceAvailabilityItem[] {
+  if (availability === null) return [];
+  return availability.items.filter(
+    (item) => item.remainingQuantityScaled > 0
+  );
 }
 
 /** One page of the first step. PageSize is the server's fixed 15. */
@@ -81,6 +148,11 @@ export interface POSourceSelectorState {
   revisionsLoading: boolean;
   revisionsError: string | null;
   selectedRevision: number | null;
+  availability: POSourceAvailability | null;
+  availabilityLoading: boolean;
+  availabilityError: string | null;
+  /** Leaf keys the new draft will contain; defaults to every remaining leaf. */
+  selectedLeaves: string[];
   confirming: boolean;
   confirmError: string | null;
 }
@@ -101,6 +173,10 @@ export const initialPOSourceSelectorState: POSourceSelectorState = {
   revisionsLoading: false,
   revisionsError: null,
   selectedRevision: null,
+  availability: null,
+  availabilityLoading: false,
+  availabilityError: null,
+  selectedLeaves: [],
   confirming: false,
   confirmError: null,
 };
@@ -117,6 +193,15 @@ export type POSourceSelectorAction =
   | { type: "revisionsLoaded"; quotationId: number; revisions: POSourceRevision[] }
   | { type: "revisionsFailed"; quotationId: number; error: string }
   | { type: "revisionSelected"; revision: number }
+  | { type: "availabilityLoading" }
+  | {
+      type: "availabilityLoaded";
+      quotationId: number;
+      revision: number;
+      availability: POSourceAvailability;
+    }
+  | { type: "availabilityFailed"; quotationId: number; error: string }
+  | { type: "leafToggled"; key: string }
   | { type: "continue" }
   | { type: "back" }
   | { type: "confirmStarted" }
@@ -135,15 +220,43 @@ export function canContinue(state: POSourceSelectorState): boolean {
 
 /**
  * Whether the confirm button may run. Step 3 alone is not enough: an
- * incomplete pair must never become a committed link.
+ * incomplete pair must never become a committed link. In the ordinary entry
+ * flow the availability read must also have answered with at least one leaf
+ * selected; repair and link modes keep their existing pair-only rule.
  */
-export function canConfirm(state: POSourceSelectorState): boolean {
+export function canConfirm(
+  state: POSourceSelectorState,
+  requireAvailability = false
+): boolean {
+  if (
+    state.step !== 3 ||
+    state.selected === null ||
+    state.selectedRevision === null ||
+    state.confirming
+  ) {
+    return false;
+  }
+  if (!requireAvailability) return true;
   return (
-    state.step === 3 &&
-    state.selected !== null &&
-    state.selectedRevision !== null &&
-    !state.confirming
+    !state.availabilityLoading &&
+    state.availabilityError === null &&
+    state.availability !== null &&
+    state.selectedLeaves.length > 0
   );
+}
+
+/** The leaves the confirmed draft will contain, or null before they load. */
+export function selectionItemsOf(
+  state: POSourceSelectorState
+): POSourceSelectionItem[] | null {
+  if (state.availability === null) return null;
+  const selected = new Set(state.selectedLeaves);
+  return selectableAvailabilityItems(state.availability)
+    .filter((item) => selected.has(availabilityLeafKey(item)))
+    .map((item) => ({
+      quotationItemNo: item.quotationItemNo,
+      quotationSubNo: item.quotationSubNo,
+    }));
 }
 
 /** The exact payload the caller receives, or null while incomplete. */
@@ -164,7 +277,7 @@ export function visibleRows(
   rows: POSourceQuotation[],
   hideUsed: boolean
 ): POSourceQuotation[] {
-  return hideUsed ? rows.filter((row) => row.activePO === null) : rows;
+  return hideUsed ? rows.filter((row) => !row.allBought) : rows;
 }
 
 /** A draft already occupies the Quotation and can be reopened. */
@@ -242,10 +355,9 @@ export function poSourceSelectorReducer(
     case "hideUsedChanged":
       return { ...state, hideUsed: action.hideUsed, page: 1 };
     case "quotationSelected":
-      // An occupied Quotation is non-interactive in the view; the reducer
-      // refuses it too, so a mis-dispatched click cannot create a second
-      // active PO. A draft is reopened through its own action instead.
-      if (state.step !== 1 || action.quotation.activePO !== null) return state;
+      // Only a fully bought quotation is non-interactive (#651). A partial
+      // quotation stays selectable and may produce another PO.
+      if (state.step !== 1 || action.quotation.allBought) return state;
       return {
         ...state,
         step: 2,
@@ -254,6 +366,10 @@ export function poSourceSelectorReducer(
         revisionsLoading: true,
         revisionsError: null,
         selectedRevision: null,
+        availability: null,
+        availabilityLoading: false,
+        availabilityError: null,
+        selectedLeaves: [],
         confirmError: null,
       };
     case "revisionsLoading":
@@ -289,13 +405,83 @@ export function poSourceSelectorReducer(
       };
     case "revisionSelected":
       if (state.step !== 2) return state;
-      return { ...state, selectedRevision: action.revision };
+      return {
+        ...state,
+        selectedRevision: action.revision,
+        availability: null,
+        availabilityLoading: false,
+        availabilityError: null,
+        selectedLeaves: [],
+      };
+    case "availabilityLoading":
+      return {
+        ...state,
+        availabilityLoading: true,
+        availabilityError: null,
+      };
+    case "availabilityLoaded":
+      if (
+        state.selected === null ||
+        state.selected.id !== action.quotationId ||
+        state.selectedRevision !== action.revision
+      ) {
+        return state;
+      }
+      return {
+        ...state,
+        availability: action.availability,
+        availabilityLoading: false,
+        availabilityError: null,
+        selectedLeaves: selectableAvailabilityItems(action.availability).map(
+          availabilityLeafKey
+        ),
+      };
+    case "availabilityFailed":
+      if (state.selected === null || state.selected.id !== action.quotationId) {
+        return state;
+      }
+      return {
+        ...state,
+        availability: null,
+        availabilityLoading: false,
+        availabilityError: action.error,
+        selectedLeaves: [],
+      };
+    case "leafToggled": {
+      const available = new Set(
+        selectableAvailabilityItems(state.availability).map(availabilityLeafKey)
+      );
+      if (!available.has(action.key)) return state;
+      const selected = new Set(state.selectedLeaves);
+      if (selected.has(action.key)) {
+        selected.delete(action.key);
+      } else {
+        selected.add(action.key);
+      }
+      return { ...state, selectedLeaves: Array.from(selected) };
+    }
     case "continue":
       if (!canContinue(state)) return state;
-      return { ...state, step: 3, confirmError: null };
+      return {
+        ...state,
+        step: 3,
+        availability: null,
+        availabilityLoading: false,
+        availabilityError: null,
+        selectedLeaves: [],
+        confirmError: null,
+      };
     case "back":
       if (state.step === 3) {
-        return { ...state, step: 2, confirmError: null };
+        return {
+          ...state,
+          step: 2,
+          availability: null,
+          availabilityLoading: false,
+          availabilityError: null,
+          selectedLeaves: [],
+          confirmError: null,
+        };
       }
       if (state.step === 2) {
         return {
@@ -306,6 +492,10 @@ export function poSourceSelectorReducer(
           revisionsLoading: false,
           revisionsError: null,
           selectedRevision: null,
+          availability: null,
+          availabilityLoading: false,
+          availabilityError: null,
+          selectedLeaves: [],
           confirmError: null,
         };
       }

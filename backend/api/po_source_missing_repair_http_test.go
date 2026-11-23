@@ -139,12 +139,17 @@ func TestSourceMissingPurchaseOrderIsFoundAndRepairedOverTheAPI(t *testing.T) {
 		t.Fatalf("stale repair = %d (%v); want 409/po_version_conflict", code, body)
 	}
 
-	// An occupied target is refused and the record stays missing.
+	// A target with another PO is allowed now; the repaired record joins it.
 	code, body = doJSON(t, server, http.MethodPost, path+"/source-repair", token,
-		repairBody(surviving, occupiedTarget, 0, "target already occupied"))
-	if code != http.StatusConflict || body["code"] != "po_target_occupied" {
-		t.Fatalf("occupied target = %d (%v); want 409/po_target_occupied", code, body)
+		repairBody(surviving, occupiedTarget, 0, "join the occupied target"))
+	if code != http.StatusOK {
+		t.Fatalf("occupied target = %d (%v); want 200", code, body)
 	}
+	surviving = decodePurchaseOrder(t, body)
+	if surviving.QuotationID != occupiedTarget {
+		t.Fatalf("repaired source = %d; want %d", surviving.QuotationID, occupiedTarget)
+	}
+	occupiedQuoteNumber := surviving.QuoteNumber
 
 	// A different customer is refused after the confirmation number exists.
 	code, body = doJSON(t, server, http.MethodPost, path+"/source-repair", token,
@@ -186,16 +191,23 @@ func TestSourceMissingPurchaseOrderIsFoundAndRepairedOverTheAPI(t *testing.T) {
 		t.Fatalf("history = %d (%v)", code, body)
 	}
 	history := decodeRepairHistory(t, body)
-	if len(history) != 1 || history[0].Kind != "source_repair" || history[0].Repair == nil {
-		t.Fatalf("history = %+v; want one source repair", history)
+	if len(history) != 2 || history[0].Kind != "source_repair" || history[0].Repair == nil ||
+		history[1].Kind != "source_repair" || history[1].Repair == nil {
+		t.Fatalf("history = %+v; want the two source repairs", history)
 	}
-	if history[0].Repair.PreviousQuoteNumber != formerNumber {
-		t.Errorf("history previous source = %q; want the deleted %q",
-			history[0].Repair.PreviousQuoteNumber, formerNumber)
+	// Newest first: the move to the free target, then the recovery from the
+	// deleted source into the occupied target.
+	if history[0].Repair.PreviousQuoteNumber != occupiedQuoteNumber ||
+		history[0].Repair.NewQuotationID != freeTarget {
+		t.Errorf("latest repair = %q -> %d; want %q -> %d",
+			history[0].Repair.PreviousQuoteNumber, history[0].Repair.NewQuotationID,
+			occupiedQuoteNumber, freeTarget)
 	}
-	if history[0].Repair.NewQuotationID != freeTarget {
-		t.Errorf("history new source = %d; want %d",
-			history[0].Repair.NewQuotationID, freeTarget)
+	if history[1].Repair.PreviousQuoteNumber != formerNumber ||
+		history[1].Repair.NewQuotationID != occupiedTarget {
+		t.Errorf("recovery repair = %q -> %d; want the deleted %q -> %d",
+			history[1].Repair.PreviousQuoteNumber, history[1].Repair.NewQuotationID,
+			formerNumber, occupiedTarget)
 	}
 
 	// The filter follows the repaired state: no source-missing rows remain.

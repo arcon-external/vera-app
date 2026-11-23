@@ -398,7 +398,7 @@ func (s *Store) CorrectPurchaseOrder(ctx context.Context, input PurchaseOrderCor
 	if err != nil {
 		return PurchaseOrder{}, err
 	}
-	if err := replacePurchaseOrderAllocations(ctx, tx, schema, org.ID, input.ID, source, kept); err != nil {
+	if err := replacePurchaseOrderAllocations(ctx, tx, schema, org.ID, input.ID, source, kept, false); err != nil {
 		return PurchaseOrder{}, err
 	}
 

@@ -297,9 +297,17 @@ type PurchaseOrderFinalizeInput struct {
 // received-date override. An empty date asks the server for today.
 type PurchaseOrderCreateInput struct {
 	ReceivedDate     string
+	Items            []PurchaseOrderCreateItemDTO
 	QuotationID      int64
 	RevisionNumber   int16
 	BusinessCategory string
+}
+
+// PurchaseOrderCreateItemDTO selects one remaining quotation leaf for a new
+// draft (#651). The server fills the quantity and the row-discounted price.
+type PurchaseOrderCreateItemDTO struct {
+	QuotationItemNo int
+	QuotationSubNo  *int
 }
 
 // PurchaseOrderBlankCreateInput starts a source-less draft (#496). The server
@@ -574,10 +582,18 @@ func (q *Quotation) CreatePurchaseOrderDraft(input PurchaseOrderCreateInput) (Pu
 		return PurchaseOrderDTO{}, err
 	}
 	revision := input.RevisionNumber
+	items := make([]apicontract.PurchaseOrderCreateItemRow, 0, len(input.Items))
+	for _, item := range input.Items {
+		items = append(items, apicontract.PurchaseOrderCreateItemRow{
+			QuotationItemNo: item.QuotationItemNo,
+			QuotationSubNo:  item.QuotationSubNo,
+		})
+	}
 	var response apicontract.PurchaseOrderRow
 	if err := client.Post("/v1/purchase-orders", apicontract.PurchaseOrderCreateRequest{
 		QuotationID:      input.QuotationID,
 		RevisionNumber:   &revision,
+		Items:            items,
 		ReceivedDate:     input.ReceivedDate,
 		BusinessCategory: input.BusinessCategory,
 	}, &response); err != nil {

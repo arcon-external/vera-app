@@ -2,26 +2,33 @@ import { useCallback, useEffect, useReducer, useRef } from "react";
 import type { KeyboardEvent, RefObject } from "react";
 import { errorMessage } from "../errors";
 import {
+  availabilityLeafKey,
   canConfirm,
   canContinue,
   draftOf,
   initialPOSourceSelectorState,
   poSourceQueryDelay,
   poSourceSelectorReducer,
+  selectableAvailabilityItems,
+  selectionItemsOf,
   selectionOf,
   tabStopIndex,
   visibleRows,
 } from "../poSelector";
 import type {
   POSourceActivePO,
+  POSourceAvailability,
   POSourcePage,
   POSourceQuery,
   POSourceRevision,
   POSourceSelection,
+  POSourceSelectionItem,
   POSourceSelectorAction,
   POSourceSelectorState,
   POSourceValidation,
 } from "../poSelector";
+import type { CurrencyInfo } from "../format";
+import { formatQuantityScaled, formatUnitPriceMinor } from "../purchaseOrder";
 import { Button, fieldClass } from "./ui";
 
 // Issue #467: the shared three-step source selector. Step 1 chooses an issued
@@ -41,12 +48,15 @@ export interface POQuotationSelectorProps {
    * record's link and keeps its own Quotation selectable through excludePOID.
    * The server gates repair mode on an admin, not this prop.
    */
-  mode?: "entry" | "repair";
+  mode?: "entry" | "repair" | "link";
   /** The saved record being repaired; absent for ordinary entry. */
   excludePOID?: number;
   /** Receives the confirmed pair. The caller opens PO entry with it (#468).
    *  A rejected promise keeps the dialog open with its error message. */
-  onConfirm: (selection: POSourceSelection) => void | Promise<void>;
+  onConfirm: (
+    selection: POSourceSelection,
+    items?: POSourceSelectionItem[]
+  ) => void | Promise<void>;
   /** Reopens the draft that already occupies a Quotation (#468). */
   onOpenDraft?: (activePO: POSourceActivePO) => void;
   /** One page of issued Quotations (15 per page, server-fixed). */
@@ -55,6 +65,13 @@ export interface POQuotationSelectorProps {
   loadRevisions: (quotationId: number) => Promise<POSourceRevision[]>;
   /** Confirm-time server revalidation of the exact pair. */
   validate: (selection: POSourceSelection) => Promise<POSourceValidation>;
+  /** Remaining-quantity read for the chosen revision (#651). */
+  loadAvailability: (
+    quotationId: number,
+    revision: number
+  ) => Promise<POSourceAvailability>;
+  /** Formats the quoted unit price in the source currency. */
+  currency?: CurrencyInfo;
   /** Issue #595: adds the Features Tutorial anchors and practice wording. */
   tutorial?: boolean;
 }
@@ -64,8 +81,8 @@ export interface POQuotationSelectorViewProps {
   dispatch: (action: POSourceSelectorAction) => void;
   onClose: () => void;
   onConfirm: () => void;
-  /** "entry" or "repair"; changes the wording, never the three-step rules. */
-  mode?: "entry" | "repair";
+  /** "entry", "repair" or "link"; changes the wording, never the three-step rules. */
+  mode?: "entry" | "repair" | "link";
   /** Opens the existing draft instead of starting a second PO. */
   onOpenDraft?: (activePO: POSourceActivePO) => void;
   /** The dialog element: the programmatic focus target on open. */
@@ -74,6 +91,8 @@ export interface POQuotationSelectorViewProps {
   onKeyDown?: (event: KeyboardEvent<HTMLDivElement>) => void;
   /** Issue #595: the tutorial selector's single practice quotation. */
   tutorial?: boolean;
+  /** Formats the quoted unit price in the source currency. */
+  currency?: CurrencyInfo;
 }
 
 // Everything the modal can focus. Disabled buttons (used Quotation rows) are
@@ -171,21 +190,25 @@ function StepOne({
       ) : (
         <ul className="grid max-h-[42vh] gap-2 overflow-y-auto scroll-thin pr-1">
           {rows.map((row) => {
-            const active = row.activePO;
-            const used = active !== null;
+            const allBought = row.allBought;
             const draft = draftOf(row);
+            const badge = allBought
+              ? "All bought"
+              : row.savedPoCount > 0 || row.draftPoCount > 0
+                ? "Partial"
+                : "Open";
             return (
               <li key={row.id} className="grid gap-1">
                 <button
                   type="button"
-                  disabled={used}
+                  disabled={allBought}
                   data-tutorial={tutorial ? "tutorial-quotation-row" : undefined}
-                  aria-disabled={used ? "true" : undefined}
+                  aria-disabled={allBought ? "true" : undefined}
                   aria-label={`Quotation ${row.quoteNumber}, ${row.customerName}`}
-                  aria-describedby={used ? `po-source-used-${row.id}` : undefined}
+                  aria-describedby={allBought ? `po-source-used-${row.id}` : undefined}
                   onClick={() => dispatch({ type: "quotationSelected", quotation: row })}
                   className={`grid w-full gap-1 rounded-lg border px-4 py-3 text-left transition ${
-                    used
+                    allBought
                       ? "cursor-not-allowed border-rule bg-paper-muted text-ink-400"
                       : "cursor-pointer border-rule bg-white text-ink-900 hover:border-accent-400 hover:bg-paper-muted"
                   }`}
@@ -201,16 +224,43 @@ function StepOne({
                   </span>
                   <span className="text-small">{row.customerName}</span>
                   <span className="text-small text-ink-500">{row.subject}</span>
+                  <span className="flex flex-wrap gap-2 text-caption">
+                    <span
+                      className={`font-medium ${
+                        allBought ? "text-danger-600" : "text-accent-700"
+                      }`}
+                    >
+                      {badge}
+                    </span>
+                    <span className="text-ink-500">
+                      {row.remainingLeafCount} of {row.leafCount} left
+                    </span>
+                    {row.draftPoCount > 0 ? (
+                      <span className="text-ink-500">
+                        {row.draftPoCount} in draft
+                      </span>
+                    ) : null}
+                    {row.savedPoCount > 0 ? (
+                      <span className="text-ink-500">
+                        {row.savedPoCount} saved
+                      </span>
+                    ) : null}
+                    {row.legacyHeaderDiscount ? (
+                      <span className="text-danger-600">
+                        Legacy header discount
+                      </span>
+                    ) : null}
+                  </span>
                 </button>
                 {/* The reason sits outside the disabled button: a disabled
                     control's descendants are not uniformly exposed, so the
                     description is a sibling the button points at. */}
-                {used ? (
+                {allBought ? (
                   <p
                     id={`po-source-used-${row.id}`}
                     className="px-1 text-caption font-medium text-danger-600"
                   >
-                    {draft !== null ? "Draft purchase order in progress" : "PO already exists"}
+                    Every quoted item is bought. Revise the quotation to order more.
                   </p>
                 ) : null}
                 {draft !== null && onOpenDraft !== undefined ? (
@@ -321,20 +371,138 @@ function StepTwo({
   );
 }
 
-function StepThree({ state, mode = "entry" }: Pick<POQuotationSelectorViewProps, "state" | "mode">) {
+function StepThree({
+  state,
+  dispatch,
+  mode = "entry",
+  currency,
+}: Pick<
+  POQuotationSelectorViewProps,
+  "state" | "dispatch" | "mode" | "currency"
+>) {
+  const isEntry = mode === "entry";
+  const selectable = selectableAvailabilityItems(state.availability);
+  if (!isEntry) {
+    return (
+      <div className="grid gap-4">
+        <SourceSummary state={state} />
+        <div className="rounded-lg border border-rule bg-white px-4 py-3">
+          <p className="text-small font-medium text-ink-900">
+            Revision {state.selectedRevision ?? "not selected"}
+          </p>
+          <p className="text-small text-ink-500">
+            {mode === "repair"
+              ? "The saved purchase order will follow this exact issued revision. Its values are reviewed against it before anything is saved, and its confirmation number and history are kept."
+              : "The purchase order will be linked to this exact issued revision."}
+          </p>
+        </div>
+        {state.confirmError !== null ? (
+          <p role="alert" className="text-small text-danger-600">
+            {state.confirmError}
+          </p>
+        ) : null}
+      </div>
+    );
+  }
   return (
     <div className="grid gap-4">
       <SourceSummary state={state} />
       <div className="rounded-lg border border-rule bg-white px-4 py-3">
         <p className="text-small font-medium text-ink-900">
-          Revision {state.selectedRevision ?? "not selected"}
+          Revision {state.selectedRevision ?? "not selected"} · remaining items
         </p>
         <p className="text-small text-ink-500">
-          {mode === "repair"
-            ? "The saved purchase order will follow this exact issued revision. Its values are reviewed against it before anything is saved, and its confirmation number and history are kept."
-            : "The purchase order will be linked to this exact issued revision."}
+          Only quotation leaves that still have quantity are listed. Drafts are
+          advisory and do not reserve anything.
         </p>
       </div>
+      {state.availabilityError !== null ? (
+        <p role="alert" className="text-small text-danger-600">
+          {state.availabilityError}
+        </p>
+      ) : null}
+      {state.availabilityLoading ? (
+        <p className="py-6 text-center text-small text-ink-500">
+          Loading remaining items…
+        </p>
+      ) : state.availability !== null ? (
+        <>
+          <p className="text-caption text-ink-500">
+            {selectable.length} of {state.availability.items.length} leaves
+            still orderable · {state.availability.savedPoCount} saved ·{" "}
+            {state.availability.draftPoCount} in draft
+          </p>
+          {state.availability.legacyHeaderDiscount ? (
+            <p role="alert" className="text-small text-danger-600">
+              This revision carries a legacy whole-order discount. Reissue it
+              with row-only discounts before ordering.
+            </p>
+          ) : null}
+          {selectable.length === 0 ? (
+            <p className="text-small text-danger-600">
+              Every quoted item is bought. Revise the quotation to order more.
+            </p>
+          ) : (
+            <ul className="grid max-h-[42vh] gap-2 overflow-y-auto scroll-thin pr-1">
+              {selectable.map((item) => {
+                const key = availabilityLeafKey(item);
+                const checked = state.selectedLeaves.includes(key);
+                const title =
+                  item.parentDescription !== undefined &&
+                  item.parentDescription !== ""
+                    ? `${item.parentDescription} — ${item.description}`
+                    : item.description;
+                return (
+                  <li key={key}>
+                    <label className="flex cursor-pointer items-start gap-3 rounded-lg border border-rule bg-white px-4 py-3 transition hover:border-accent-400">
+                      <input
+                        type="checkbox"
+                        className="mt-1 h-4 w-4 cursor-pointer rounded border-rule accent-accent-700"
+                        checked={checked}
+                        aria-label={`Quotation item ${item.label}, remaining ${formatQuantityScaled(item.remainingQuantityScaled)}`}
+                        onChange={() =>
+                          dispatch({ type: "leafToggled", key })
+                        }
+                      />
+                      <span className="grid flex-1 gap-1">
+                        <span className="flex flex-wrap items-baseline justify-between gap-2">
+                          <span className="tnum text-small font-semibold">
+                            {item.label}
+                          </span>
+                          <span className="text-caption text-ink-500">
+                            {currency !== undefined
+                              ? `${formatUnitPriceMinor(currency, item.quotedUnitPriceMinor)} / ${item.uom || "unit"}`
+                              : `Quoted ${item.quotedUnitPriceMinor} / ${item.uom || "unit"}`}
+                          </span>
+                        </span>
+                        <span className="text-small">{title}</span>
+                        <span className="flex flex-wrap gap-2 text-caption text-ink-500">
+                          <span>Quoted {formatQuantityScaled(item.quotedQuantityScaled)}</span>
+                          <span>Bought {formatQuantityScaled(item.boughtQuantityScaled)}</span>
+                          <span>In drafts {formatQuantityScaled(item.draftQuantityScaled)}</span>
+                          <span className="font-medium text-accent-700">
+                            Remaining {formatQuantityScaled(item.remainingQuantityScaled)}
+                          </span>
+                          {item.overBoughtQuantityScaled > 0 ? (
+                            <span className="text-danger-600">
+                              Over-bought {formatQuantityScaled(item.overBoughtQuantityScaled)}
+                            </span>
+                          ) : null}
+                        </span>
+                      </span>
+                    </label>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+          {state.selectedLeaves.length === 0 && selectable.length > 0 ? (
+            <p className="text-caption text-ink-500">
+              Select at least one remaining item to create the purchase order.
+            </p>
+          ) : null}
+        </>
+      ) : null}
       {state.confirmError !== null ? (
         <p role="alert" className="text-small text-danger-600">
           {state.confirmError}
@@ -354,6 +522,7 @@ export function POQuotationSelectorView({
   dialogRef,
   onKeyDown,
   tutorial = false,
+  currency,
 }: POQuotationSelectorViewProps) {
   const confirming = state.confirming;
   const repairing = mode === "repair";
@@ -410,7 +579,9 @@ export function POQuotationSelectorView({
             />
           ) : null}
           {state.step === 2 ? <StepTwo state={state} dispatch={dispatch} /> : null}
-          {state.step === 3 ? <StepThree state={state} mode={mode} /> : null}
+          {state.step === 3 ? (
+            <StepThree state={state} dispatch={dispatch} mode={mode} currency={currency} />
+          ) : null}
         </div>
 
         <div className="flex items-center justify-between gap-3 border-t border-rule px-6 py-4">
@@ -446,7 +617,7 @@ export function POQuotationSelectorView({
                 data-tutorial={
                   tutorial ? "tutorial-selector-confirm" : undefined
                 }
-                disabled={!canConfirm(state)}
+                disabled={!canConfirm(state, mode === "entry")}
                 onClick={onConfirm}
               >
                 {confirming ? "Checking…" : "Confirm source"}
@@ -469,6 +640,8 @@ export function POQuotationSelector({
   loadPage,
   loadRevisions,
   validate,
+  loadAvailability,
+  currency,
   tutorial = false,
 }: POQuotationSelectorProps) {
   const [state, dispatch] = useReducer(
@@ -498,6 +671,8 @@ export function POQuotationSelector({
   revisionLoader.current = loadRevisions;
   const validator = useRef(validate);
   validator.current = validate;
+  const availabilityLoader = useRef(loadAvailability);
+  availabilityLoader.current = loadAvailability;
 
   useEffect(() => {
     if (!open) {
@@ -652,9 +827,53 @@ export function POQuotationSelector({
     };
   }, [open, state.step, selectedID]);
 
+  const selectedRevision = state.selectedRevision;
+  useEffect(() => {
+    if (
+      !open ||
+      state.step !== 3 ||
+      mode !== "entry" ||
+      selectedID === null ||
+      selectedRevision === null
+    ) {
+      return;
+    }
+    let stale = false;
+    dispatch({ type: "availabilityLoading" });
+    availabilityLoader
+      .current(selectedID, selectedRevision)
+      .then((availability) => {
+        if (!stale) {
+          dispatch({
+            type: "availabilityLoaded",
+            quotationId: selectedID,
+            revision: selectedRevision,
+            availability,
+          });
+        }
+      })
+      .catch((error: unknown) => {
+        if (!stale) {
+          dispatch({
+            type: "availabilityFailed",
+            quotationId: selectedID,
+            error: errorMessage(
+              error,
+              "The remaining items could not be loaded. Try again."
+            ),
+          });
+        }
+      });
+    return () => {
+      stale = true;
+    };
+  }, [open, state.step, mode, selectedID, selectedRevision]);
+
   const confirm = useCallback(async () => {
     const selection = selectionOf(state);
-    if (!canConfirm(state) || selection === null) return;
+    if (!canConfirm(state, mode === "entry") || selection === null) return;
+    const items =
+      mode === "entry" ? selectionItemsOf(state) ?? undefined : undefined;
     const token = ++confirmToken.current;
     dispatch({ type: "confirmStarted" });
     try {
@@ -666,12 +885,12 @@ export function POQuotationSelector({
         dispatch({ type: "confirmFailed", error: validationMessage(outcome.reason) });
         return;
       }
-      await onConfirm(selection);
+      await onConfirm(selection, items);
     } catch (error) {
       if (token !== confirmToken.current || !openRef.current) return;
       dispatch({ type: "confirmFailed", error: errorMessage(error, "The request failed. Try again.") });
     }
-  }, [state, onConfirm]);
+  }, [state, onConfirm, mode]);
 
   if (!open) return null;
   return (

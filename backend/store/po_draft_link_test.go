@@ -507,7 +507,7 @@ func TestDraftLinkRefusesSavedRecordsAndLiveDrafts(t *testing.T) {
 	}
 }
 
-func TestDraftLinkRefusesAnOccupiedQuotationAndRacesToOneWinner(t *testing.T) {
+func TestDraftLinkAllowsMultipleDraftsFromOneQuotationUnderConcurrency(t *testing.T) {
 	database := openTestSchema(t, "vera_po_497_occupied")
 	staff := poTestUser(t, database)
 	ctx := poContext(t, database)
@@ -542,30 +542,26 @@ func TestDraftLinkRefusesAnOccupiedQuotationAndRacesToOneWinner(t *testing.T) {
 	}
 	wg.Wait()
 
-	winners := 0
-	losers := 0
+	// #651 removed target occupancy: two drafts may link to the same quotation,
+	// and the later one is a normal second PO.
 	for _, err := range results {
-		switch {
-		case err == nil:
-			winners++
-		case errors.Is(err, ErrPurchaseOrderTargetOccupied):
-			losers++
-		default:
-			t.Errorf("concurrent link error = %v; want success or ErrPurchaseOrderTargetOccupied", err)
+		if err != nil {
+			t.Errorf("concurrent link error = %v; want both links to succeed", err)
 		}
 	}
-	if winners != 1 || losers != 1 {
-		t.Fatalf("concurrent links = %d winners / %d occupied; want exactly one of each", winners, losers)
-	}
 
-	// The pre-check answers normally once the row is committed.
 	third := seedNeverLinkableDraft(t, database, staff, ctx, false)
-	if _, err := database.PreviewPurchaseOrderDraftLink(ctx, third.ID, quotation.ID, quotation.RevisionNumber); !errors.Is(err, ErrPurchaseOrderTargetOccupied) {
-		t.Errorf("preview of an occupied target = %v; want ErrPurchaseOrderTargetOccupied", err)
+	if _, err := database.PreviewPurchaseOrderDraftLink(ctx, third.ID, quotation.ID, quotation.RevisionNumber); err != nil {
+		t.Errorf("preview with an existing PO = %v; want a normal review", err)
 	}
-	if _, err := database.LinkPurchaseOrderDraftSource(ctx, draftLinkInput(
-		third, quotation, staff, decisions, missing, extra, "")); !errors.Is(err, ErrPurchaseOrderTargetOccupied) {
-		t.Errorf("link of an occupied target = %v; want ErrPurchaseOrderTargetOccupied", err)
+	linked, err := database.LinkPurchaseOrderDraftSource(ctx, draftLinkInput(
+		third, quotation, staff, decisions, missing, extra, ""))
+	if err != nil {
+		t.Fatalf("link a third draft to the same quotation: %v", err)
+	}
+	if linked.QuotationID != quotation.ID || len(linked.Items) == 0 {
+		t.Errorf("third linked draft = %d lines on quotation %d; want the target source",
+			len(linked.Items), linked.QuotationID)
 	}
 	_ = source
 }
@@ -769,14 +765,28 @@ func TestDraftLinkRequiresExplicitLineMatchingAndRefusesDuplicates(t *testing.T)
 			t.Errorf("line %d reference = %v; want %d", index+1, item.QuotationItemNo, index+1)
 		}
 	}
+	// #651: the link rewrites allocations for the references the draft carries,
+	// so a linked record is cost-resolvable immediately rather than at finalize.
+	allocations := readAllocations(t, database, ctx, linked.ID)
+	if len(allocations) != 10 {
+		t.Fatalf("linked allocations = %d; want one per matched line", len(allocations))
+	}
+	for key, allocation := range allocations {
+		if allocation.QuotationID != matchedQuotation.ID {
+			t.Errorf("linked allocation %s source = %d; want %d",
+				key, allocation.QuotationID, matchedQuotation.ID)
+		}
+	}
 
-	// Two lines cannot claim one source line.
+	// Two lines cannot claim one source leaf. A draft may carry the duplicate
+	// while the reviewer resolves it (the allocation guard keeps the first line
+	// allocated), but the committed link refuses the unresolved claim.
 	duplicate := seedTenLineManualDraft(t, database, ctx, staff)
 	duplicateUpdate := tenLineMatchedUpdate(duplicate, staff)
 	duplicateUpdate.Items[1].QuotationItemNo = duplicateUpdate.Items[0].QuotationItemNo
 	duplicate, err = database.UpdatePurchaseOrderDraft(ctx, duplicateUpdate)
 	if err != nil {
-		t.Fatalf("save the duplicate match: %v", err)
+		t.Fatalf("save the duplicate match for review: %v", err)
 	}
 	if _, err := database.LinkPurchaseOrderDraftSource(ctx, draftLinkInput(
 		duplicate, duplicateQuotation, staff, nil, nil, nil, "")); !errors.Is(err, ErrPurchaseOrderUnresolvedDifference) {

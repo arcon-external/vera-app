@@ -42,6 +42,14 @@ type POSourceQuotationDTO struct {
 	ID                  int64
 	LatestRevision      int16
 	IssuedRevisionCount int
+	// Bought-state badges (#651). AllBought disables a new PO; a partial
+	// quotation stays selectable and shows its remaining leaf count.
+	AllBought            bool
+	LeafCount            int
+	RemainingLeafCount   int
+	SavedPOCount         int
+	DraftPOCount         int
+	LegacyHeaderDiscount bool
 }
 
 // POSourcePageDTO is one page of the selector's first step.
@@ -82,8 +90,45 @@ type POSourceSelection struct {
 // belongs to the Quotation, so the displayed revision is deliberately not an
 // input.
 type POSourceOccupancyDTO struct {
-	ActivePO    *POSourceActivePODTO
-	QuotationID int64
+	ActivePO             *POSourceActivePODTO
+	QuotationID          int64
+	AllBought            bool
+	RemainingLeafCount   int
+	SavedPOCount         int
+	DraftPOCount         int
+	LegacyHeaderDiscount bool
+}
+
+// POSourceAvailabilityItemDTO is one remaining quotation leaf. The price is
+// the row-discounted customer price; supplier cost is never exposed (Story 42).
+type POSourceAvailabilityItemDTO struct {
+	QuotationItemNo          int
+	QuotationSubNo           *int
+	Label                    string
+	Description              string
+	ParentDescription        string
+	GroupKey                 string
+	DescriptionLines         []string
+	UoM                      string
+	QuotedQuantityScaled     int64
+	BoughtQuantityScaled     int64
+	DraftQuantityScaled      int64
+	RemainingQuantityScaled  int64
+	OverBoughtQuantityScaled int64
+	QuotedUnitPriceMinor     int64
+}
+
+// POSourceAvailabilityDTO is the server-side bought state for one quotation
+// revision. A draft quantity is advisory and never reduces remaining.
+type POSourceAvailabilityDTO struct {
+	QuotationID          int64
+	RevisionNumber       int16
+	LatestRevision       int16
+	AllBought            bool
+	LegacyHeaderDiscount bool
+	SavedPOCount         int
+	DraftPOCount         int
+	Items                []POSourceAvailabilityItemDTO
 }
 
 // POSourceValidationDTO answers the confirm-time revalidation. A false Valid
@@ -128,12 +173,18 @@ func (q *Quotation) ListPOSourceQuotations(query POSourceQuery) (POSourcePageDTO
 	rows := make([]POSourceQuotationDTO, 0, len(response.Quotations))
 	for _, row := range response.Quotations {
 		dto := POSourceQuotationDTO{
-			ID:                  row.ID,
-			QuoteNumber:         row.QuoteNumber,
-			Subject:             row.Subject,
-			CustomerName:        row.CustomerName,
-			LatestRevision:      row.LatestRevision,
-			IssuedRevisionCount: row.IssuedRevisionCount,
+			ID:                   row.ID,
+			QuoteNumber:          row.QuoteNumber,
+			Subject:              row.Subject,
+			CustomerName:         row.CustomerName,
+			LatestRevision:       row.LatestRevision,
+			IssuedRevisionCount:  row.IssuedRevisionCount,
+			AllBought:            row.AllBought,
+			LeafCount:            row.LeafCount,
+			RemainingLeafCount:   row.RemainingLeafCount,
+			SavedPOCount:         row.SavedPOCount,
+			DraftPOCount:         row.DraftPOCount,
+			LegacyHeaderDiscount: row.LegacyHeaderDiscount,
 		}
 		if row.ActivePO != nil {
 			dto.ActivePO = &POSourceActivePODTO{
@@ -225,7 +276,14 @@ func (q *Quotation) GetPOSourceOccupancy(quotationID int64) (POSourceOccupancyDT
 	if err := client.Get(path, &response); err != nil {
 		return POSourceOccupancyDTO{}, err
 	}
-	dto := POSourceOccupancyDTO{QuotationID: response.QuotationID}
+	dto := POSourceOccupancyDTO{
+		QuotationID:          response.QuotationID,
+		AllBought:            response.AllBought,
+		RemainingLeafCount:   response.RemainingLeafCount,
+		SavedPOCount:         response.SavedPOCount,
+		DraftPOCount:         response.DraftPOCount,
+		LegacyHeaderDiscount: response.LegacyHeaderDiscount,
+	}
 	if response.ActivePO != nil {
 		dto.ActivePO = &POSourceActivePODTO{
 			ID:    response.ActivePO.ID,
@@ -233,4 +291,55 @@ func (q *Quotation) GetPOSourceOccupancy(quotationID int64) (POSourceOccupancyDT
 		}
 	}
 	return dto, nil
+}
+
+// GetQuotationAvailability reads the latest revision's bought state: quoted,
+// saved-bought, draft, remaining and over-bought quantities per leaf, plus the
+// All bought and legacy-header flags. The workspace uses it to show only
+// remaining leaves and to disable Create PO when nothing is left.
+func (q *Quotation) GetQuotationAvailability(quotationID int64, revision int16) (POSourceAvailabilityDTO, error) {
+	if err := q.requireUser(q.ctx); err != nil {
+		return POSourceAvailabilityDTO{}, err
+	}
+	client, err := api()
+	if err != nil {
+		return POSourceAvailabilityDTO{}, err
+	}
+	var response apicontract.POSourceAvailabilityResponse
+	path := "/v1/po-sources/" + strconv.FormatInt(quotationID, 10) + "/availability"
+	if revision >= 0 {
+		path += "?revision=" + strconv.Itoa(int(revision))
+	}
+	if err := client.Get(path, &response); err != nil {
+		return POSourceAvailabilityDTO{}, err
+	}
+	items := make([]POSourceAvailabilityItemDTO, 0, len(response.Items))
+	for _, item := range response.Items {
+		items = append(items, POSourceAvailabilityItemDTO{
+			QuotationItemNo:          item.QuotationItemNo,
+			QuotationSubNo:           item.QuotationSubNo,
+			Label:                    item.Label,
+			Description:              item.Description,
+			ParentDescription:        item.ParentDescription,
+			GroupKey:                 item.GroupKey,
+			DescriptionLines:         item.DescriptionLines,
+			UoM:                      item.UoM,
+			QuotedQuantityScaled:     item.QuotedQuantityScaled,
+			BoughtQuantityScaled:     item.BoughtQuantityScaled,
+			DraftQuantityScaled:      item.DraftQuantityScaled,
+			RemainingQuantityScaled:  item.RemainingQuantityScaled,
+			OverBoughtQuantityScaled: item.OverBoughtQuantityScaled,
+			QuotedUnitPriceMinor:     item.QuotedUnitPriceMinor,
+		})
+	}
+	return POSourceAvailabilityDTO{
+		QuotationID:          response.QuotationID,
+		RevisionNumber:       response.RevisionNumber,
+		LatestRevision:       response.LatestRevision,
+		AllBought:            response.AllBought,
+		LegacyHeaderDiscount: response.LegacyHeaderDiscount,
+		SavedPOCount:         response.SavedPOCount,
+		DraftPOCount:         response.DraftPOCount,
+		Items:                items,
+	}, nil
 }

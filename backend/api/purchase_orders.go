@@ -59,9 +59,17 @@ func (s *Server) createPurchaseOrderDraft(context echo.Context) error {
 	if request.QuotationID < 0 || request.RevisionNumber == nil || *request.RevisionNumber < 0 {
 		return context.JSON(http.StatusBadRequest, map[string]string{"error": "invalid quotation source"})
 	}
+	items := make([]store.PurchaseOrderCreateItem, 0, len(request.Items))
+	for _, item := range request.Items {
+		items = append(items, store.PurchaseOrderCreateItem{
+			QuotationItemNo: item.QuotationItemNo,
+			QuotationSubNo:  item.QuotationSubNo,
+		})
+	}
 	order, err := s.database.CreatePurchaseOrderDraft(requestContext, store.PurchaseOrderCreate{
 		QuotationID:      request.QuotationID,
 		RevisionNumber:   *request.RevisionNumber,
+		Items:            items,
 		ReceivedDate:     received,
 		BusinessCategory: request.BusinessCategory,
 		CreatedBy:        user.ID,
@@ -450,11 +458,6 @@ func purchaseOrderError(context echo.Context, err error) error {
 			"error": err.Error(),
 			"code":  "po_source_unchanged",
 		})
-	case errors.Is(err, store.ErrPurchaseOrderTargetOccupied):
-		return context.JSON(http.StatusConflict, map[string]string{
-			"error": err.Error(),
-			"code":  "po_target_occupied",
-		})
 	case errors.Is(err, store.ErrPurchaseOrderConfirmationCustomerLocked):
 		return context.JSON(http.StatusConflict, map[string]string{
 			"error": err.Error(),
@@ -465,10 +468,20 @@ func purchaseOrderError(context echo.Context, err error) error {
 			"error": "a correction needs a reason",
 			"code":  "po_correction_reason_required",
 		})
-	case errors.Is(err, store.ErrPurchaseOrderExists):
+	case errors.Is(err, store.ErrQuotationFullyBought):
 		return context.JSON(http.StatusConflict, map[string]string{
-			"error": "this quotation already has a purchase order",
-			"code":  "po_already_exists",
+			"error": err.Error(),
+			"code":  "quotation_fully_bought",
+		})
+	case errors.Is(err, store.ErrPurchaseOrderItemAlreadyBought):
+		return context.JSON(http.StatusConflict, map[string]string{
+			"error": err.Error(),
+			"code":  "po_item_already_bought",
+		})
+	case errors.Is(err, store.ErrPurchaseOrderLegacyHeaderDiscount):
+		return context.JSON(http.StatusConflict, map[string]string{
+			"error": err.Error(),
+			"code":  "po_legacy_header_discount",
 		})
 	case errors.Is(err, store.ErrPurchaseOrderNotDraft):
 		return context.JSON(http.StatusConflict, map[string]string{

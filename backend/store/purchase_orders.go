@@ -63,8 +63,17 @@ var (
 	// organization: the row exists but is outside the caller's boundary, and
 	// saying so would confirm another tenant's id.
 	ErrPurchaseOrderNotFound = errors.New("purchase order not found")
-	// ErrPurchaseOrderExists is the one-active-record-per-Quotation refusal.
-	ErrPurchaseOrderExists = errors.New("quotation already has an active purchase order")
+	// ErrQuotationFullyBought refuses a new purchase order when every leaf of
+	// the quotation's latest revision has already been bought.
+	ErrQuotationFullyBought = errors.New("this quotation has no remaining quantity to order")
+	// ErrPurchaseOrderItemAlreadyBought refuses a line whose quotation leaf is
+	// exhausted by other saved purchase orders. It is the finalize-time race
+	// refusal, not a draft rule.
+	ErrPurchaseOrderItemAlreadyBought = errors.New("this quotation item has no remaining quantity to order")
+	// ErrPurchaseOrderLegacyHeaderDiscount refuses a new allocation-backed PO
+	// against a revision whose stored whole-order discount is nonzero. Row-only
+	// pricing is the current model; the legacy revision must be reissued first.
+	ErrPurchaseOrderLegacyHeaderDiscount = errors.New("this quotation revision carries a legacy whole-order discount; reissue it with row-only discounts")
 	// ErrPurchaseOrderNotDraft refuses a write to a finalized record.
 	ErrPurchaseOrderNotDraft = errors.New("purchase order is not a draft")
 	// ErrPurchaseOrderSourceNotFound means the selected Quotation or revision
@@ -302,12 +311,22 @@ type PurchaseOrderFinalize struct {
 // from the revision inside the transaction.
 type PurchaseOrderCreate struct {
 	ReceivedDate   *time.Time
+	Items          []PurchaseOrderCreateItem
 	QuotationID    int64
 	RevisionNumber int16
 	// BusinessCategory is optional at creation; a draft may start Unassigned.
 	// A supplied value must be one of the four codes.
 	BusinessCategory string
 	CreatedBy        int64
+}
+
+// PurchaseOrderCreateItem selects one remaining quotation leaf for a new draft.
+// Empty Items means "every leaf with remaining quantity", which keeps the
+// ordinary first-PO flow one call. The server fills the quantity and the
+// row-discounted quotation price; staff edit them in the workspace.
+type PurchaseOrderCreateItem struct {
+	QuotationItemNo int
+	QuotationSubNo  *int
 }
 
 // PurchaseOrderBlankCreate starts a draft with no source and no Customer
@@ -378,10 +397,10 @@ type purchaseOrderQuerier interface {
 	QueryRow(context.Context, string, ...any) pgx.Row
 }
 
-// CreatePurchaseOrderDraft creates the one active PO for a Quotation from the
-// exact issued revision. The unique index on quotation_id is the concurrency
-// guard: two simultaneous creations race in Postgres, one wins, and the other
-// is refused with ErrPurchaseOrderExists rather than silently overwritten.
+// CreatePurchaseOrderDraft creates a draft for the exact issued revision from
+// the selected remaining leaves, or from every leaf that still has quantity
+// when the caller selects none. One quotation may produce many drafts: the
+// allocations, not a unique index, are the bought-state truth.
 func (s *Store) CreatePurchaseOrderDraft(ctx context.Context, input PurchaseOrderCreate) (PurchaseOrder, error) {
 	org, err := s.RequireOrg(ctx)
 	if err != nil {
@@ -410,9 +429,67 @@ func (s *Store) CreatePurchaseOrderDraft(ctx context.Context, input PurchaseOrde
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
-	source, err := loadPurchaseOrderSource(ctx, tx, schema, input.QuotationID, input.RevisionNumber)
+	// The global order is quotation first, then purchase order. A create only
+	// takes the quotation; the lock serializes it with finalize, correction and
+	// deletion so a stale availability read cannot slip between them.
+	if err := lockQuotationForAllocation(ctx, tx, schema, input.QuotationID); err != nil {
+		return PurchaseOrder{}, err
+	}
+
+	source, err := loadPurchaseOrderSourceDetail(ctx, tx, schema, input.QuotationID, input.RevisionNumber)
 	if err != nil {
 		return PurchaseOrder{}, err
+	}
+	availability, err := getQuotationAvailability(
+		ctx, tx, schema, org.ID, input.QuotationID, input.RevisionNumber)
+	if err != nil {
+		return PurchaseOrder{}, err
+	}
+	if availability.AllBought {
+		return PurchaseOrder{}, ErrQuotationFullyBought
+	}
+
+	byLeaf := make(map[string]PurchaseOrderSourceLine, len(source.Lines))
+	for _, line := range source.Lines {
+		byLeaf[allocationSourceKey(line.QuotationItemNo, line.QuotationSubNo)] = line
+	}
+	selected := make([]PurchaseOrderSourceLine, 0, len(source.Lines))
+	selectedQuantities := make([]int64, 0, len(source.Lines))
+	if len(input.Items) == 0 {
+		for _, line := range source.Lines {
+			leaf, ok := availabilityLeaf(availability, line.QuotationItemNo, line.QuotationSubNo)
+			if !ok || leaf.RemainingQuantityScaled <= 0 {
+				continue
+			}
+			selected = append(selected, line)
+			selectedQuantities = append(selectedQuantities, leaf.RemainingQuantityScaled)
+		}
+	} else {
+		seen := make(map[string]bool, len(input.Items))
+		for _, pick := range input.Items {
+			key := allocationSourceKey(pick.QuotationItemNo, pick.QuotationSubNo)
+			line, ok := byLeaf[key]
+			if !ok {
+				return PurchaseOrder{}, fmt.Errorf(
+					"%w: quotation item %s is not a line of revision %d",
+					ErrPurchaseOrderInvalid, key, input.RevisionNumber)
+			}
+			if seen[key] {
+				return PurchaseOrder{}, fmt.Errorf(
+					"%w: quotation item %s is selected twice; one leaf may appear once",
+					ErrPurchaseOrderInvalid, key)
+			}
+			seen[key] = true
+			leaf, ok := availabilityLeaf(availability, pick.QuotationItemNo, pick.QuotationSubNo)
+			if !ok || leaf.RemainingQuantityScaled <= 0 {
+				return PurchaseOrder{}, ErrPurchaseOrderItemAlreadyBought
+			}
+			selected = append(selected, line)
+			selectedQuantities = append(selectedQuantities, leaf.RemainingQuantityScaled)
+		}
+	}
+	if len(selected) == 0 {
+		return PurchaseOrder{}, ErrQuotationFullyBought
 	}
 
 	received := normalizeDate(input.ReceivedDate)
@@ -420,20 +497,16 @@ func (s *Store) CreatePurchaseOrderDraft(ctx context.Context, input PurchaseOrde
 		received = companyToday(time.Now())
 	}
 
-	lines, err := loadPurchaseOrderSourceLines(ctx, tx, schema, source.RevisionID)
-	if err != nil {
-		return PurchaseOrder{}, err
-	}
-	// The allocation writer needs the frozen source lines alongside the header.
-	source.Lines = lines
+	source.Lines = selected
 	ppnBps, err := PurchaseOrderPPNBps(
 		source.TaxZone, source.TaxType, source.ServiceCategory, source.TaxCategory)
 	if err != nil {
 		return PurchaseOrder{}, err
 	}
-	items := make([]PurchaseOrderItem, len(lines))
-	for index, line := range lines {
+	items := make([]PurchaseOrderItem, len(selected))
+	for index, line := range selected {
 		items[index] = line.PurchaseOrderItem()
+		items[index].QuantityScaled = selectedQuantities[index]
 	}
 	items, calculation, err := calculatePurchaseOrderLines(items, source.DiscountPercent, 0, "", ppnBps)
 	if err != nil {
@@ -472,9 +545,6 @@ func (s *Store) CreatePurchaseOrderDraft(ctx context.Context, input PurchaseOrde
 		source.TaxType, source.ServiceCategory, input.BusinessCategory,
 	).Scan(&id, &uuid)
 	if err != nil {
-		if isActivePurchaseOrderConflict(err) {
-			return PurchaseOrder{}, ErrPurchaseOrderExists
-		}
 		// A concurrent quotation deletion holds the parent row FOR UPDATE; this
 		// insert's foreign-key check then fails with 23503. The source is gone,
 		// not the request malformed.
@@ -488,7 +558,7 @@ func (s *Store) CreatePurchaseOrderDraft(ctx context.Context, input PurchaseOrde
 	if err != nil {
 		return PurchaseOrder{}, err
 	}
-	if err := replacePurchaseOrderAllocations(ctx, tx, schema, org.ID, id, source, kept); err != nil {
+	if err := replacePurchaseOrderAllocations(ctx, tx, schema, org.ID, id, source, kept, false); err != nil {
 		return PurchaseOrder{}, err
 	}
 	sessionID, err := createReconciliationSessionTx(ctx, tx, schema, org.ID, id,
@@ -926,10 +996,23 @@ func (s *Store) UpdatePurchaseOrderDraft(ctx context.Context, input PurchaseOrde
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
+	// #650/#651 global lock order: quotation first, then PO. A draft save now
+	// rewrites allocations too, so it must take the same pair in the same order
+	// as finalize and correction.
+	peekedQuotationID, err := peekPurchaseOrderQuotationID(ctx, tx, schema, org.ID, input.ID)
+	if err != nil {
+		return PurchaseOrder{}, err
+	}
+	if err := lockQuotationForAllocation(ctx, tx, schema, peekedQuotationID); err != nil {
+		return PurchaseOrder{}, err
+	}
 	lock, err := lockPurchaseOrderWrite(ctx, tx, schema, org.ID, input.ID,
 		input.ExpectedVersion, PurchaseOrderStateDraft)
 	if err != nil {
 		return PurchaseOrder{}, err
+	}
+	if lock.LiveQuotationID != peekedQuotationID {
+		return PurchaseOrder{}, ErrPurchaseOrderVersionConflict
 	}
 	// #496: a never-linked or formerly-linked draft still saves its own
 	// PO-owned values. Only the paths that need the frozen revision (review,
@@ -944,9 +1027,15 @@ func (s *Store) UpdatePurchaseOrderDraft(ctx context.Context, input PurchaseOrde
 		if err != nil {
 			return PurchaseOrder{}, err
 		}
-		if _, err := insertPurchaseOrderCorrection(ctx, tx, schema, stored, org.ID,
+		correctionID, err := insertPurchaseOrderCorrection(ctx, tx, schema, stored, org.ID,
 			PurchaseOrderCorrectionKindDraftOverwrite, PurchaseOrderDraftOverwriteReason,
-			input.UpdatedBy); err != nil {
+			input.UpdatedBy)
+		if err != nil {
+			return PurchaseOrder{}, err
+		}
+		// The replaced draft keeps its allocation picture beside its lines.
+		if err := snapshotPurchaseOrderCorrectionAllocations(
+			ctx, tx, schema, correctionID, input.ID); err != nil {
 			return PurchaseOrder{}, err
 		}
 	}
@@ -976,6 +1065,21 @@ func (s *Store) UpdatePurchaseOrderDraft(ctx context.Context, input PurchaseOrde
 	}
 	kept, removed, err := replacePurchaseOrderItems(ctx, tx, schema, org.ID, input.ID, lines)
 	if err != nil {
+		return PurchaseOrder{}, err
+	}
+	// #651: a draft save rewrites its allocations so the advisory "in drafts"
+	// count is never stale. A source-less draft clears whatever a former link
+	// left behind; a live one freezes the source baseline again.
+	var source PurchaseOrderSource
+	if lock.SourceState == PurchaseOrderSourceStateLive {
+		source, err = loadPurchaseOrderSourceDetail(
+			ctx, tx, schema, lock.QuotationID, lock.SourceRevision)
+		if err != nil {
+			return PurchaseOrder{}, err
+		}
+	}
+	if err := replacePurchaseOrderAllocations(
+		ctx, tx, schema, org.ID, input.ID, source, kept, true); err != nil {
 		return PurchaseOrder{}, err
 	}
 	// #502 ticket 05: the saved line set owns the stable identities. Newly
@@ -2109,14 +2213,6 @@ func dateOrNil(value *time.Time) any {
 		return nil
 	}
 	return normalizeDate(value)
-}
-
-func isActivePurchaseOrderConflict(err error) bool {
-	var pgErr *pgconn.PgError
-	if !errors.As(err, &pgErr) {
-		return false
-	}
-	return pgErr.Code == "23505" && pgErr.ConstraintName == "purchase_orders_active_quotation_idx"
 }
 
 // isMissingQuotationConflict names the foreign-key failure a creation race with

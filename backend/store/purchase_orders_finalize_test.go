@@ -701,7 +701,7 @@ func TestFinalizePurchaseOrderRefusesACorruptedSourceLink(t *testing.T) {
 // the #573 split: the row discount is copied because it is printed per line,
 // while the source's whole-PO discount is retired and must not be carried into
 // the draft. The printed source totals remain evidence of what was issued.
-func TestPurchaseOrderDraftCopiesTheSourceRowDiscountButNotTheWholeDiscount(t *testing.T) {
+func TestPurchaseOrderDraftCopiesTheSourceRowDiscount(t *testing.T) {
 	database := openTestSchema(t, "vera_po_finalize_seed")
 	record, err := database.SaveRevision(context.Background(), RevisionDraft{
 		CustomerCode:     2,
@@ -714,7 +714,7 @@ func TestPurchaseOrderDraftCopiesTheSourceRowDiscountButNotTheWholeDiscount(t *t
 		ValidityDays:     30,
 		PaymentTermDays:  45,
 		LeadTimeDays:     10,
-		DiscountPercent:  10,
+		DiscountPercent:  0,
 		TaxZone:          "FTZ",
 		TaxType:          "Goods",
 		Currency:         "USD",
@@ -761,7 +761,7 @@ func TestPurchaseOrderDraftCopiesTheSourceRowDiscountButNotTheWholeDiscount(t *t
 		t.Errorf("PO totals = subtotal %d / grand %d; want 228/228",
 			draft.SubtotalMinor, draft.GrandTotalMinor)
 	}
-	// The source's printed figures still record its own whole discount.
+	// The source's printed figures still record its own row discount.
 	if draft.PrintedSubtotalMinor != 240 || draft.PrintedDiscountMinor != 24 ||
 		draft.PrintedGrandTotalMinor != 216 {
 		t.Errorf("printed snapshot = %d/%d/%d; want 240/24/216",
@@ -777,6 +777,58 @@ func TestPurchaseOrderDraftCopiesTheSourceRowDiscountButNotTheWholeDiscount(t *t
 	}
 	if draft.Items[0].UnitPriceMinor != 120 {
 		t.Errorf("unit price = %d; want the printed list 120", draft.Items[0].UnitPriceMinor)
+	}
+}
+
+func TestQuotationAvailabilityReportsALegacyWholeOrderDiscount(t *testing.T) {
+	database := openTestSchema(t, "vera_po_finalize_legacy_header")
+	record, err := database.SaveRevision(context.Background(), RevisionDraft{
+		CustomerCode:     2,
+		CustomerName:     "PT. Legacy Header",
+		CustomerAddress:  "Jl. Billing 1",
+		RecipientName:    "Budi Santoso",
+		RecipientAddress: "Jl. Recipient 9",
+		Subject:          "Legacy header discount",
+		Incoterm:         "CIF",
+		ValidityDays:     30,
+		PaymentTermDays:  45,
+		LeadTimeDays:     10,
+		DiscountPercent:  10,
+		TaxZone:          "FTZ",
+		TaxType:          "Goods",
+		Currency:         "USD",
+		HTMLSnapshot:     "<html>legacy header snapshot</html>",
+		Items: []RevisionItem{{
+			ItemNo:                1,
+			Description:           "Legacy widget",
+			Qty:                   2,
+			UoM:                   "Pc",
+			UnitPrice:             100,
+			OriginalTotal:         200,
+			MarginalizedUnitPrice: 100,
+			MarginalizedTotal:     200,
+			ListUnitPrice:         100,
+		}},
+		Totals: RevisionTotals{
+			OriginalSubtotal:          200,
+			OriginalGrand:             180,
+			MarginalizedSubtotal:      200,
+			MarginalizedDiscount:      20,
+			MarginalizedGrand:         180,
+			MarginalizedGrandAfterTax: 180,
+			CustomerGrandTotal:        180,
+		},
+	})
+	if err != nil {
+		t.Fatalf("seed legacy header quotation: %v", err)
+	}
+	ctx := poContext(t, database)
+	availability, err := database.GetQuotationAvailability(ctx, record.ID)
+	if err != nil {
+		t.Fatalf("read legacy availability: %v", err)
+	}
+	if !availability.LegacyHeaderDiscount {
+		t.Error("availability did not flag the stored whole-order discount")
 	}
 }
 

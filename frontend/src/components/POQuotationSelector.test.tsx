@@ -24,6 +24,12 @@ const QUOTATION: POSourceQuotation = {
   latestRevision: 1,
   issuedRevisionCount: 2,
   activePO: null,
+  allBought: false,
+  leafCount: 2,
+  remainingLeafCount: 2,
+  savedPoCount: 0,
+  draftPoCount: 0,
+  legacyHeaderDiscount: false,
 };
 
 const USED: POSourceQuotation = {
@@ -34,6 +40,12 @@ const USED: POSourceQuotation = {
   latestRevision: 0,
   issuedRevisionCount: 1,
   activePO: { id: 21, state: "saved" },
+  allBought: false,
+  leafCount: 2,
+  remainingLeafCount: 1,
+  savedPoCount: 1,
+  draftPoCount: 0,
+  legacyHeaderDiscount: false,
 };
 
 const DRAFT: POSourceQuotation = {
@@ -44,12 +56,72 @@ const DRAFT: POSourceQuotation = {
   latestRevision: 0,
   issuedRevisionCount: 1,
   activePO: { id: 20, state: "draft" },
+  allBought: false,
+  leafCount: 1,
+  remainingLeafCount: 1,
+  savedPoCount: 0,
+  draftPoCount: 1,
+  legacyHeaderDiscount: false,
+};
+
+const ALL_BOUGHT: POSourceQuotation = {
+  id: 15,
+  quoteNumber: "1502260004",
+  subject: "Completed supply",
+  customerName: "PT. Fully Bought",
+  latestRevision: 0,
+  issuedRevisionCount: 1,
+  activePO: { id: 22, state: "saved" },
+  allBought: true,
+  leafCount: 2,
+  remainingLeafCount: 0,
+  savedPoCount: 2,
+  draftPoCount: 0,
+  legacyHeaderDiscount: false,
 };
 
 const TWO_REVISIONS = [
   { revision: 1, issuedAt: "2026-10-20T10:00:00+07:00" },
   { revision: 0, issuedAt: "2026-10-18T10:00:00+07:00" },
 ];
+
+const AVAILABILITY = {
+  quotationId: QUOTATION.id,
+  revisionNumber: 1,
+  latestRevision: 1,
+  allBought: false,
+  legacyHeaderDiscount: false,
+  savedPoCount: 1,
+  draftPoCount: 0,
+  items: [
+    {
+      quotationItemNo: 1,
+      quotationSubNo: null,
+      label: "1",
+      description: "Electrical installation",
+      uom: "Pc",
+      quotedQuantityScaled: 100_000,
+      boughtQuantityScaled: 40_000,
+      draftQuantityScaled: 0,
+      remainingQuantityScaled: 60_000,
+      overBoughtQuantityScaled: 0,
+      quotedUnitPriceMinor: 5_000_000,
+    },
+    {
+      quotationItemNo: 2,
+      quotationSubNo: null,
+      label: "2",
+      description: "Cabling",
+      uom: "Lot",
+      quotedQuantityScaled: 10_000,
+      boughtQuantityScaled: 10_000,
+      draftQuantityScaled: 0,
+      remainingQuantityScaled: 0,
+      overBoughtQuantityScaled: 0,
+      quotedUnitPriceMinor: 2_500_000,
+    },
+  ],
+};
 
 const SOLE_REVISION = [{ revision: 0, issuedAt: "2026-10-18T10:00:00+07:00" }];
 
@@ -106,6 +178,13 @@ function atStepThree(revision = 1) {
     { type: "revisionsLoaded", quotationId: QUOTATION.id, revisions: TWO_REVISIONS },
     { type: "revisionSelected", revision },
     { type: "continue" },
+    { type: "availabilityLoading" },
+    {
+      type: "availabilityLoaded",
+      quotationId: QUOTATION.id,
+      revision,
+      availability: { ...AVAILABILITY, revisionNumber: revision },
+    },
   ]);
 }
 
@@ -154,37 +233,39 @@ describe("POQuotationSelectorView step 1 (issue #467)", () => {
     expect(buttonTagFor(html, "Next page")).not.toContain(" disabled=");
   });
 
-  it("makes a saved Quotation non-interactive with a reason and the disabled cursor", () => {
+  it("keeps a partly bought Quotation selectable and shows its Partial badge", () => {
     const html = render(stepOneState());
-    const usedTag = buttonTagFor(html, "Quotation 1502260002, PT. H-Tech Oilfield Equipment");
-    expect(usedTag).toContain(" disabled=");
-    expect(usedTag).toContain('aria-disabled="true"');
-    expect(usedTag).toContain("cursor-not-allowed");
-
-    // A disabled button's descendants are not uniformly exposed, so the
-    // reason lives outside the button and the button points at it.
-    const describedBy = /aria-describedby="([^"]+)"/.exec(usedTag)?.[1];
-    expect(describedBy).toBeTruthy();
-    expect(html).toContain(`id="${describedBy}"`);
-    expect(html).toContain("PO already exists");
-    const usedElement = buttonElementFor(
-      html,
-      "Quotation 1502260002, PT. H-Tech Oilfield Equipment"
-    );
-    expect(usedElement).not.toContain("PO already exists");
-
-    // The available row is the contrast that makes the guard meaningful.
-    const available = buttonTagFor(html, "Quotation 1502260001, PT. Infineon Technologies Batam");
-    expect(available).not.toContain(" disabled=");
-    expect(available).not.toContain("cursor-not-allowed");
-    expect(available).not.toContain("aria-describedby=");
+    const partialTag = buttonTagFor(html, "Quotation 1502260002, PT. H-Tech Oilfield Equipment");
+    expect(partialTag).not.toContain(" disabled=");
+    expect(partialTag).not.toContain("cursor-not-allowed");
+    expect(html).toContain("Partial");
+    expect(html).toContain("1 of 2 left");
+    expect(html).toContain("1 saved");
   });
 
-  it("offers Open draft for a draft and keeps the row itself non-selectable", () => {
+  it("disables an All bought Quotation with a revision reason", () => {
+    const state = stepOneState({
+      rows: [ALL_BOUGHT],
+      total: 1,
+      totalPages: 1,
+    });
+    const html = render(state);
+    const rowTag = buttonTagFor(html, "Quotation 1502260004, PT. Fully Bought");
+    expect(rowTag).toContain(" disabled=");
+    expect(rowTag).toContain('aria-disabled="true"');
+    expect(rowTag).toContain("cursor-not-allowed");
+    const describedBy = /aria-describedby="([^"]+)"/.exec(rowTag)?.[1];
+    expect(describedBy).toBeTruthy();
+    expect(html).toContain(`id="${describedBy}"`);
+    expect(html).toContain("All bought");
+    expect(html).toContain("Revise the quotation to order more.");
+  });
+
+  it("offers Open draft for a draft while the row stays selectable for another PO", () => {
     const html = render(stepOneState());
     const draftRow = buttonTagFor(html, "Quotation 1502260003, PT. Datalec Global Solution");
-    expect(draftRow).toContain(" disabled=");
-    expect(html).toContain("Draft purchase order in progress");
+    expect(draftRow).not.toContain(" disabled=");
+    expect(html).toContain("1 in draft");
     const action = buttonTagFor(
       html,
       "Open draft for Quotation 1502260003"
@@ -203,10 +284,15 @@ describe("POQuotationSelectorView step 1 (issue #467)", () => {
     expect(dialogTag).toContain('tabindex="-1"');
   });
 
-  it("hides occupied rows when the filter is on, and shows the checked filter", () => {
-    const html = render(stepOneState({ hideUsed: true }));
-    expect(html).not.toContain("1502260002");
-    expect(html).not.toContain("1502260003");
+  it("hides All bought rows when the filter is on, and shows the checked filter", () => {
+    const html = render(
+      stepOneState({
+        hideUsed: true,
+        rows: [QUOTATION, USED, DRAFT, ALL_BOUGHT],
+      })
+    );
+    expect(html).not.toContain("1502260004");
+    expect(html).toContain("1502260002");
     expect(html).toContain("Hide quotations already used");
     expect(html).toMatch(/type="checkbox"[^>]*checked/);
   });

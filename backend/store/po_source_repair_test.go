@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sync"
 	"testing"
 	"time"
 )
@@ -414,7 +415,7 @@ func TestRepairPurchaseOrderSourceMovesCustomerOnlyBeforeAssignment(t *testing.T
 	}
 }
 
-func TestRepairPurchaseOrderSourceRefusesAnOccupiedTarget(t *testing.T) {
+func TestRepairPurchaseOrderSourceMovesToAQuotationWithAnotherPO(t *testing.T) {
 	database := openTestSchema(t, "vera_po_475_occupied")
 	ctx := poContext(t, database)
 	staff := poTestUser(t, database)
@@ -422,107 +423,89 @@ func TestRepairPurchaseOrderSourceRefusesAnOccupiedTarget(t *testing.T) {
 	original := seedRepairQuotation(t, database, 2, "PT. Buyer", "Original", "Jl. Billing A", 100, 45)
 	target := seedRepairQuotation(t, database, 2, "PT. Buyer", "Target", "Jl. Billing A", 100, 45)
 	saved := savedPurchaseOrder(t, database, ctx, staff, original, "PO-475-OCCUPIED")
-	// A draft is an active PO for the one-active-record rule, so it occupies
-	// the target quotation even before it is saved.
-	createFinalizeDraft(t, database, ctx, staff, target)
+	// #651 removed the one-active-record rule: the target may already have a
+	// draft (or saved record) and still receive another PO.
+	existing := createFinalizeDraft(t, database, ctx, staff, target)
 
-	if _, err := database.RepairPurchaseOrderSource(ctx,
-		repairInput(t, saved, admin, target, "move to an occupied quotation")); !errors.Is(err, ErrPurchaseOrderTargetOccupied) {
-		t.Fatalf("occupied target error = %v; want ErrPurchaseOrderTargetOccupied", err)
-	}
-	unchanged, err := database.GetPurchaseOrder(ctx, saved.ID)
+	repaired, err := database.RepairPurchaseOrderSource(ctx,
+		repairInput(t, saved, admin, target, "move beside the existing quotation PO"))
 	if err != nil {
-		t.Fatalf("read after refused repair: %v", err)
+		t.Fatalf("repair to a quotation with another PO = %v; want success", err)
 	}
-	if unchanged.QuotationID != original.ID || unchanged.Version != saved.Version {
-		t.Errorf("refused occupied-target repair wrote the record: source %d, version %d",
-			unchanged.QuotationID, unchanged.Version)
+	if repaired.QuotationID != target.ID || repaired.SourceRevision != target.RevisionNumber {
+		t.Errorf("repaired source = %d/%d; want %d/%d",
+			repaired.QuotationID, repaired.SourceRevision,
+			target.ID, target.RevisionNumber)
+	}
+	allocations := readAllocations(t, database, ctx, repaired.ID)
+	if len(allocations) != 2 {
+		t.Fatalf("repaired allocations = %d; want the target's two source leaves", len(allocations))
+	}
+	for key, allocation := range allocations {
+		if allocation.QuotationID != target.ID {
+			t.Errorf("repaired allocation %s source = %d; want %d",
+				key, allocation.QuotationID, target.ID)
+		}
+	}
+	if countRows(t, database, "purchase_orders", "quotation_id = $1", target.ID) != 2 {
+		t.Errorf("target quotation POs = %d; want the existing draft plus the repaired record",
+			countRows(t, database, "purchase_orders", "quotation_id = $1", target.ID))
+	}
+	if countRows(t, database, "purchase_orders", "id = $1", existing.ID) != 1 {
+		t.Error("the repair removed the target quotation's existing draft")
 	}
 }
 
-// TestRepairPurchaseOrderSourceLosesTheRaceForAnOccupiedTarget proves the
-// unique quotation index, not just the read-check, is what a concurrent
-// creator meets. An uncommitted insert into the target quotation is invisible
-// to the repair's pre-check; the repair's UPDATE then waits on that index
-// entry, and the commit turns the wait into the named refusal.
-func TestRepairPurchaseOrderSourceLosesTheRaceForAnOccupiedTarget(t *testing.T) {
+// TestRepairPurchaseOrderSourceConcurrentMovesHaveOneWinner proves the version
+// CAS still bounds two admins moving one saved record at once. Both take the
+// quotation pairs in ascending order, then the PO; the loser sees the moved
+// version instead of a deadlock or a silent overwrite.
+func TestRepairPurchaseOrderSourceConcurrentMovesHaveOneWinner(t *testing.T) {
 	database := openTestSchema(t, "vera_po_475_race")
 	ctx := poContext(t, database)
 	staff := poTestUser(t, database)
 	admin := poRepairAdmin(t, database)
 	original := seedRepairQuotation(t, database, 2, "PT. Buyer", "Original", "Jl. Billing A", 100, 45)
-	target := seedRepairQuotation(t, database, 2, "PT. Buyer", "Target", "Jl. Billing A", 100, 45)
+	firstTarget := seedRepairQuotation(t, database, 2, "PT. Buyer", "First target", "Jl. Billing A", 100, 45)
+	secondTarget := seedRepairQuotation(t, database, 2, "PT. Buyer", "Second target", "Jl. Billing A", 100, 45)
 	saved := savedPurchaseOrder(t, database, ctx, staff, original, "PO-475-RACE")
-	org, err := database.DefaultOrganization(ctx)
-	if err != nil {
-		t.Fatalf("organization: %v", err)
-	}
-	pool, err := database.poolOrError()
-	if err != nil {
-		t.Fatalf("pool: %v", err)
-	}
-	schema := database.configSchema()
 
-	blocker, err := pool.Begin(ctx)
-	if err != nil {
-		t.Fatalf("begin blocking insert: %v", err)
+	inputs := []PurchaseOrderSourceRepairInput{
+		repairInput(t, saved, admin, firstTarget, "move to the first target"),
+		repairInput(t, saved, admin, secondTarget, "move to the second target"),
 	}
-	defer func() { _ = blocker.Rollback(ctx) }()
-	if _, err := blocker.Exec(ctx, fmt.Sprintf(`
-		INSERT INTO %s.purchase_orders (
-			org_id, quotation_id, source_revision, state, customer_id,
-			customer_name, received_date, currency, tax_zone, created_by,
-			updated_by
-		) VALUES ($1,$2,$3,'draft',$4,$5,$6,$7,$8,$9,$9)`, schema),
-		org.ID, target.ID, target.RevisionNumber, customerIDByCode(t, database, 2),
-		"PT. Buyer", time.Now(), "USD", "FTZ", staff.ID,
-	); err != nil {
-		t.Fatalf("uncommitted occupying insert: %v", err)
+	results := make([]error, len(inputs))
+	var wait sync.WaitGroup
+	for index := range inputs {
+		wait.Add(1)
+		go func(index int) {
+			defer wait.Done()
+			_, results[index] = database.RepairPurchaseOrderSource(ctx, inputs[index])
+		}(index)
 	}
+	wait.Wait()
 
-	input := repairInput(t, saved, admin, target, "move while another record is being created")
-	done := make(chan error, 1)
-	go func() {
-		_, repairErr := database.RepairPurchaseOrderSource(ctx, input)
-		done <- repairErr
-	}()
-
-	waitDeadline := time.Now().Add(10 * time.Second)
-	waited := false
-	for time.Now().Before(waitDeadline) {
-		var waiting bool
-		if err := pool.QueryRow(ctx, `
-			SELECT EXISTS (
-				SELECT 1 FROM pg_stat_activity
-				WHERE datname = current_database()
-				  AND pid <> pg_backend_pid()
-				  AND wait_event_type = 'Lock'
-				  AND query ILIKE '%UPDATE%purchase_orders%'
-			)`).Scan(&waiting); err != nil {
-			t.Fatalf("poll for the repair wait: %v", err)
+	successes, conflicts := 0, 0
+	for _, err := range results {
+		switch {
+		case err == nil:
+			successes++
+		case errors.Is(err, ErrPurchaseOrderVersionConflict):
+			conflicts++
+		default:
+			t.Errorf("concurrent repair error = %v; want success or a version conflict", err)
 		}
-		if waiting {
-			waited = true
-			break
-		}
-		time.Sleep(10 * time.Millisecond)
 	}
-	if !waited {
-		_ = blocker.Rollback(ctx)
-		t.Fatal("the repair never waited on the target quotation index; the race was not exercised")
+	if successes != 1 || conflicts != 1 {
+		t.Fatalf("concurrent repairs = %d winners / %d conflicts; want one of each",
+			successes, conflicts)
 	}
-	if err := blocker.Commit(ctx); err != nil {
-		t.Fatalf("commit the occupying insert: %v", err)
-	}
-	if err := <-done; !errors.Is(err, ErrPurchaseOrderTargetOccupied) {
-		t.Fatalf("race repair error = %v; want ErrPurchaseOrderTargetOccupied", err)
-	}
-	unchanged, err := database.GetPurchaseOrder(ctx, saved.ID)
+	final, err := database.GetPurchaseOrder(ctx, saved.ID)
 	if err != nil {
-		t.Fatalf("read after lost race: %v", err)
+		t.Fatalf("read after the race: %v", err)
 	}
-	if unchanged.QuotationID != original.ID {
-		t.Errorf("lost race moved the source to %d; want it left on %d", unchanged.QuotationID, original.ID)
+	if final.QuotationID != firstTarget.ID && final.QuotationID != secondTarget.ID {
+		t.Errorf("final source = %d; want one of the two targets", final.QuotationID)
 	}
 }
 
@@ -688,13 +671,46 @@ func TestRepairPurchaseOrderSourceRefreshesTheSourceDerivedValues(t *testing.T) 
 	}
 }
 
-func TestListPOSourceQuotationsRepairModeFreesOnlyTheRepairedRecord(t *testing.T) {
+func TestListPOSourceQuotationsShowsPartialQuotationsAsSelectable(t *testing.T) {
 	database := openTestSchema(t, "vera_po_475_selector")
 	ctx := poContext(t, database)
 	staff := poTestUser(t, database)
 	first := seedRepairQuotation(t, database, 2, "PT. Buyer", "First", "Jl. Billing A", 100, 45)
 	second := seedRepairQuotation(t, database, 4, "PT. Other", "Second", "Jl. Billing B", 100, 45)
-	saved := savedPurchaseOrder(t, database, ctx, staff, first, "PO-475-SELECTOR")
+	// Buy one of the first quotation's two priced units: the quotation stays
+	// partial and selectable even though it already has a saved PO.
+	firstDraft := createFinalizeDraft(t, database, ctx, staff, first)
+	firstUpdate := PurchaseOrderUpdate{
+		ID:               firstDraft.ID,
+		BillingAddress:   firstDraft.BillingAddress,
+		DeliveryAddress:  firstDraft.DeliveryAddress,
+		ShipToCode:       firstDraft.ShipToCode,
+		ContactEmail:     firstDraft.ContactEmail,
+		ContactPhone:     firstDraft.ContactPhone,
+		PONumber:         firstDraft.PONumber,
+		Incoterms:        firstDraft.Incoterms,
+		PaymentTerms:     firstDraft.PaymentTerms,
+		PODate:           firstDraft.PODate,
+		ReceivedDate:     &firstDraft.ReceivedDate,
+		BusinessCategory: PurchaseOrderBusinessCategoryFm,
+		Items:            append([]PurchaseOrderItem(nil), firstDraft.Items...),
+		UpdatedBy:        staff.ID,
+		ExpectedVersion:  firstDraft.Version,
+	}
+	firstUpdate.Items[0].QuantityScaled = QuantityScale
+	firstReady, err := database.UpdatePurchaseOrderDraft(ctx, firstUpdate)
+	if err != nil {
+		t.Fatalf("reduce the first quotation order: %v", err)
+	}
+	firstInput := finalizeInput(firstReady, staff, "PO-475-SELECTOR")
+	firstInput.BusinessCategory = PurchaseOrderBusinessCategoryFm
+	firstInput.Decisions = []PurchaseOrderDecision{{
+		Key: "line:1:quantity", Choice: PurchaseOrderChoicePO,
+	}}
+	saved, err := database.FinalizePurchaseOrder(ctx, firstInput)
+	if err != nil {
+		t.Fatalf("finalize the partial first order: %v", err)
+	}
 	createFinalizeDraft(t, database, ctx, staff, second)
 
 	rows, _, err := database.ListPOSourceQuotations(ctx, 1, "", false, saved.ID)
@@ -705,21 +721,27 @@ func TestListPOSourceQuotationsRepairModeFreesOnlyTheRepairedRecord(t *testing.T
 	for _, row := range rows {
 		byID[row.ID] = row
 	}
-	if row, ok := byID[first.ID]; !ok || row.ActivePO != nil {
-		t.Errorf("the repaired record's quotation = %v; want it selectable with no active PO", row.ActivePO)
+	// #651: a quotation with a saved PO is still selectable while it has
+	// remaining leaves. The repaired record's own quotation is no exception.
+	if row, ok := byID[first.ID]; !ok || row.AllBought || row.RemainingLeafCount == 0 {
+		t.Errorf("the repaired record's quotation = %+v; want a selectable partial row", row)
 	}
-	if row, ok := byID[second.ID]; !ok || row.ActivePO == nil {
-		t.Errorf("another occupied quotation = %v; want it still disabled", row.ActivePO)
+	if row, ok := byID[first.ID]; ok && (row.ActivePO == nil || row.ActivePO.ID != saved.ID) {
+		t.Errorf("the repaired record's active PO = %v; want the saved record %d", row.ActivePO, saved.ID)
+	}
+	if row, ok := byID[second.ID]; !ok || row.AllBought || row.DraftPOCount != 1 {
+		t.Errorf("the draft quotation = %+v; want a selectable partial row with one draft", row)
 	}
 
-	// Normal entry keeps the repaired record's quotation occupied.
+	// Normal entry sees the same selectable rows: excludePOID is no longer an
+	// occupancy exemption because occupancy is not the rule.
 	rows, _, err = database.ListPOSourceQuotations(ctx, 1, "", false, 0)
 	if err != nil {
 		t.Fatalf("normal selector: %v", err)
 	}
 	for _, row := range rows {
-		if row.ID == first.ID && row.ActivePO == nil {
-			t.Error("normal PO entry made an occupied quotation selectable")
+		if row.AllBought {
+			t.Errorf("normal PO entry hid or disabled a partial quotation: %+v", row)
 		}
 	}
 
@@ -904,13 +926,21 @@ func TestRepairSourceMissingPurchaseOrderRepeatsTheSavedEligibilityRules(t *test
 		t.Fatalf("read the source-missing record: %v", err)
 	}
 
-	// An occupied target is refused; the live PO that occupies it is untouched.
+	// A target that already has a PO is allowed now; the existing record stays.
 	occupied := seedRepairQuotation(t, database, 2, "PT. Survives", "Occupied target", "Jl. Billing 1", 100, 45)
-	savedPurchaseOrder(t, database, ctx, staff, occupied, "PO-481-OCCUPIED")
-	if _, err := database.RepairPurchaseOrderSource(ctx,
-		repairInput(t, missing, admin, occupied, "move to an occupied source")); !errors.Is(err, ErrPurchaseOrderTargetOccupied) {
-		t.Fatalf("occupied target error = %v; want ErrPurchaseOrderTargetOccupied", err)
+	existing := savedPurchaseOrder(t, database, ctx, staff, occupied, "PO-481-OCCUPIED")
+	repaired, err := database.RepairPurchaseOrderSource(ctx,
+		repairInput(t, missing, admin, occupied, "move beside the existing source PO"))
+	if err != nil {
+		t.Fatalf("repair to a source with another PO = %v; want success", err)
 	}
+	if repaired.QuotationID != occupied.ID {
+		t.Errorf("repaired source = %d; want %d", repaired.QuotationID, occupied.ID)
+	}
+	if countRows(t, database, "purchase_orders", "id = $1", existing.ID) != 1 {
+		t.Error("the repair removed the target's existing purchase order")
+	}
+	missing = repaired
 
 	// A different customer is refused after the number exists.
 	other := seedRepairQuotation(t, database, 4, "PT. Other", "Other customer", "Jl. Billing B", 100, 45)
@@ -933,8 +963,8 @@ func TestRepairSourceMissingPurchaseOrderRepeatsTheSavedEligibilityRules(t *test
 	if err != nil {
 		t.Fatalf("read after refused repairs: %v", err)
 	}
-	if !after.SourceMissing || after.QuotationID != quotation.ID {
-		t.Errorf("refusals changed the source: %+v", after)
+	if after.SourceMissing || after.QuotationID != occupied.ID {
+		t.Errorf("refusals changed the repaired source: %+v", after)
 	}
 	if after.ConfirmationNumber == nil || *after.ConfirmationNumber != *assigned.ConfirmationNumber {
 		t.Errorf("refusals changed the confirmation number: %v", after.ConfirmationNumber)

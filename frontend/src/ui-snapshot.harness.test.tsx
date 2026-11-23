@@ -203,6 +203,12 @@ const PO_SELECTOR_ROWS: POSourceQuotation[] = [
     latestRevision: 2,
     issuedRevisionCount: 3,
     activePO: null,
+    allBought: false,
+    leafCount: 3,
+    remainingLeafCount: 3,
+    savedPoCount: 0,
+    draftPoCount: 0,
+    legacyHeaderDiscount: false,
   },
   {
     id: 11,
@@ -212,6 +218,12 @@ const PO_SELECTOR_ROWS: POSourceQuotation[] = [
     latestRevision: 0,
     issuedRevisionCount: 1,
     activePO: { id: 20, state: "draft" },
+    allBought: false,
+    leafCount: 3,
+    remainingLeafCount: 2,
+    savedPoCount: 1,
+    draftPoCount: 1,
+    legacyHeaderDiscount: false,
   },
   {
     id: 10,
@@ -221,6 +233,12 @@ const PO_SELECTOR_ROWS: POSourceQuotation[] = [
     latestRevision: 1,
     issuedRevisionCount: 2,
     activePO: { id: 21, state: "saved" },
+    allBought: true,
+    leafCount: 2,
+    remainingLeafCount: 0,
+    savedPoCount: 2,
+    draftPoCount: 0,
+    legacyHeaderDiscount: false,
   },
 ];
 const PO_SELECTOR_STEP_ONE = {
@@ -3905,6 +3923,7 @@ const CASES: SnapshotCase[] = [
         onEdit={() => undefined}
         purchaseOrder={null}
         purchaseOrderPending={false}
+        purchaseOrderAllBought={false}
         onCreatePurchaseOrder={() => undefined}
         onOpenPurchaseOrder={() => undefined}
         onCopy={() => undefined}
@@ -3930,6 +3949,7 @@ const CASES: SnapshotCase[] = [
         onEdit={() => undefined}
         purchaseOrder={{ id: 7, state: "draft" }}
         purchaseOrderPending={false}
+        purchaseOrderAllBought={false}
         onCreatePurchaseOrder={() => undefined}
         onOpenPurchaseOrder={() => undefined}
         onCopy={() => undefined}
@@ -3955,6 +3975,7 @@ const CASES: SnapshotCase[] = [
         onEdit={() => undefined}
         purchaseOrder={{ id: 7, state: "saved" }}
         purchaseOrderPending={false}
+        purchaseOrderAllBought={false}
         onCreatePurchaseOrder={() => undefined}
         onOpenPurchaseOrder={() => undefined}
         onCopy={() => undefined}

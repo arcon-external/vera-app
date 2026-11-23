@@ -114,13 +114,19 @@ type poSourceActivePO struct {
 }
 
 type poSourceRow struct {
-	ID                  int64             `json:"id"`
-	QuoteNumber         string            `json:"quoteNumber"`
-	Subject             string            `json:"subject"`
-	CustomerName        string            `json:"customerName"`
-	LatestRevision      int16             `json:"latestRevision"`
-	IssuedRevisionCount int               `json:"issuedRevisionCount"`
-	ActivePO            *poSourceActivePO `json:"activePO"`
+	ID                   int64             `json:"id"`
+	QuoteNumber          string            `json:"quoteNumber"`
+	Subject              string            `json:"subject"`
+	CustomerName         string            `json:"customerName"`
+	LatestRevision       int16             `json:"latestRevision"`
+	IssuedRevisionCount  int               `json:"issuedRevisionCount"`
+	ActivePO             *poSourceActivePO `json:"activePO"`
+	AllBought            bool              `json:"allBought"`
+	LeafCount            int               `json:"leafCount"`
+	RemainingLeafCount   int               `json:"remainingLeafCount"`
+	SavedPOCount         int               `json:"savedPoCount"`
+	DraftPOCount         int               `json:"draftPoCount"`
+	LegacyHeaderDiscount bool              `json:"legacyHeaderDiscount"`
 }
 
 type poSourceList struct {
@@ -410,8 +416,20 @@ func TestPOSourceListReportsTheActivePOAndHonoursTheHideFilter(t *testing.T) {
 		occupied.Quotations[0].ActivePO.State != "draft" {
 		t.Errorf("activePO = %+v; want draft %d", occupied.Quotations[0].ActivePO, draft.ID)
 	}
+	// #651: a draft is advisory and reserves nothing, so the filter keeps it.
+	if hidden := listPOSources(t, server, token, "?hideUsed=true"); len(hidden.Quotations) != 1 {
+		t.Errorf("hideUsed rows = %d; want the advisory draft still selectable", len(hidden.Quotations))
+	}
+
+	// Saving the record makes its allocation count: the quotation is fully
+	// bought and the filter hides it.
+	setPurchaseOrderStateForTest(t, "vera_api_po_sources_eligibility", draft.ID, "saved")
+	saved := listPOSources(t, server, token, "")
+	if !saved.Quotations[0].AllBought || saved.Quotations[0].SavedPOCount != 1 {
+		t.Errorf("saved row badges = %+v; want All bought by one saved PO", saved.Quotations[0])
+	}
 	if hidden := listPOSources(t, server, token, "?hideUsed=true"); len(hidden.Quotations) != 0 {
-		t.Errorf("hideUsed rows = %d; want the occupied quotation hidden", len(hidden.Quotations))
+		t.Errorf("hideUsed rows = %d; want the fully bought quotation hidden", len(hidden.Quotations))
 	}
 }
 

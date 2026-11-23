@@ -553,6 +553,32 @@ func (s *Store) FinalizePurchaseOrder(ctx context.Context, input PurchaseOrderFi
 	if err != nil {
 		return PurchaseOrder{}, err
 	}
+	// #651: the final save is the authoritative remaining-quantity gate. It runs
+	// under the quotation lock, so a concurrent finalize that took the last
+	// quantity makes this one refuse cleanly instead of double-booking it.
+	// Quantity above the remaining amount is allowed (it becomes quantity extra
+	// income later); only an exhausted leaf is refused.
+	availability, err := getQuotationAvailability(
+		ctx, tx, schema, org.ID, quotationID, sourceRevision)
+	if err != nil {
+		return PurchaseOrder{}, err
+	}
+	for index, item := range input.Items {
+		if item.QuotationItemNo == nil {
+			continue
+		}
+		// A missing leaf is the reference validation's refusal, with its own
+		// precise wording; only an exhausted, known leaf is this gate's.
+		leaf, ok := availabilityLeaf(availability, *item.QuotationItemNo, item.QuotationSubNo)
+		if !ok {
+			continue
+		}
+		if leaf.RemainingQuantityScaled <= 0 {
+			return PurchaseOrder{}, fmt.Errorf(
+				"%w: line %d names quotation item %s, which is fully bought",
+				ErrPurchaseOrderItemAlreadyBought, index+1, leaf.Label)
+		}
+	}
 	if err := checkPurchaseOrderSourceMatches(PurchaseOrder{
 		CustomerID: customerID,
 		Currency:   currency,
@@ -716,7 +742,7 @@ func (s *Store) FinalizePurchaseOrder(ctx context.Context, input PurchaseOrderFi
 	if err != nil {
 		return PurchaseOrder{}, err
 	}
-	if err := replacePurchaseOrderAllocations(ctx, tx, schema, org.ID, input.ID, source, kept); err != nil {
+	if err := replacePurchaseOrderAllocations(ctx, tx, schema, org.ID, input.ID, source, kept, false); err != nil {
 		return PurchaseOrder{}, err
 	}
 
