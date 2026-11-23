@@ -17,6 +17,7 @@ import {
   purchaseOrderVarianceBadges,
   type PurchaseOrderVarianceBadge,
 } from "../purchaseOrder";
+import { sanitizeQuantityInput } from "../poAggregate";
 
 // The IDR entry, transcribed field-for-field from
 // backend/currency/currency.go. This is the prop default only -- the live
@@ -164,17 +165,6 @@ function quantityTimes(unitMinor: number, rawQty: string): number {
   const remainder = product % divisor;
   const rounded = remainder * 2n >= divisor ? quotient + 1n : quotient;
   return Number(rounded);
-}
-
-/** Keeps digits and at most one decimal point, with four places. */
-function sanitizeQuantityInput(raw: string): string {
-  const cleaned = raw.replace(/[^\d.]/g, "");
-  const dot = cleaned.indexOf(".");
-  if (dot === -1) return cleaned;
-  return `${cleaned.slice(0, dot)}.${cleaned
-    .slice(dot + 1)
-    .replace(/\./g, "")
-    .slice(0, 4)}`;
 }
 
 /** One inline PO variance badge set. The text and tone come from the pure

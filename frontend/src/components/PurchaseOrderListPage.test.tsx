@@ -2,6 +2,7 @@ import { renderToString } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import {
   activeFilterCount,
+  formatReceivedDate,
   initialPOListFilters,
   initialPOListState,
   initialPOListStateFor,
@@ -13,7 +14,6 @@ import {
 } from "../poList";
 import {
   PurchaseOrderListView,
-  formatReceivedDate,
   type PurchaseOrderListViewProps,
 } from "./PurchaseOrderListPage";
 

@@ -14,6 +14,46 @@ import {
 /** The server's fixed page size when no size is requested (issue #469). */
 export const PO_LIST_PAGE_SIZE = 15;
 
+const RECEIVED_MONTHS = [
+  "Jan",
+  "Feb",
+  "Mar",
+  "Apr",
+  "May",
+  "Jun",
+  "Jul",
+  "Aug",
+  "Sep",
+  "Oct",
+  "Nov",
+  "Dec",
+] as const;
+
+/**
+ * Ticket 03: the docket's received date, the one form both PO screens use. A
+ * real YYYY-MM-DD calendar date reads `2 Oct 2026`; anything else (blank,
+ * unparsable, an impossible day) renders as-is so a missing date is never
+ * invented. The fulfillment drill-down imports this same helper, so its saved
+ * PO dates cannot drift from the list's.
+ */
+export function formatReceivedDate(raw: string): string {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(raw.trim());
+  if (match === null) return raw;
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  if (month < 1 || month > 12 || day < 1 || day > 31) return raw;
+  const date = new Date(Date.UTC(year, month - 1, day));
+  if (
+    date.getUTCFullYear() !== year ||
+    date.getUTCMonth() !== month - 1 ||
+    date.getUTCDate() !== day
+  ) {
+    return raw;
+  }
+  return `${day} ${RECEIVED_MONTHS[month - 1]} ${year}`;
+}
+
 /**
  * The list API's page-size bounds (issue #492). The backend accepts an
  * optional PageSize of 1..100; 0 or absent keeps the 15-row default. The

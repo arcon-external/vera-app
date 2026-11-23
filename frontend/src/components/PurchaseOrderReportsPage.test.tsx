@@ -239,6 +239,9 @@ interface RenderOptions {
   catalogue?: CurrencyInfo[] | null;
   onExport?: (view: PurchaseOrderReportView) => Promise<string>;
   mutationEpoch?: number;
+  isAdmin?: boolean;
+  onCloseQuotation?: (quotationID: number, reason: string) => Promise<unknown>;
+  onReopenQuotation?: (quotationID: number) => Promise<unknown>;
 }
 
 async function renderPage(options: RenderOptions = {}): Promise<void> {
@@ -250,6 +253,9 @@ async function renderPage(options: RenderOptions = {}): Promise<void> {
           currencyCatalogue={options.catalogue ?? CATALOGUE}
           onExport={options.onExport}
           mutationEpoch={options.mutationEpoch ?? 0}
+          isAdmin={options.isAdmin}
+          onCloseQuotation={options.onCloseQuotation}
+          onReopenQuotation={options.onReopenQuotation}
         />
       </ToastProvider>
     );
@@ -365,6 +371,71 @@ describe("Reports filters (issue #630)", () => {
       page: 1,
       pageSize: 25,
     });
+  });
+
+  it("passes the admin close action through to the fulfillment workspace (#648)", async () => {
+    fulfillmentMock.mockReset().mockImplementation(async (query: FulfillmentQueryInput) => ({
+      ...emptyFulfillment(query),
+      quotations: [
+        {
+          quotationId: 7,
+          quoteNumber: "1502260007",
+          customerName: "PT. Infineon Technologies Batam",
+          currency: "IDR",
+          latestRevision: 1,
+          issuedAt: "2026-10-10",
+          validUntil: "2026-11-09",
+          status: "open",
+          items: [],
+          extraExpenses: [],
+        },
+      ],
+      total: 1,
+    }));
+    const closeQuotation = vi.fn(async () => undefined);
+    const reopenQuotation = vi.fn(async () => undefined);
+    await renderPage({
+      isAdmin: true,
+      onCloseQuotation: closeQuotation,
+      onReopenQuotation: reopenQuotation,
+    });
+
+    const close = document.querySelector<HTMLButtonElement>(
+      'button[aria-label="Close quotation 1502260007"]'
+    );
+    if (close === null) throw new Error("an admin must see the close action");
+    await act(async () => {
+      close.click();
+    });
+    const reason = document.querySelector<HTMLTextAreaElement>(
+      'textarea[aria-label="Close reason"]'
+    );
+    if (reason === null) throw new Error("no close reason field");
+    act(() => {
+      const setter = Object.getOwnPropertyDescriptor(
+        HTMLTextAreaElement.prototype,
+        "value"
+      )?.set;
+      setter?.call(reason, "Customer cancelled the remainder");
+      reason.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    await act(async () => {
+      button("Confirm close quotation").click();
+    });
+    await flush();
+    expect(closeQuotation).toHaveBeenCalledWith(
+      7,
+      "Customer cancelled the remainder"
+    );
+
+    await renderPage({
+      isAdmin: false,
+      onCloseQuotation: closeQuotation,
+      onReopenQuotation: reopenQuotation,
+    });
+    expect(
+      document.querySelector('button[aria-label="Close quotation 1502260007"]')
+    ).toBeNull();
   });
 
   it("follows the report's selected currency into the drill-down", async () => {

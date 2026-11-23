@@ -8,6 +8,7 @@ import {
   buildPOListQuery,
   canOpenRow,
   customerCellLabel,
+  formatReceivedDate,
   initialPOListFilters,
   initialPOListState,
   initialPOListStateFor,
@@ -372,8 +373,21 @@ describe("row decisions (issue #469)", () => {
 
 // Issue #496: a never-linked row must not be described as a former revision 0,
 // while a linked revision 00 is real and says so.
-describe("source copy (issue #496)", () => {
-  it("distinguishes never, former and a real revision 00", () => {
+describe("received date formatting (ticket 03, #648)", () => {
+  it("reads a real calendar date in the one form both PO screens use, and echoes anything else", () => {
+    expect(formatReceivedDate("2026-10-02")).toBe("2 Oct 2026");
+    // One helper, one output: a leading-zero day is not preserved, so the
+    // list and the fulfillment drill-down read identically.
+    expect(formatReceivedDate("2026-10-05")).toBe("5 Oct 2026");
+    expect(formatReceivedDate(" 2026-01-31 ")).toBe("31 Jan 2026");
+    expect(formatReceivedDate("2026-02-30")).toBe("2026-02-30");
+    expect(formatReceivedDate("2026-13-01")).toBe("2026-13-01");
+    expect(formatReceivedDate("not-a-date")).toBe("not-a-date");
+    expect(formatReceivedDate("")).toBe("");
+  });
+});
+
+describe("source copy (issue #496)", () => {  it("distinguishes never, former and a real revision 00", () => {
     expect(
       sourceRevisionLabel(
         row({ SourceState: "never", SourceMissing: true, SourceRevision: 0 })

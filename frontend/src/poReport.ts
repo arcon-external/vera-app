@@ -30,6 +30,12 @@ export interface PurchaseOrderReportPopulation {
   availableCurrencies: string[];
   hasUnassigned: boolean;
   sourceMissingPoCount: number;
+  /** POs no allocation could place (#648). Typed; not rendered today. */
+  unallocatedPoCount: number;
+  /** POs still served by the legacy allocation fallback (#648). */
+  legacyFallbackPoCount: number;
+  /** Quotations whose validity lapsed without an explicit close (#648). */
+  expiredUnclosedQuotationCount: number;
 }
 
 export interface PurchaseOrderReportMetrics {
@@ -59,6 +65,14 @@ export interface PurchaseOrderReportMetrics {
 export interface PurchaseOrderReportPipeline {
   unsoldAmountMinor: number;
   unsoldMarginMinor: number;
+  /**
+   * The bought share of the quoted quantity (#648), basis points:
+   * `bought / quoted * 10000`, 0 when the quoted quantity is 0. It is a
+   * quantity-coverage ratio, deliberately separate from cost coverage and
+   * never folded into margin; it may exceed 10000 when the customer bought
+   * more than the quotation offered.
+   */
+  fulfillmentBps: number;
 }
 
 /**
@@ -267,13 +281,47 @@ function nullableRatio(value: number | null | undefined): number | null {
 }
 
 /**
- * The pass-through bucket (#655). It is read structurally because the
- * generated Wails model predates the field until the bindings are regenerated;
- * a payload from a server older than #655 has no extra line kind at all, so an
- * absent value is a real zero rather than an unknown.
+ * The pass-through bucket (#655), declared on the generated model. The numeric
+ * guard stays because the desktop and the API deploy separately: a payload from
+ * a server older than #655 has no extra line kind at all, so an absent value is
+ * a real zero rather than an unknown.
  */
 function readExtraExpenseMinor(metrics: poreport.Metrics): number {
-  const value = (metrics as { extraExpenseMinor?: unknown }).extraExpenseMinor;
+  const value = metrics.extraExpenseMinor;
+  return typeof value === "number" && Number.isFinite(value) ? value : 0;
+}
+
+/**
+ * The population counters added with #648. The generated Wails model predates
+ * them until the bindings are regenerated, so they are read by name. An API
+ * older than #648 has no such count, so it reads as zero; the fields are typed
+ * for the report contract and not rendered today, so that fallback is never
+ * presented as a measured figure.
+ */
+function readPopulationCount(
+  population: poreport.Population,
+  field:
+    | "unallocatedPoCount"
+    | "legacyFallbackPoCount"
+    | "expiredUnclosedQuotationCount"
+): number {
+  const value = (population as unknown as Record<string, unknown>)[field];
+  return typeof value === "number" && Number.isFinite(value) ? value : 0;
+}
+
+/**
+ * Fulfillment coverage (#648): the bought share of the quoted quantity, basis
+ * points, with 0 meaning "nothing quoted" exactly as the server defines it. It
+ * is a pipeline ratio, never cost coverage and never margin. The generated
+ * model predates the field until the bindings are regenerated; a pre-#648 API
+ * omits it, and 0 is the same fallback the rest of the pipeline uses.
+ */
+function readFulfillmentBps(
+  pipeline: poreport.PipelineSummary | null | undefined
+): number {
+  const value = (
+    pipeline as { fulfillmentBps?: unknown } | null | undefined
+  )?.fulfillmentBps;
   return typeof value === "number" && Number.isFinite(value) ? value : 0;
 }
 
@@ -529,11 +577,24 @@ export function normalizePurchaseOrderReport(input: poreport.Report): PurchaseOr
       availableCurrencies: [...input.population.availableCurrencies],
       hasUnassigned: input.population.hasUnassigned,
       sourceMissingPoCount: input.population.sourceMissingPoCount,
+      unallocatedPoCount: readPopulationCount(
+        input.population,
+        "unallocatedPoCount"
+      ),
+      legacyFallbackPoCount: readPopulationCount(
+        input.population,
+        "legacyFallbackPoCount"
+      ),
+      expiredUnclosedQuotationCount: readPopulationCount(
+        input.population,
+        "expiredUnclosedQuotationCount"
+      ),
     },
     totals: normalizeMetrics(input.totals),
     pipeline: {
       unsoldAmountMinor: input.pipeline?.unsoldAmountMinor ?? 0,
       unsoldMarginMinor: input.pipeline?.unsoldMarginMinor ?? 0,
+      fulfillmentBps: readFulfillmentBps(input.pipeline),
     },
     variance: {
       quantityExtraIncomeAmountMinor:

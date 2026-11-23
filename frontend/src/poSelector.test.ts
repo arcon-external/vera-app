@@ -240,10 +240,10 @@ describe("PO source selector state machine (issue #467)", () => {
     expect(entry.step).toBe(1);
     expect(entry.selected).toBeNull();
 
-    for (const allowAllBought of [true]) {
+    for (const allowUnavailable of [true]) {
       const repair = run([
         { type: "rowsLoaded", page: pageOf(allBought) },
-        { type: "quotationSelected", quotation: allBought, allowAllBought },
+        { type: "quotationSelected", quotation: allBought, allowUnavailable },
       ]);
       expect(repair.step).toBe(2);
       expect(repair.selected).toEqual(allBought);
@@ -442,7 +442,7 @@ describe("PO source selector closure and expiry (issue #656)", () => {
 
     const repair = run([
       { type: "rowsLoaded", page: pageOf(CLOSED) },
-      { type: "quotationSelected", quotation: CLOSED, allowAllBought: true },
+      { type: "quotationSelected", quotation: CLOSED, allowUnavailable: true },
     ]);
     expect(repair.step).toBe(2);
     expect(repair.selected).toEqual(CLOSED);

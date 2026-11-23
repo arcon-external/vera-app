@@ -357,32 +357,3 @@ export function formatFulfillmentLoss(
 export function formatFulfillmentQuantity(scaled: number): string {
   return formatQuantityScaled(scaled);
 }
-
-const FULFILLMENT_MONTHS = [
-  "Jan",
-  "Feb",
-  "Mar",
-  "Apr",
-  "May",
-  "Jun",
-  "Jul",
-  "Aug",
-  "Sep",
-  "Oct",
-  "Nov",
-  "Dec",
-] as const;
-
-/**
- * A WIB calendar date as the compact readable form a dense cell can hold:
- * `2026-10-05` becomes `05 Oct 2026`. Anything that is not a plain date is
- * echoed unchanged rather than guessed at; the server's own date is the truth.
- */
-export function formatFulfillmentDate(value: string): string {
-  const trimmed = value.trim();
-  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(trimmed);
-  if (match === null) return value;
-  const month = Number(match[2]);
-  if (!Number.isInteger(month) || month < 1 || month > 12) return value;
-  return `${match[3]} ${FULFILLMENT_MONTHS[month - 1]} ${match[1]}`;
-}

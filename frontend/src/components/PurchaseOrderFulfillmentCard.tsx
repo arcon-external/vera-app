@@ -3,14 +3,15 @@ import {
   useEffect,
   useMemo,
   useState,
+  type ReactNode,
 } from "react";
 import { GetPurchaseOrderFulfillment } from "@backend/backend/Quotation";
 import { errorMessage } from "../errors";
 import type { CurrencyInfo } from "../format";
+import { formatReceivedDate } from "../poList";
 import {
   FULFILLMENT_DEFAULT_PAGE_SIZE,
   FULFILLMENT_STATUS_OPTIONS,
-  formatFulfillmentDate,
   formatFulfillmentLoss,
   formatFulfillmentMoney,
   formatFulfillmentQuantity,
@@ -26,6 +27,7 @@ import {
   type PurchaseOrderFulfillmentQuotation,
 } from "../poFulfillment";
 import { Badge, Button, Card, StatusBanner } from "./ui";
+import { QuotationCloseDialog } from "./QuotationCloseDialog";
 
 /**
  * Issue #657 phase B: the Fulfillment drill-down card.
@@ -62,6 +64,14 @@ export interface PurchaseOrderFulfillmentCardProps {
   refreshToken?: number;
   /** Injected by tests; the live page uses the Wails binding. */
   load?: PurchaseOrderFulfillmentLoader;
+  /**
+   * #648: closing and reopening are admin decisions made from the report
+   * workspace. The handlers are App's existing close/reopen bindings; a
+   * successful call bumps the mutation epoch, which re-reads this card.
+   */
+  isAdmin?: boolean;
+  onCloseQuotation?: (quotationID: number, reason: string) => Promise<unknown>;
+  onReopenQuotation?: (quotationID: number) => Promise<unknown>;
 }
 
 interface ReadState {
@@ -287,7 +297,7 @@ function ContributionList({
             <span className="tnum">
               {formatFulfillmentQuantity(contribution.allocatedQuantityScaled)}
             </span>{" "}
-            · {formatFulfillmentDate(contribution.receivedDate)}
+            · {formatReceivedDate(contribution.receivedDate)}
           </span>
         </li>
       ))}
@@ -578,11 +588,56 @@ function NarrowQuotationItems({
 function QuotationBlock({
   quotation,
   entry,
+  isAdmin,
+  closurePending,
+  onCloseQuotation,
+  onReopenQuotation,
 }: {
   quotation: PurchaseOrderFulfillmentQuotation;
   entry: CurrencyInfo | null;
+  isAdmin: boolean;
+  closurePending: boolean;
+  onCloseQuotation?: (quotation: PurchaseOrderFulfillmentQuotation) => void;
+  onReopenQuotation?: (quotation: PurchaseOrderFulfillmentQuotation) => void;
 }) {
   const groups = groupFulfillmentItems(quotation.items);
+  // #648: open and expired rows can be closed; a closed row can be reopened.
+  // An all-bought row has nothing to close, and staff never see either action.
+  let closureButton: ReactNode = null;
+  if (
+    isAdmin &&
+    quotation.status === "closed" &&
+    onReopenQuotation !== undefined
+  ) {
+    closureButton = (
+      <Button
+        size="xs"
+        variant="secondary"
+        aria-label={`Reopen quotation ${quotation.quoteNumber}`}
+        disabled={closurePending}
+        onClick={() => onReopenQuotation(quotation)}
+      >
+        Reopen quotation
+      </Button>
+    );
+  } else if (
+    isAdmin &&
+    (quotation.status === "open" ||
+      quotation.status === "expired_unclosed") &&
+    onCloseQuotation !== undefined
+  ) {
+    closureButton = (
+      <Button
+        size="xs"
+        variant="secondary"
+        aria-label={`Close quotation ${quotation.quoteNumber}`}
+        disabled={closurePending}
+        onClick={() => onCloseQuotation(quotation)}
+      >
+        Close quotation
+      </Button>
+    );
+  }
   return (
     <article
       data-fulfillment-quotation={quotation.quoteNumber}
@@ -599,6 +654,11 @@ function QuotationBlock({
                 {fulfillmentStatusLabel(quotation.status)}
               </Badge>
             </span>
+            {closureButton === null ? null : (
+              <span data-fulfillment-closure-action={quotation.status}>
+                {closureButton}
+              </span>
+            )}
           </div>
           <p className="mt-0.5 truncate text-small text-ink-600">
             {quotation.customerName}
@@ -767,6 +827,12 @@ export interface PurchaseOrderFulfillmentCardViewProps {
   onPreviousPage: () => void;
   onNextPage: () => void;
   onRetry: () => void;
+  /** #648: admin-only closure actions, passed through from App. */
+  isAdmin?: boolean;
+  closurePendingId?: number | null;
+  onCloseQuotation?: (quotation: PurchaseOrderFulfillmentQuotation) => void;
+  onReopenQuotation?: (quotation: PurchaseOrderFulfillmentQuotation) => void;
+  actionError?: string;
 }
 
 /**
@@ -792,6 +858,11 @@ export function PurchaseOrderFulfillmentCardView({
   onPreviousPage,
   onNextPage,
   onRetry,
+  isAdmin = false,
+  closurePendingId = null,
+  onCloseQuotation,
+  onReopenQuotation,
+  actionError = "",
 }: PurchaseOrderFulfillmentCardViewProps) {
   const displayCurrency = page?.filter.currency ?? currency;
   const entry =
@@ -895,6 +966,12 @@ export function PurchaseOrderFulfillmentCardView({
         </div>
       </div>
 
+      {actionError === "" ? null : (
+        <div className="mt-4" data-fulfillment-action-error="">
+          <StatusBanner tone="danger">{actionError}</StatusBanner>
+        </div>
+      )}
+
       {loading ? (
         <p role="status" className="mt-4 text-small text-ink-500">
           Loading fulfillment…
@@ -923,6 +1000,10 @@ export function PurchaseOrderFulfillmentCardView({
               key={quotation.quotationId}
               quotation={quotation}
               entry={entry}
+              isAdmin={isAdmin}
+              closurePending={closurePendingId === quotation.quotationId}
+              onCloseQuotation={onCloseQuotation}
+              onReopenQuotation={onReopenQuotation}
             />
           ))}
         </div>
@@ -951,12 +1032,23 @@ export function PurchaseOrderFulfillmentCard({
   mutationEpoch = 0,
   refreshToken = 0,
   load = defaultLoader,
+  isAdmin = false,
+  onCloseQuotation,
+  onReopenQuotation,
 }: PurchaseOrderFulfillmentCardProps) {
   const [status, setStatus] = useState("all");
   const [searchDraft, setSearchDraft] = useState("");
   const [search, setSearch] = useState("");
   const [pageNumber, setPageNumber] = useState(1);
   const [retry, setRetry] = useState(0);
+  // #648: the close dialog's target and request state live here, so the view
+  // stays presentational and a refusal can keep the dialog and the reason.
+  const [closureTarget, setClosureTarget] =
+    useState<PurchaseOrderFulfillmentQuotation | null>(null);
+  const [closurePending, setClosurePending] = useState(false);
+  const [closureError, setClosureError] = useState<string | null>(null);
+  const [reopenPendingId, setReopenPendingId] = useState<number | null>(null);
+  const [closureActionError, setClosureActionError] = useState("");
   const [read, setRead] = useState<ReadState>({
     key: "",
     page: null,
@@ -1026,6 +1118,62 @@ export function PurchaseOrderFulfillmentCard({
     setPageNumber(1);
   }, []);
 
+  const requestClose = useCallback(
+    (quotation: PurchaseOrderFulfillmentQuotation) => {
+      setClosureError(null);
+      setClosureActionError("");
+      setClosureTarget(quotation);
+    },
+    []
+  );
+
+  const cancelClose = useCallback(() => {
+    if (closurePending) return;
+    setClosureTarget(null);
+    setClosureError(null);
+  }, [closurePending]);
+
+  const confirmClose = useCallback(
+    async (reason: string) => {
+      if (closureTarget === null || onCloseQuotation === undefined) return;
+      setClosurePending(true);
+      setClosureError(null);
+      try {
+        await onCloseQuotation(closureTarget.quotationId, reason);
+        // App's close binding bumps the mutation epoch, which re-reads this
+        // card; closing the dialog here is all this component owns.
+        setClosureTarget(null);
+      } catch (caught) {
+        // No optimistic close: the dialog and the typed reason stay on screen
+        // with the server's own refusal.
+        setClosureError(
+          errorMessage(caught, "The quotation could not be closed.")
+        );
+      } finally {
+        setClosurePending(false);
+      }
+    },
+    [closureTarget, onCloseQuotation]
+  );
+
+  const requestReopen = useCallback(
+    async (quotation: PurchaseOrderFulfillmentQuotation) => {
+      if (onReopenQuotation === undefined) return;
+      setClosureActionError("");
+      setReopenPendingId(quotation.quotationId);
+      try {
+        await onReopenQuotation(quotation.quotationId);
+      } catch (caught) {
+        setClosureActionError(
+          errorMessage(caught, "The quotation could not be reopened.")
+        );
+      } finally {
+        setReopenPendingId(null);
+      }
+    },
+    [onReopenQuotation]
+  );
+
   const current = read.key === readKey;
   const loading = !current || read.loading;
   const readError = current ? read.error : "";
@@ -1037,22 +1185,50 @@ export function PurchaseOrderFulfillmentCard({
   );
 
   return (
-    <PurchaseOrderFulfillmentCardView
-      page={page}
-      currency={currency}
-      catalogue={catalogue}
-      status={status}
-      searchDraft={searchDraft}
-      pageNumber={pageNumber}
-      loading={loading}
-      error={readError}
-      onStatusChange={changeStatus}
-      onSearchDraftChange={setSearchDraft}
-      onSearchSubmit={submitSearch}
-      onClearFilters={clearFilters}
-      onPreviousPage={() => setPageNumber(Math.max(1, bounds.page - 1))}
-      onNextPage={() => setPageNumber(bounds.page + 1)}
-      onRetry={() => setRetry((current) => current + 1)}
-    />
+    <>
+      <PurchaseOrderFulfillmentCardView
+        page={page}
+        currency={currency}
+        catalogue={catalogue}
+        status={status}
+        searchDraft={searchDraft}
+        pageNumber={pageNumber}
+        loading={loading}
+        error={readError}
+        onStatusChange={changeStatus}
+        onSearchDraftChange={setSearchDraft}
+        onSearchSubmit={submitSearch}
+        onClearFilters={clearFilters}
+        onPreviousPage={() => setPageNumber(Math.max(1, bounds.page - 1))}
+        onNextPage={() => setPageNumber(bounds.page + 1)}
+        onRetry={() => setRetry((current) => current + 1)}
+        isAdmin={isAdmin}
+        closurePendingId={
+          closurePending
+            ? (closureTarget?.quotationId ?? null)
+            : reopenPendingId
+        }
+        onCloseQuotation={
+          onCloseQuotation === undefined ? undefined : requestClose
+        }
+        onReopenQuotation={
+          onReopenQuotation === undefined ? undefined : (quotation) => {
+            void requestReopen(quotation);
+          }
+        }
+        actionError={closureActionError}
+      />
+      <QuotationCloseDialog
+        open={closureTarget !== null}
+        isAdmin={isAdmin}
+        quotationNumber={closureTarget?.quoteNumber ?? ""}
+        pending={closurePending}
+        error={closureError}
+        onCancel={cancelClose}
+        onConfirm={(reason) => {
+          void confirmClose(reason);
+        }}
+      />
+    </>
   );
 }

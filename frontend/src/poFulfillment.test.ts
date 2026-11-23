@@ -5,7 +5,6 @@ import {
   FULFILLMENT_DEFAULT_PAGE_SIZE,
   FULFILLMENT_STATUS_OPTIONS,
   FULFILLMENT_STATUS_ORDER,
-  formatFulfillmentDate,
   formatFulfillmentLoss,
   formatFulfillmentMoney,
   fulfillmentPageBounds,
@@ -332,13 +331,5 @@ describe("formatting", () => {
   it("renders a scaled quantity as the shortest decimal", () => {
     const page: PurchaseOrderFulfillmentPage = normalizePurchaseOrderFulfillmentPage(wirePage());
     expect(page.quotations[0].items[0].boughtQuantityScaled).toBe(30000);
-  });
-
-  it("formats a saved-PO date compactly and echoes anything that is not a date", () => {
-    expect(formatFulfillmentDate("2026-10-05")).toBe("05 Oct 2026");
-    expect(formatFulfillmentDate(" 2026-01-31 ")).toBe("31 Jan 2026");
-    expect(formatFulfillmentDate("2026-13-01")).toBe("2026-13-01");
-    expect(formatFulfillmentDate("not-a-date")).toBe("not-a-date");
-    expect(formatFulfillmentDate("")).toBe("");
   });
 });

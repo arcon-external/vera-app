@@ -1,6 +1,7 @@
 import type { CurrencyInfo } from "../format";
 import { formatMoney } from "../format";
 import type { PurchaseOrderReportData } from "../poReport";
+import { formatReportBps } from "../poReportPage";
 import { Card } from "./ui";
 
 /**
@@ -68,6 +69,10 @@ export function PurchaseOrderReportPipelineVarianceCards({
         <p className="mt-1.5 text-small leading-relaxed text-ink-500">
           Unsold is not a loss and is not added to Actual.
         </p>
+        <p className="mt-1 text-small leading-relaxed text-ink-500">
+          Fulfillment is the bought share of the quoted quantity: its own
+          ratio, not cost coverage and never part of margin.
+        </p>
         <dl className="mt-3 space-y-1.5">
           <AmountRow
             label="Unsold amount"
@@ -77,6 +82,10 @@ export function PurchaseOrderReportPipelineVarianceCards({
             label="Unsold margin"
             value={money(currency, pipeline.unsoldMarginMinor)}
             negative={pipeline.unsoldMarginMinor < 0}
+          />
+          <AmountRow
+            label="Fulfillment"
+            value={formatReportBps(pipeline.fulfillmentBps)}
           />
         </dl>
       </Card>

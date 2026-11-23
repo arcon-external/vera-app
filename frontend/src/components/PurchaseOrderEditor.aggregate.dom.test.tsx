@@ -791,6 +791,32 @@ describe("PO editor aggregate mode (#654)", () => {
     expect(headerTotal("0")).toBe("$440.00");
   });
 
+  it("accepts a comma as a line quantity's decimal separator, exactly like the aggregate field", () => {
+    render(
+      aggregateOrder({
+        Items: [aggregateDtoItem({ ID: 1, AggregateGroupID: 1 })],
+        AggregateGroups: [
+          {
+            ID: 1,
+            DisplayOrder: 1,
+            Title: "Combined items",
+            OrderedQuantityScaled: 20000,
+            OrderedUoM: "Lot",
+            ShowChildrenToCustomer: false,
+            TotalMinor: 20000,
+            DisplayUnitPriceMinor: 20000,
+          },
+        ],
+      })
+    );
+    typeInto(lineInput("Quantity for line 1"), "2,5");
+    // A comma is the decimal separator the office types; dropping it would
+    // read 2,5 as 25 and multiply the line by ten ($2,500.00, not $250.00).
+    expect(lineInput("Quantity for line 1").value).toBe("2.5");
+    expect(headerTotal("0")).toBe("$250.00");
+    expect(headerTotal("0")).not.toBe("$2,500.00");
+  });
+
   it("does not let the display quantity change bought state or variance", () => {
     render(
       aggregateOrder({

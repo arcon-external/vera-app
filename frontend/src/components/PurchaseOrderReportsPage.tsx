@@ -91,6 +91,14 @@ export interface PurchaseOrderReportsPageProps {
    * without fetching while hidden.
    */
   mutationEpoch?: number;
+  /**
+   * #648: closing and reopening a quotation are admin decisions made from the
+   * report workspace. The handlers are App's existing bindings; the page only
+   * passes them to the fulfillment card.
+   */
+  isAdmin?: boolean;
+  onCloseQuotation?: (quotationID: number, reason: string) => Promise<unknown>;
+  onReopenQuotation?: (quotationID: number) => Promise<unknown>;
 }
 
 export interface PurchaseOrderReportsViewProps {
@@ -571,6 +579,9 @@ export function PurchaseOrderReportsPage({
   onExport,
   active: activeProp = true,
   mutationEpoch = 0,
+  isAdmin = false,
+  onCloseQuotation,
+  onReopenQuotation,
 }: PurchaseOrderReportsPageProps) {
   const { pushToast } = useToast();
   const active = activeProp;
@@ -1013,6 +1024,9 @@ export function PurchaseOrderReportsPage({
             active={active}
             mutationEpoch={mutationEpoch}
             refreshToken={fulfillmentRefresh}
+            isAdmin={isAdmin}
+            onCloseQuotation={onCloseQuotation}
+            onReopenQuotation={onReopenQuotation}
           />
         }
       />

@@ -45,10 +45,12 @@ export interface CustomerPOLeaf {
   /** Null when the field is not a price in this currency or is out of range. */
   unitPriceMinor: number | null;
   /**
-   * The exact net (gross minus the row discount). A heading row carries its
-   * display group's sum; a depth-2 bullet is text and carries zero.
+   * The exact net (gross minus the row discount), or null when the line cannot
+   * be totalled. A heading row carries its display group's sum; a depth-2
+   * bullet is text and carries zero. Null is unknown: a customer document
+   * prints the unavailable mark, never a fabricated Rp0.
    */
-  amountMinor: number;
+  amountMinor: number | null;
 }
 
 /** One aggregate as the customer reads it. */
@@ -59,8 +61,12 @@ export interface CustomerPOAggregate {
   uom: string;
   /** Derived with the editor's exact rule; null when out of range or unnamed. */
   unitPriceMinor: number | null;
-  /** The exact sum of the child nets: authoritative over the unit price. */
-  totalMinor: number;
+  /**
+   * The exact sum of the child nets: authoritative over the unit price. Null
+   * when any child cannot be totalled, so a partial sum is never shown as the
+   * group's value.
+   */
+  totalMinor: number | null;
   /** Null when the group is title-only: no child description may leak. */
   children: CustomerPOLeaf[] | null;
 }
@@ -125,7 +131,7 @@ export function customerPOHeaderOf(
 function leafOf(
   line: PurchaseOrderLine,
   depth: 0 | 1,
-  amountMinor: number,
+  amountMinor: number | null,
   currency: CurrencyInfo
 ): CustomerPOLeaf {
   return {
@@ -166,9 +172,13 @@ function childRowsOfGroup(
   if (group.groupKey === "") {
     const line = group.lines[0];
     if (line === undefined) return [];
-    const row = leafOf(line, 0, lineNetMinor(line, currency) ?? 0, currency);
+    const row = leafOf(line, 0, lineNetMinor(line, currency), currency);
     return [{ ...row, descriptionLines: [...line.descriptionLines] }];
   }
+  const nets = group.lines.map((line) => lineNetMinor(line, currency));
+  const groupNet = nets.every((net) => net !== null)
+    ? nets.reduce<number>((sum, net) => sum + (net ?? 0), 0)
+    : null;
   const rows: CustomerPOLeaf[] = [
     {
       kind: "line",
@@ -178,14 +188,11 @@ function childRowsOfGroup(
       quantity: "",
       uom: "",
       unitPriceMinor: null,
-      amountMinor: group.lines.reduce(
-        (sum, line) => sum + (lineNetMinor(line, currency) ?? 0),
-        0
-      ),
+      amountMinor: groupNet,
     },
   ];
   for (const line of group.lines) {
-    rows.push(leafOf(line, 1, lineNetMinor(line, currency) ?? 0, currency));
+    rows.push(leafOf(line, 1, lineNetMinor(line, currency), currency));
     for (const bullet of line.descriptionLines) rows.push(bulletOf(bullet));
   }
   return rows;
@@ -197,7 +204,7 @@ function aggregateRow(
   members: PurchaseOrderLine[],
   currency: CurrencyInfo
 ): CustomerPOAggregate {
-  const totalMinor = aggregateTotalMinor(members, header.key, currency) ?? 0;
+  const totalMinor = aggregateTotalMinor(members, header.key, currency);
   const quantityScaled = parseQuantityScaled(header.orderedQuantity);
   return {
     kind: "aggregate",
@@ -205,7 +212,7 @@ function aggregateRow(
     quantity: header.orderedQuantity.trim(),
     uom: header.orderedUoM,
     unitPriceMinor:
-      quantityScaled === null
+      totalMinor === null || quantityScaled === null
         ? null
         : aggregateDisplayUnitPriceMinor(totalMinor, quantityScaled),
     totalMinor,

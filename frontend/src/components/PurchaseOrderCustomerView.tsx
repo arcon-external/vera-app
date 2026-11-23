@@ -81,7 +81,11 @@ function InAppRow({
         {unitPriceText(row, currency)}
       </td>
       <td className="tnum whitespace-nowrap px-3 py-2 text-right align-top">
-        {heading ? "" : formatMoney(currency, row.amountMinor)}
+        {heading
+          ? ""
+          : row.amountMinor === null
+            ? "—"
+            : formatMoney(currency, row.amountMinor)}
       </td>
     </tr>
   );
@@ -142,7 +146,7 @@ function AggregateRowGroup({
           {row.unitPriceMinor === null ? "—" : formatMoney(currency, row.unitPriceMinor)}
         </td>
         <td className="tnum whitespace-nowrap px-3 py-2 text-right align-top font-semibold">
-          {formatMoney(currency, row.totalMinor)}
+          {row.totalMinor === null ? "—" : formatMoney(currency, row.totalMinor)}
         </td>
       </tr>
       {(row.children ?? []).map((child, index) => (
