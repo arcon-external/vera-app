@@ -959,7 +959,11 @@ func reportPipelineAndVariance(raw []byte) (poreport.PipelineSummary, poreport.V
 func purchaseOrderPipelineSQL(schema string) string {
 	return fmt.Sprintf(`
 WITH latest_revision AS (
-    SELECT DISTINCT ON (r.quotation_id) r.id AS revision_id, r.quotation_id
+    -- Currency is part of the partition: a USD quotation must never add its
+    -- cents to an IDR report's Unsold. Select the latest revision's currency
+    -- and filter the leaves by the report currency below.
+    SELECT DISTINCT ON (r.quotation_id) r.id AS revision_id,
+           r.quotation_id, r.currency
     FROM %[1]s.quotation_revisions r
     ORDER BY r.quotation_id, r.revision_number DESC
 ),
@@ -972,7 +976,8 @@ leaves AS (
            i.unit_price::numeric AS cost_unit_minor
     FROM latest_revision lr
     JOIN %[1]s.quotation_revision_items i ON i.revision_id = lr.revision_id
-    WHERE NOT (i.show_sub_prices AND EXISTS (
+    WHERE lr.currency = $2
+      AND NOT (i.show_sub_prices AND EXISTS (
         SELECT 1 FROM %[1]s.quotation_revision_sub_items s
         WHERE s.revision_item_id = i.id
     ))
@@ -984,7 +989,7 @@ leaves AS (
     FROM latest_revision lr
     JOIN %[1]s.quotation_revision_items i ON i.revision_id = lr.revision_id
     JOIN %[1]s.quotation_revision_sub_items s ON s.revision_item_id = i.id
-    WHERE i.show_sub_prices
+    WHERE lr.currency = $2 AND i.show_sub_prices
 ),
 bought AS (
     -- Bought state is cross-revision: a leaf keyed by item/sub is the same
@@ -994,24 +999,25 @@ bought AS (
            SUM(a.quantity_scaled::numeric) AS bought_qty_scaled,
            SUM(a.revenue_minor::numeric) AS bought_revenue_minor,
            SUM(ROUND(a.quantity_scaled::numeric * a.quoted_unit_price_minor / 10000))
-               AS bought_at_quoted_minor,
-           SUM(ROUND(a.quantity_scaled::numeric * COALESCE(a.cost_unit_minor, 0) / 10000))
-               AS bought_cost_minor
+               AS bought_at_quoted_minor
     FROM %[1]s.purchase_order_allocations a
     JOIN %[1]s.purchase_orders po ON po.id = a.purchase_order_id
     WHERE po.org_id = $1 AND po.state = 'saved' AND po.currency = $2
     GROUP BY a.quotation_id, a.quotation_item_no, COALESCE(a.quotation_sub_no, 0)
 ),
 position AS (
+    -- A FULL OUTER JOIN keeps a bought allocation whose leaf was removed in a
+    -- later revision or whose quotation was deleted. Its realized price
+    -- variance survives; the nullable quoted columns make the unsold and
+    -- quantity-extra gates below contribute zero for that row.
     SELECT COALESCE(b.bought_qty_scaled, 0) AS bought_qty_scaled,
            COALESCE(b.bought_revenue_minor, 0) AS bought_revenue_minor,
            COALESCE(b.bought_at_quoted_minor, 0) AS bought_at_quoted_minor,
-           COALESCE(b.bought_cost_minor, 0) AS bought_cost_minor,
            l.quoted_qty_scaled,
            l.quoted_unit_price_minor,
            l.cost_unit_minor
     FROM leaves l
-    LEFT JOIN bought b
+    FULL OUTER JOIN bought b
       ON b.quotation_id = l.quotation_id
      AND b.item_no = l.item_no
      AND b.sub_no = COALESCE(l.sub_no, 0)
@@ -1019,19 +1025,23 @@ position AS (
 classified AS (
     SELECT GREATEST(bought_revenue_minor - bought_at_quoted_minor, 0) AS price_extra,
            GREATEST(bought_at_quoted_minor - bought_revenue_minor, 0) AS price_loss,
-           CASE WHEN bought_qty_scaled > quoted_qty_scaled
+           CASE WHEN quoted_qty_scaled IS NOT NULL
+                     AND bought_qty_scaled > quoted_qty_scaled
                 THEN ROUND((bought_qty_scaled - quoted_qty_scaled)
                            * quoted_unit_price_minor / 10000)
                 ELSE 0 END AS quantity_extra_amount,
-           CASE WHEN bought_qty_scaled > quoted_qty_scaled
+           CASE WHEN quoted_qty_scaled IS NOT NULL
+                     AND bought_qty_scaled > quoted_qty_scaled
                 THEN ROUND((bought_qty_scaled - quoted_qty_scaled)
                            * cost_unit_minor / 10000)
                 ELSE 0 END AS quantity_extra_cost,
-           CASE WHEN bought_qty_scaled < quoted_qty_scaled
+           CASE WHEN quoted_qty_scaled IS NOT NULL
+                     AND bought_qty_scaled < quoted_qty_scaled
                 THEN ROUND((quoted_qty_scaled - bought_qty_scaled)
                            * quoted_unit_price_minor / 10000)
                 ELSE 0 END AS unsold_amount,
-           CASE WHEN bought_qty_scaled < quoted_qty_scaled
+           CASE WHEN quoted_qty_scaled IS NOT NULL
+                     AND bought_qty_scaled < quoted_qty_scaled
                 THEN ROUND((quoted_qty_scaled - bought_qty_scaled)
                            * cost_unit_minor / 10000)
                 ELSE 0 END AS unsold_cost

@@ -423,6 +423,10 @@ describe("PurchaseOrderReportOverview (issue #644)", () => {
     expect(view.querySelector("details")).toBeNull();
     expect(visibleText(view)).not.toContain("PO amount");
     expect(view.querySelector("[data-report-overview-updating]")).toBeNull();
+    // #653 NB1: Pipeline is period/category independent, so the two cards
+    // stay visible even when the selected Actual period has no saved POs.
+    expect(view.querySelector("[data-report-pipeline-card]")).not.toBeNull();
+    expect(view.querySelector("[data-report-variance-card]")).not.toBeNull();
     expect(reportMock).not.toHaveBeenCalled();
   });
 

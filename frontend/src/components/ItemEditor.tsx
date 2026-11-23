@@ -957,7 +957,7 @@ export function ItemRow({
           1
         </div>
       </Captioned>
-      <Captioned label="Unit cost">
+      <Captioned label={purchaseOrder ? "Unit price" : "Unit cost"}>
         <div className="flex h-10 items-center text-body text-ink-300">
           -
         </div>
@@ -978,11 +978,13 @@ export function ItemRow({
         </div>
       </Captioned>
       )}
+      {purchaseOrder ? null : (
       <Captioned label="Discount">
         <div className="flex h-10 items-center text-body text-ink-300">
           -
         </div>
       </Captioned>
+      )}
       <Captioned label="Sells for">
         <div
           className="tnum text-body font-semibold text-ink-950"
@@ -1037,7 +1039,7 @@ export function ItemRow({
         />
       </Captioned>
 
-      <Captioned label="Unit cost">
+      <Captioned label={purchaseOrder ? "Unit price" : "Unit cost"}>
         <input
           type="text"
           data-grid-cell=""
@@ -1330,12 +1332,12 @@ export function ItemRow({
               }
             />
           </div>
-          <div className={`grid grid-cols-2 items-start gap-2.5 ${purchaseOrder ? "lg:grid-cols-[64px_48px_108px_128px_minmax(0,1fr)]" : "lg:grid-cols-[64px_48px_108px_128px_128px_minmax(0,1fr)]"}`}>
+          <div className={`grid grid-cols-2 items-start gap-2.5 ${purchaseOrder ? "lg:grid-cols-[64px_48px_108px_minmax(0,1fr)]" : "lg:grid-cols-[64px_48px_108px_128px_128px_minmax(0,1fr)]"}`}>
             {controlCells}
           </div>
         </div>
       ) : (
-        <div className={`mt-3 grid grid-cols-2 items-start gap-3 ${purchaseOrder ? "lg:grid-cols-[68px_72px_140px_184px_minmax(0,1fr)]" : "lg:grid-cols-[72px_68px_140px_184px_184px_minmax(0,1fr)]"}`}>
+        <div className={`mt-3 grid grid-cols-2 items-start gap-3 ${purchaseOrder ? "lg:grid-cols-[68px_72px_140px_minmax(0,1fr)]" : "lg:grid-cols-[72px_68px_140px_184px_184px_minmax(0,1fr)]"}`}>
           {controlCells}
         </div>
       )}
@@ -1609,7 +1611,7 @@ function SubRow({
               onChange={onBulletChange}
             />
         </div>
-        <div className={`grid grid-cols-2 items-start gap-2.5 ${purchaseOrder ? "lg:grid-cols-[40px_64px_132px_116px_minmax(0,1fr)]" : "lg:grid-cols-[40px_64px_92px_116px_116px_minmax(0,1fr)]"}`}>
+        <div className={`grid grid-cols-2 items-start gap-2.5 ${purchaseOrder ? "lg:grid-cols-[40px_64px_132px_minmax(0,1fr)]" : "lg:grid-cols-[40px_64px_92px_116px_116px_minmax(0,1fr)]"}`}>
         <Captioned label="Qty">
           {/* Counts, not money: digit-strip stays (see the main row). */}
           <input
@@ -1647,11 +1649,13 @@ function SubRow({
           />
         </Captioned>
 
-        <Captioned label="Unit cost">
+        <Captioned label={purchaseOrder ? "Unit price" : "Unit cost"}>
           <input
             type="text"
             inputMode="numeric"
-            aria-label={`Unit cost for ${label}`}
+            aria-label={
+              purchaseOrder ? `Unit price for ${label}` : `Unit cost for ${label}`
+            }
             placeholder="0"
             value={formatMoneyInput(currency, sub.unitCost)}
             onChange={(event) =>

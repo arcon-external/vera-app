@@ -224,9 +224,25 @@ describe("ItemEditor purchase-order mode (#573)", () => {
     expect(html).toContain("Add sub-sub-item");
     expect(html).toContain("IP54 enclosure");
     expect(html).toContain("Two technicians");
-    // #653: the PO has no discount input at either depth.
+    // #653: the PO has no discount column or input at either depth, and the
+    // negotiated price is labelled as a price rather than a supplier cost.
+    expect(html).not.toContain(">Discount<");
+    expect(html).not.toContain(">Unit cost<");
+    expect(html).toContain(">Unit price<");
     expect(html).not.toContain("Enable a discount for sub-item 1 of line 1");
     expect(html).not.toContain("Discount percentage for sub-item 1 of line 1");
+    expect(html).not.toContain('aria-label="Enable a discount for line 1"');
+  });
+
+  it("hides the Discount column and labels the price for a plain PO row", () => {
+    const html = render({
+      items: [{ ...ITEM, unitPrice: "1000" }],
+      mode: "purchase-order",
+      currency: USD,
+    });
+    expect(html).not.toContain(">Discount<");
+    expect(html).not.toContain(">Unit cost<");
+    expect(html).toContain(">Unit price<");
     expect(html).not.toContain('aria-label="Enable a discount for line 1"');
   });
 
@@ -259,10 +275,12 @@ describe("ItemEditor purchase-order mode (#573)", () => {
     expect(extra).toContain("vs quoted (Price extra income)");
   });
 
-  it("keeps margin in quotation mode", () => {
+  it("keeps margin, Unit cost and Discount in quotation mode", () => {
     const html = render({ items: [{ ...ITEM, unitPrice: "1000" }] });
     expect(html).toContain(">Margin<");
     expect(html).toContain("Enable profit margin for line 1");
+    expect(html).toContain(">Unit cost<");
+    expect(html).toContain(">Discount<");
   });
 
   it("multiplies a decimal PO quantity exactly", () => {

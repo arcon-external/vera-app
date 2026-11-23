@@ -340,7 +340,7 @@ export function PurchaseOrderReportOverview({
         </div>
       ) : null}
 
-      {showFigures && report !== null ? (
+      {report !== null ? (
         <PurchaseOrderReportPipelineVarianceCards
           report={report}
           currency={entry}
