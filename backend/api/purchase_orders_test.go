@@ -601,21 +601,21 @@ func TestPurchaseOrderCalculationRoundTripsThroughTheAPI(t *testing.T) {
 	server, token := testQuotationServer(t, "vera_api_po_calc")
 	quotationID, _ := exportForSelector(t, server, token, quotationInput())
 
-	// The source revision printed 290000 before its own 10% whole discount and
-	// 261000 after it (FTZ, no PPN). The whole discount is retired (#573), so
-	// creation copies the customer-facing list prices and row discounts only:
-	// this fixture has no row discount, so the draft total is 290000. The
-	// printed 261000 survives as evidence of what the source document said.
+	// The source revision is row-only (#652): every line carries its own 10%
+	// off, so the customer printed 261000 (FTZ, no PPN) and no whole-order
+	// discount exists any more. Creation copies the list prices and the row
+	// discounts, so the purchase order subtotal is its net 261000 and its own
+	// whole-order discount stays zero.
 	_, body := createPODraft(t, server, token, quotationID, 0, nil)
 	draft := decodePurchaseOrder(t, body)
-	if draft.SubtotalMinor != 290000 || draft.GrandTotalMinor != 290000 ||
+	if draft.SubtotalMinor != 261000 || draft.GrandTotalMinor != 261000 ||
 		draft.DiscountMinor != 0 || draft.DiscountPercent != 0 ||
 		draft.PpnBps != 0 || draft.PpnMinor != 0 {
-		t.Fatalf("created calculation = %+v; want subtotal 290000, no whole discount, grand 290000", draft)
+		t.Fatalf("created calculation = %+v; want the row-discounted subtotal 261000, no whole discount", draft)
 	}
-	if draft.PrintedSubtotalMinor != 290000 || draft.PrintedDiscountMinor != 29000 ||
+	if draft.PrintedSubtotalMinor != 261000 || draft.PrintedDiscountMinor != 0 ||
 		draft.PrintedPpnMinor != 0 || draft.PrintedGrandTotalMinor != 261000 {
-		t.Errorf("printed snapshot = %d/%d/%d/%d; want 290000/29000/0/261000",
+		t.Errorf("printed snapshot = %d/%d/%d/%d; want 261000/0/0/261000",
 			draft.PrintedSubtotalMinor, draft.PrintedDiscountMinor,
 			draft.PrintedPpnMinor, draft.PrintedGrandTotalMinor)
 	}
@@ -1124,11 +1124,11 @@ func TestPurchaseOrderReviewAndFinalizeOverTheAPI(t *testing.T) {
 		t.Errorf("saved = %+v; want a trimmed number and recorded identity", saved)
 	}
 	// The saved total belongs to the purchase order, not the quotation. This
-	// fixture's source carried a 10% whole discount, which is retired (#573):
-	// the order totals 290000 while the source printed 261000. The printed
-	// figure stays as evidence and does not set the saved total.
-	if saved.GrandTotalMinor != 290000 {
-		t.Errorf("saved grand = %d; want the purchase order's own 290000", saved.GrandTotalMinor)
+	// fixture's source is row-only (#652), so the order arrives at the same
+	// 261000 the quotation printed; the copied printed figures remain evidence
+	// and never set the saved total themselves.
+	if saved.GrandTotalMinor != 261000 {
+		t.Errorf("saved grand = %d; want the purchase order's own 261000", saved.GrandTotalMinor)
 	}
 	if review.Source.PrintedGrandTotalMinor != 261000 {
 		t.Errorf("printed source grand = %d; want the source's 261000",

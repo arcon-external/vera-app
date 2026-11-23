@@ -553,6 +553,9 @@ func (s *Store) FinalizePurchaseOrder(ctx context.Context, input PurchaseOrderFi
 	if err != nil {
 		return PurchaseOrder{}, err
 	}
+	if source.DiscountPercent > 0 {
+		return PurchaseOrder{}, ErrPurchaseOrderLegacyHeaderDiscount
+	}
 	// #651: the final save is the authoritative remaining-quantity gate. It runs
 	// under the quotation lock, so a concurrent finalize that took the last
 	// quantity makes this one refuse cleanly instead of double-booking it.

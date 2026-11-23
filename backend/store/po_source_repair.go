@@ -198,6 +198,9 @@ func (s *Store) RepairPurchaseOrderSource(ctx context.Context, input PurchaseOrd
 	if err != nil {
 		return PurchaseOrder{}, err
 	}
+	if source.DiscountPercent > 0 {
+		return PurchaseOrder{}, ErrPurchaseOrderLegacyHeaderDiscount
+	}
 	if err := checkPurchaseOrderRepairTarget(ctx, tx, schema, org.ID, stored, source); err != nil {
 		return PurchaseOrder{}, err
 	}
@@ -535,6 +538,9 @@ func (s *Store) ReviewPurchaseOrderSource(ctx context.Context, id, quotationID i
 	source, err := loadPurchaseOrderSourceDetail(ctx, pool, schema, quotationID, revision)
 	if err != nil {
 		return PurchaseOrderReview{}, err
+	}
+	if source.DiscountPercent > 0 {
+		return PurchaseOrderReview{}, ErrPurchaseOrderLegacyHeaderDiscount
 	}
 	if err := checkPurchaseOrderRepairTarget(ctx, pool, schema, org.ID, order, source); err != nil {
 		return PurchaseOrderReview{}, err

@@ -295,7 +295,7 @@ a rounding bug into a pricing system.
 | `taxZone` | `FTZ` (default) or `NonFTZ`. |
 | `taxType` | `Goods` (default) or `Services`. |
 | `serviceCategory` | Services only: `NonConstruction` (2% PPH23) or `Construction` (1.75%). Sending one with `Goods` is an error, so it is dropped rather than passed on. |
-| `discountPercent` | Whole-quotation discount. Retired from the editor in favour of per-row discounts; still accepted so older payloads load. |
+| `discountPercent` | Whole-quotation discount. Retired from the editor in favour of per-row discounts, and refused on a new revision when nonzero. A stored value on an older revision stays readable in the archive. |
 | `items[]` | At least one line. |
 
 Per item:

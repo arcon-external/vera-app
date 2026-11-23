@@ -228,6 +228,12 @@ func (s *Server) exportEndpoint(context echo.Context) error {
 	}
 	record, err := s.database.SaveRevision(context.Request().Context(), draft)
 	if err != nil {
+		if errors.Is(err, store.ErrQuotationHeaderDiscountRetired) {
+			return context.JSON(http.StatusUnprocessableEntity, map[string]string{
+				"error": err.Error(),
+				"code":  "quotation_header_discount_retired",
+			})
+		}
 		return context.JSON(http.StatusConflict, map[string]string{"error": err.Error()})
 	}
 	// The draft has become a quotation, so it has nothing left to be. Scoped

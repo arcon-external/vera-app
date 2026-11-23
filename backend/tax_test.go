@@ -116,7 +116,11 @@ func TestPrepareMarginDiscountTaxChain(t *testing.T) {
 	q.SetAuthService(auth.StaffTestService())
 	err := q.Prepare(QuotationInput{
 		Items: []QuotationItemInput{
-			{Description: "Item", Qty: 1, UoM: "Lot", UnitPrice: 100000, MarginEnabled: true, MarginPercent: 20},
+			{
+				Description: "Item", Qty: 1, UoM: "Lot", UnitPrice: 100000,
+				MarginEnabled: true, MarginPercent: 20,
+				DiscountEnabled: true, DiscountPercent: 10,
+			},
 		},
 		Subject:         "Test",
 		RecipientName:   "Test",
@@ -125,18 +129,21 @@ func TestPrepareMarginDiscountTaxChain(t *testing.T) {
 		LeadTimeDays:    30,
 		CustomerID:      2,
 		Incoterm:        "EXW",
-		DiscountPercent: 10,
+		DiscountPercent: 0,
 		TaxZone:         TaxZoneNonFTZ,
 		TaxCategory:     TaxCategorySupplyInstall,
 	})
 	if err != nil {
 		t.Fatalf("Prepare failed: %v", err)
 	}
-	if q.Data.SubTotal != 120000 {
-		t.Errorf("SubTotal = %d; want 120000", q.Data.SubTotal)
+	if q.Data.SubTotal != 108000 {
+		t.Errorf("SubTotal = %d; want the row-discounted 108000", q.Data.SubTotal)
 	}
-	if q.Data.DiscountAmount != 12000 {
-		t.Errorf("DiscountAmount = %d; want 12000", q.Data.DiscountAmount)
+	if q.Data.DiscountAmount != 0 {
+		t.Errorf("DiscountAmount = %d; want the retired whole-order 0", q.Data.DiscountAmount)
+	}
+	if q.Data.RowDiscountTotal != 12000 {
+		t.Errorf("RowDiscountTotal = %d; want 12000", q.Data.RowDiscountTotal)
 	}
 	if q.Data.GrandTotal != 108000 {
 		t.Errorf("GrandTotal = %d; want 108000", q.Data.GrandTotal)

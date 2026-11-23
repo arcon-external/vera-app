@@ -13,8 +13,16 @@ import (
 func testPreviewInput() QuotationInput {
 	return QuotationInput{
 		Items: []QuotationItemInput{
-			{Description: "Item A", Qty: 2, UoM: "Lot", UnitPrice: 100000, MarginEnabled: true, MarginPercent: 20},
-			{Description: "Item B", Qty: 1, UoM: "Unit", UnitPrice: 50000, MarginEnabled: true, MarginPercent: 20},
+			{
+				Description: "Item A", Qty: 2, UoM: "Lot", UnitPrice: 100000,
+				MarginEnabled: true, MarginPercent: 20,
+				DiscountEnabled: true, DiscountPercent: 10,
+			},
+			{
+				Description: "Item B", Qty: 1, UoM: "Unit", UnitPrice: 50000,
+				MarginEnabled: true, MarginPercent: 20,
+				DiscountEnabled: true, DiscountPercent: 10,
+			},
 		},
 		Subject:         "Test",
 		RecipientName:   "Test",
@@ -23,15 +31,15 @@ func testPreviewInput() QuotationInput {
 		LeadTimeDays:    30,
 		CustomerID:      2,
 		Incoterm:        "EXW",
-		DiscountPercent: 10,
+		DiscountPercent: 0,
 		TaxZone:         TaxZoneNonFTZ,
 		TaxCategory:     TaxCategorySupplyInstall,
 	}
 }
 
-// Cost 250.000 (2x100.000 + 1x50.000); margin 20% -> sell 300.000
-// (2x120.000 + 1x60.000); discount 10% -> grand 270.000;
-// tax 2% -> 5.400; after-tax customer grand 264.600; nett profit 39.600.
+// Cost 250.000 (2x100.000 + 1x50.000); margin 20% -> list 300.000
+// (2x120.000 + 1x60.000); row discounts 10% -> sell 270.000; the retired
+// whole-order discount is 0; tax 2% -> 5.400; after-tax 264.600; nett 39.600.
 func TestGetCustomerPreviewMatchesSellData(t *testing.T) {
 	q := newTestQuotation()
 	q.SetAuthService(auth.StaffTestService())
@@ -47,11 +55,13 @@ func TestGetCustomerPreviewMatchesSellData(t *testing.T) {
 	if len(prev.Items) != 2 {
 		t.Fatalf("preview items = %d; want 2", len(prev.Items))
 	}
-	if prev.Items[0].UnitPrice != 120000 || prev.Items[0].Total != 240000 {
-		t.Errorf("item 0 = %d/%d; want 120000/240000", prev.Items[0].UnitPrice, prev.Items[0].Total)
+	if prev.Items[0].UnitPrice != 108000 || prev.Items[0].Total != 216000 {
+		t.Errorf("item 0 = %d/%d; want the row-discounted 108000/216000",
+			prev.Items[0].UnitPrice, prev.Items[0].Total)
 	}
-	if prev.SubTotal != 300000 || prev.DiscountAmount != 30000 || prev.GrandTotal != 270000 {
-		t.Errorf("totals = %d/%d/%d; want 300000/30000/270000", prev.SubTotal, prev.DiscountAmount, prev.GrandTotal)
+	if prev.SubTotal != 270000 || prev.DiscountAmount != 0 || prev.GrandTotal != 270000 {
+		t.Errorf("totals = %d/%d/%d; want the row-only 270000/0/270000",
+			prev.SubTotal, prev.DiscountAmount, prev.GrandTotal)
 	}
 	if prev.SubTotal != q.Data.SubTotal || prev.GrandTotal != q.Data.GrandTotal {
 		t.Error("customer preview diverges from PDF-bound QuotationData")
@@ -73,8 +83,8 @@ func TestGetInternalBreakdown(t *testing.T) {
 	if bd.CostSubtotal != 250000 {
 		t.Errorf("CostSubtotal = %d; want 250000", bd.CostSubtotal)
 	}
-	if bd.SellSubtotal != 300000 {
-		t.Errorf("SellSubtotal = %d; want 300000", bd.SellSubtotal)
+	if bd.SellSubtotal != 270000 {
+		t.Errorf("SellSubtotal = %d; want the row-discounted 270000", bd.SellSubtotal)
 	}
 	// No cost-side discount, so the cost grand is the cost subtotal.
 	if bd.DiscountCost != 0 {
@@ -100,8 +110,9 @@ func TestGetInternalBreakdown(t *testing.T) {
 	if len(bd.Items) != 2 {
 		t.Fatalf("breakdown items = %d; want 2", len(bd.Items))
 	}
-	if bd.Items[0].CostUnit != 100000 || bd.Items[0].SellUnit != 120000 {
-		t.Errorf("item 0 cost/sell unit = %d/%d; want 100000/120000", bd.Items[0].CostUnit, bd.Items[0].SellUnit)
+	if bd.Items[0].CostUnit != 100000 || bd.Items[0].SellUnit != 108000 {
+		t.Errorf("item 0 cost/sell unit = %d/%d; want the row-discounted 100000/108000",
+			bd.Items[0].CostUnit, bd.Items[0].SellUnit)
 	}
 }
 

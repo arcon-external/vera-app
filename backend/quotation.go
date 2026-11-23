@@ -1081,8 +1081,11 @@ func (q *Quotation) Prepare(input QuotationInput) error {
 	// JSON decode already pins each to 0..255, and zero means "no lead time
 	// stated" -- a legitimate quotation, not a missing field.
 
-	if input.DiscountPercent > 100 {
-		return fmt.Errorf("discount percent cannot be greater than 100")
+	// #652: new quotations are row-only. Historical revisions keep their stored
+	// header discount in the archive; no new revision may write one. This
+	// replaces the old 0..100 ceiling for the header field entirely.
+	if input.DiscountPercent != 0 {
+		return store.ErrQuotationHeaderDiscountRetired
 	}
 
 	if input.TaxZone == "" {

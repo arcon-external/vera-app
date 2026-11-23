@@ -87,6 +87,17 @@ describe("formatLeadTimeSegment", () => {
   });
 });
 
+describe("DetailsPanel row-only pricing (issue #652)", () => {
+  it("offers no whole-order discount input, even for a stored legacy value", () => {
+    const html = render({ ...DETAILS, discountPercent: 10 });
+    // The retired control is gone; the only discount inputs in the editor are
+    // the per-line ones inside ItemEditor, not this panel.
+    expect(html).not.toMatch(/aria-label="[^"]*quotation[^"]*discount/i);
+    expect(html).not.toContain("Whole-order discount");
+    expect(html).not.toContain("Quotation discount");
+  });
+});
+
 describe("DetailsPanel lead time", () => {
   it("renders four labelled segments with house suffixes", () => {
     const html = render();

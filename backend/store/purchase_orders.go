@@ -440,6 +440,9 @@ func (s *Store) CreatePurchaseOrderDraft(ctx context.Context, input PurchaseOrde
 	if err != nil {
 		return PurchaseOrder{}, err
 	}
+	if source.DiscountPercent > 0 {
+		return PurchaseOrder{}, ErrPurchaseOrderLegacyHeaderDiscount
+	}
 	availability, err := getQuotationAvailability(
 		ctx, tx, schema, org.ID, input.QuotationID, input.RevisionNumber)
 	if err != nil {

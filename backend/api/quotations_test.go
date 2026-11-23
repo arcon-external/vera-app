@@ -53,12 +53,20 @@ func testQuotationServer(t *testing.T, schema string) (*Server, string) {
 func quotationInput() map[string]any {
 	return map[string]any{
 		"Items": []map[string]any{
-			{"Description": "Test item", "Qty": 2, "UoM": "Lot", "UnitPrice": 100000, "MarginEnabled": true, "MarginPercent": 20},
-			{"Description": "Plain item", "Qty": 1, "UoM": "Unit", "UnitPrice": 50000, "MarginEnabled": false, "MarginPercent": 0},
+			{
+				"Description": "Test item", "Qty": 2, "UoM": "Lot", "UnitPrice": 100000,
+				"MarginEnabled": true, "MarginPercent": 20,
+				"DiscountEnabled": true, "DiscountPercent": 10,
+			},
+			{
+				"Description": "Plain item", "Qty": 1, "UoM": "Unit", "UnitPrice": 50000,
+				"MarginEnabled": false, "MarginPercent": 0,
+				"DiscountEnabled": true, "DiscountPercent": 10,
+			},
 		},
 		"Subject":         "Test quotation",
 		"RecipientName":   "Test Recipient",
-		"DiscountPercent": 10,
+		"DiscountPercent": 0,
 		"TaxZone":         "FTZ",
 		"Validity":        30,
 		"PaymentTerm":     30,
@@ -110,7 +118,8 @@ func TestPrepareEndpointPricesQuotation(t *testing.T) {
 	}
 	customer, _ := body["customer"].(map[string]any)
 	internal, _ := body["internal"].(map[string]any)
-	// Sell: 2x120000 + 1x50000 = 290000; discount 10% -> grand 261000.
+	// List: 2x120000 + 1x50000 = 290000; both rows are 10% off, so the
+	// row-only grand is 261000. New revisions carry no whole-order discount.
 	if customer["GrandTotal"] != 261000.0 {
 		t.Errorf("customer grand = %v; want 261000", customer["GrandTotal"])
 	}

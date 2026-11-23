@@ -112,7 +112,7 @@ func TestQuotationRevisionPersistence(t *testing.T) {
 		ValidityDays:     30,
 		PaymentTermDays:  30,
 		LeadTimeDays:     10,
-		DiscountPercent:  5,
+		DiscountPercent:  0,
 		TaxZone:          "FTZ",
 		TaxRateBps:       0,
 		// The line is written as a coherent package: the parent is the rollup

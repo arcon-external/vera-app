@@ -780,20 +780,24 @@ func TestPurchaseOrderDraftCopiesTheSourceRowDiscount(t *testing.T) {
 	}
 }
 
-func TestQuotationAvailabilityReportsALegacyWholeOrderDiscount(t *testing.T) {
-	database := openTestSchema(t, "vera_po_finalize_legacy_header")
+// seedLegacyHeaderQuotation writes the pre-#652 shape through the lowest-level
+// path available: a normal row-only revision, then the stored whole-order
+// discount column and its printed totals directly. SaveRevision deliberately
+// refuses a new header discount, so only a fixture can create history.
+func seedLegacyHeaderQuotation(t *testing.T, database *Store, customerName, subject string) QuotationRecord {
+	t.Helper()
 	record, err := database.SaveRevision(context.Background(), RevisionDraft{
 		CustomerCode:     2,
-		CustomerName:     "PT. Legacy Header",
+		CustomerName:     customerName,
 		CustomerAddress:  "Jl. Billing 1",
 		RecipientName:    "Budi Santoso",
 		RecipientAddress: "Jl. Recipient 9",
-		Subject:          "Legacy header discount",
+		Subject:          subject,
 		Incoterm:         "CIF",
 		ValidityDays:     30,
 		PaymentTermDays:  45,
 		LeadTimeDays:     10,
-		DiscountPercent:  10,
+		DiscountPercent:  0,
 		TaxZone:          "FTZ",
 		TaxType:          "Goods",
 		Currency:         "USD",
@@ -811,17 +815,51 @@ func TestQuotationAvailabilityReportsALegacyWholeOrderDiscount(t *testing.T) {
 		}},
 		Totals: RevisionTotals{
 			OriginalSubtotal:          200,
-			OriginalGrand:             180,
+			OriginalGrand:             200,
 			MarginalizedSubtotal:      200,
-			MarginalizedDiscount:      20,
-			MarginalizedGrand:         180,
-			MarginalizedGrandAfterTax: 180,
-			CustomerGrandTotal:        180,
+			MarginalizedGrand:         200,
+			MarginalizedGrandAfterTax: 200,
+			CustomerGrandTotal:        200,
 		},
 	})
 	if err != nil {
-		t.Fatalf("seed legacy header quotation: %v", err)
+		t.Fatalf("seed row-only revision for the legacy fixture: %v", err)
 	}
+	pool, err := database.poolOrError()
+	if err != nil {
+		t.Fatalf("pool: %v", err)
+	}
+	if _, err := pool.Exec(context.Background(), fmt.Sprintf(`
+		UPDATE %s.quotation_revisions
+		SET discount_percent = 10
+		WHERE quotation_id = $1 AND revision_number = $2`,
+		database.configSchema()), record.ID, record.RevisionNumber); err != nil {
+		t.Fatalf("write the legacy header discount: %v", err)
+	}
+	if _, err := pool.Exec(context.Background(), fmt.Sprintf(`
+		UPDATE %s.quotation_revision_totals
+		SET marginalized_discount = 20,
+		    marginalized_grand_total = 180,
+		    marginalized_grand_after_tax = 180,
+		    customer_grand_total = 180
+		WHERE revision_id = (
+			SELECT id FROM %s.quotation_revisions
+			WHERE quotation_id = $1 AND revision_number = $2)`,
+		database.configSchema(), database.configSchema()),
+		record.ID, record.RevisionNumber); err != nil {
+		t.Fatalf("write the legacy printed totals: %v", err)
+	}
+	record.DiscountPercent = 10
+	record.Totals.MarginalizedDiscount = 20
+	record.Totals.MarginalizedGrand = 180
+	record.Totals.MarginalizedGrandAfterTax = 180
+	record.Totals.CustomerGrandTotal = 180
+	return record
+}
+
+func TestQuotationAvailabilityReportsALegacyWholeOrderDiscount(t *testing.T) {
+	database := openTestSchema(t, "vera_po_finalize_legacy_header")
+	record := seedLegacyHeaderQuotation(t, database, "PT. Legacy Header", "Legacy header discount")
 	ctx := poContext(t, database)
 	availability, err := database.GetQuotationAvailability(ctx, record.ID)
 	if err != nil {
@@ -829,6 +867,118 @@ func TestQuotationAvailabilityReportsALegacyWholeOrderDiscount(t *testing.T) {
 	}
 	if !availability.LegacyHeaderDiscount {
 		t.Error("availability did not flag the stored whole-order discount")
+	}
+}
+
+// TestLegacyHeaderRevisionRemainsReadable pins the other half of #652: the
+// stored revision keeps its discount and printed totals, and reading it again
+// never rewrites them.
+func TestLegacyHeaderRevisionRemainsReadable(t *testing.T) {
+	database := openTestSchema(t, "vera_store_legacy_header_read")
+	qctx := poContext(t, database)
+	record := seedLegacyHeaderQuotation(t, database, "PT. Legacy Read", "Legacy readable")
+
+	first, err := database.GetQuotation(qctx, record.ID, nil)
+	if err != nil {
+		t.Fatalf("read the legacy quotation: %v", err)
+	}
+	if first.DiscountPercent != 10 {
+		t.Errorf("stored header discount = %d; want the historical 10", first.DiscountPercent)
+	}
+	if first.Totals.MarginalizedDiscount != 20 ||
+		first.Totals.MarginalizedGrand != 180 ||
+		first.Totals.CustomerGrandTotal != 180 {
+		t.Errorf("stored totals = %d/%d/%d; want the historical 20/180/180",
+			first.Totals.MarginalizedDiscount, first.Totals.MarginalizedGrand,
+			first.Totals.CustomerGrandTotal)
+	}
+	second, err := database.GetQuotation(qctx, record.ID, nil)
+	if err != nil {
+		t.Fatalf("re-read the legacy quotation: %v", err)
+	}
+	if second.DiscountPercent != first.DiscountPercent ||
+		second.Totals != first.Totals {
+		t.Errorf("reading rewrote the historical revision: %+v -> %+v", first, second)
+	}
+}
+
+// TestRowOnlyRevisionTotalsAreTheSumOfRows proves the store does not recompute
+// or round the row-only arithmetic on its way to disk: the figures Prepare
+// summed are the figures a later read reports, and the retired whole-order
+// discount stays zero.
+func TestRowOnlyRevisionTotalsAreTheSumOfRows(t *testing.T) {
+	database := openTestSchema(t, "vera_store_row_only_sums")
+	qctx := poContext(t, database)
+	saved, err := database.SaveRevision(context.Background(), RevisionDraft{
+		CustomerCode:     2,
+		CustomerName:     "PT. Row Only",
+		CustomerAddress:  "Jl. Sum 1",
+		RecipientName:    "Budi Santoso",
+		RecipientAddress: "Jl. Recipient 1",
+		Subject:          "Row-only sums",
+		Incoterm:         "CIF",
+		ValidityDays:     30,
+		PaymentTermDays:  45,
+		LeadTimeDays:     10,
+		DiscountPercent:  0,
+		TaxZone:          "FTZ",
+		TaxType:          "Goods",
+		Currency:         "USD",
+		HTMLSnapshot:     "<html>row-only sums snapshot</html>",
+		Items: []RevisionItem{
+			{
+				ItemNo: 1, Description: "Margined and discounted", Qty: 2, UoM: "Pc",
+				UnitPrice: 150, MarginAmount: 35,
+				OriginalTotal: 200, MarginalizedUnitPrice: 135, MarginalizedTotal: 270,
+				ListUnitPrice: 150, DiscountAmount: 30,
+				DiscountEnabled: true, DiscountPercent: 10,
+			},
+			{
+				ItemNo: 2, Description: "Plain", Qty: 1, UoM: "Pc",
+				UnitPrice: 50, OriginalTotal: 50,
+				MarginalizedUnitPrice: 50, MarginalizedTotal: 50, ListUnitPrice: 50,
+			},
+		},
+		Totals: RevisionTotals{
+			OriginalSubtotal:          250,
+			OriginalGrand:             250,
+			MarginalizedSubtotal:      320,
+			MarginalizedGrand:         320,
+			MarginalizedGrandAfterTax: 320,
+			ProfitAmount:              70,
+			NettProfit:                70,
+			CustomerGrandTotal:        320,
+		},
+	})
+	if err != nil {
+		t.Fatalf("save the row-only revision: %v", err)
+	}
+	record, err := database.GetQuotation(qctx, saved.ID, nil)
+	if err != nil {
+		t.Fatalf("read the row-only revision: %v", err)
+	}
+
+	var sell, cost, margin int64
+	for _, item := range record.Items {
+		sell += item.MarginalizedTotal
+		cost += item.OriginalTotal
+		margin += item.MarginAmount * item.Qty
+	}
+	if record.Totals.MarginalizedSubtotal != sell || record.Totals.MarginalizedGrand != sell {
+		t.Errorf("stored sell = %d / grand %d; want the summed rows %d",
+			record.Totals.MarginalizedSubtotal, record.Totals.MarginalizedGrand, sell)
+	}
+	if record.Totals.OriginalSubtotal != cost || record.Totals.OriginalGrand != cost {
+		t.Errorf("stored cost = %d / grand %d; want the summed rows %d",
+			record.Totals.OriginalSubtotal, record.Totals.OriginalGrand, cost)
+	}
+	if record.Totals.ProfitAmount != margin || record.Totals.NettProfit != margin {
+		t.Errorf("stored profit = %d / nett %d; want the summed row margins %d",
+			record.Totals.ProfitAmount, record.Totals.NettProfit, margin)
+	}
+	if record.Totals.MarginalizedDiscount != 0 || record.Totals.OriginalDiscount != 0 {
+		t.Errorf("stored whole-order discounts = %d / %d; want the retired zero",
+			record.Totals.MarginalizedDiscount, record.Totals.OriginalDiscount)
 	}
 }
 

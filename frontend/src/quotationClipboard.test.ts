@@ -308,6 +308,15 @@ describe("archivedToEditorDraft", () => {
     });
   });
 
+  it("opens a legacy revision as row-only while the archive keeps its value", () => {
+    const archived = makeArchived({ DiscountPercent: 10 });
+    const draft = archivedToEditorDraft(archived);
+    expect(draft.details.discountPercent).toBe(0);
+    // The archived record itself is untouched; the detail page still renders
+    // its stored value read-only.
+    expect(archived.DiscountPercent).toBe(10);
+  });
+
   it("falls back to the legacy tax mapping when the revision predates taxType", () => {
     const draft = archivedToEditorDraft(
       makeArchived({ TaxType: "", ServiceCategory: "", TaxCategory: "SupplyInstall" })
