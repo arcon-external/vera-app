@@ -3,7 +3,6 @@ import {
   useEffect,
   useMemo,
   useState,
-  type FormEvent,
 } from "react";
 import { GetPurchaseOrderFulfillment } from "@backend/backend/Quotation";
 import { errorMessage } from "../errors";
@@ -435,6 +434,202 @@ function QuotationBlock({
   );
 }
 
+export interface PurchaseOrderFulfillmentCardViewProps {
+  /** The already-loaded page; null while loading or after a failure. */
+  page: PurchaseOrderFulfillmentPage | null;
+  /** The report's selected currency, used until the page echoes its own. */
+  currency: string;
+  /** Null until the catalogue answers; a missing code renders "-". */
+  catalogue: readonly CurrencyInfo[] | null;
+  status: string;
+  searchDraft: string;
+  pageNumber: number;
+  loading: boolean;
+  error: string;
+  onStatusChange: (status: string) => void;
+  onSearchDraftChange: (value: string) => void;
+  onSearchSubmit: () => void;
+  onClearFilters: () => void;
+  onPreviousPage: () => void;
+  onNextPage: () => void;
+  onRetry: () => void;
+}
+
+/**
+ * The presentational fulfillment card. The container owns the loader, the
+ * freshness epoch and the request state; this view owns the screen. The split
+ * exists so the snapshot harness can render a settled page with
+ * renderToString, which runs no effects: without it, every snapshot would show
+ * only the loading shell.
+ */
+export function PurchaseOrderFulfillmentCardView({
+  page,
+  currency,
+  catalogue,
+  status,
+  searchDraft,
+  pageNumber,
+  loading,
+  error,
+  onStatusChange,
+  onSearchDraftChange,
+  onSearchSubmit,
+  onClearFilters,
+  onPreviousPage,
+  onNextPage,
+  onRetry,
+}: PurchaseOrderFulfillmentCardViewProps) {
+  const displayCurrency = page?.filter.currency ?? currency;
+  const entry =
+    catalogue?.find((item) => item.code === displayCurrency) ?? null;
+  const bounds = fulfillmentPageBounds(
+    page?.total ?? 0,
+    page?.pageSize ?? FULFILLMENT_DEFAULT_PAGE_SIZE,
+    pageNumber
+  );
+
+  return (
+    <Card
+      data-purchase-order-fulfillment=""
+      className="min-w-0 p-5"
+      aria-labelledby="fulfillment-heading"
+    >
+      <header className="flex flex-wrap items-start justify-between gap-3">
+        <div className="min-w-0">
+          <h2
+            id="fulfillment-heading"
+            className="text-title font-semibold text-ink-950"
+          >
+            Fulfillment
+          </h2>
+          <p className="mt-1 max-w-3xl text-small leading-relaxed text-ink-500">
+            What each quotation asked for, what saved purchase orders actually
+            bought, and what is still unsold or closed. No date filter: bought
+            state spans revisions and time, so a date range would answer half
+            the question.
+          </p>
+        </div>
+        <p className="tnum whitespace-nowrap text-caption text-ink-500">
+          {page === null
+            ? " "
+            : `${page.total} ${
+                page.total === 1 ? "quotation" : "quotations"
+              } · Page ${bounds.page} of ${bounds.totalPages}`}
+        </p>
+      </header>
+
+      <div className="mt-4 flex flex-wrap items-end gap-3">
+        <label className="flex flex-col gap-1 text-caption font-medium text-ink-600">
+          Status
+          <select
+            aria-label="Fulfillment status"
+            className="min-h-9 rounded-md border border-rule-strong bg-white px-2 text-small text-ink-900"
+            value={status}
+            onChange={(event) => onStatusChange(event.target.value)}
+          >
+            {FULFILLMENT_STATUS_OPTIONS.map((option) => (
+              <option key={option.value} value={option.value}>
+                {option.label}
+              </option>
+            ))}
+          </select>
+        </label>
+        <form
+          className="flex flex-wrap items-end gap-2"
+          onSubmit={(event) => {
+            event.preventDefault();
+            onSearchSubmit();
+          }}
+        >
+          <label className="flex flex-col gap-1 text-caption font-medium text-ink-600">
+            Search
+            <input
+              aria-label="Search quotations"
+              className="min-h-9 w-56 rounded-md border border-rule-strong bg-white px-2 text-small text-ink-900"
+              placeholder="Quote number or customer"
+              type="search"
+              value={searchDraft}
+              onChange={(event) => onSearchDraftChange(event.target.value)}
+            />
+          </label>
+          <Button aria-label="Search fulfillment" type="submit">
+            Search
+          </Button>
+          <Button
+            aria-label="Clear fulfillment filters"
+            type="button"
+            onClick={onClearFilters}
+          >
+            Clear
+          </Button>
+        </form>
+        <div className="ml-auto flex items-center gap-2">
+          <Button
+            aria-label="Previous fulfillment page"
+            disabled={!bounds.hasPrevious || loading}
+            onClick={onPreviousPage}
+          >
+            Previous
+          </Button>
+          <Button
+            aria-label="Next fulfillment page"
+            disabled={!bounds.hasNext || loading}
+            onClick={onNextPage}
+          >
+            Next
+          </Button>
+        </div>
+      </div>
+
+      {loading ? (
+        <p role="status" className="mt-4 text-small text-ink-500">
+          Loading fulfillment…
+        </p>
+      ) : error !== "" ? (
+        <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
+          <StatusBanner tone="danger">{error}</StatusBanner>
+          <Button aria-label="Retry fulfillment" onClick={onRetry}>
+            Retry
+          </Button>
+        </div>
+      ) : page === null || page.quotations.length === 0 ? (
+        <div className="mt-4 rounded-lg border border-dashed border-rule-strong px-4 py-6">
+          <p className="text-small font-medium text-ink-700">
+            No quotations match these filters.
+          </p>
+          <p className="mt-1 text-small text-ink-500">
+            No date filter applies: every saved purchase-order buy for the
+            selected currency is considered, across revisions.
+          </p>
+        </div>
+      ) : (
+        <div className="mt-4 space-y-3">
+          {page.quotations.map((quotation) => (
+            <QuotationBlock
+              key={quotation.quotationId}
+              quotation={quotation}
+              entry={entry}
+            />
+          ))}
+        </div>
+      )}
+
+      {page === null ? null : (
+        <p className="mt-3 text-caption text-ink-500">
+          As of {page.asOf}. Aggregate titles are presentation only: they add no
+          row and no quantity of their own.
+        </p>
+      )}
+    </Card>
+  );
+}
+
+/**
+ * The live card: one paginated read and nothing else. Every mutation or filter
+ * change advances the read key, which hides the old page on the first render
+ * after the change; the view then shows either the new page, the error or the
+ * empty state.
+ */
 export function PurchaseOrderFulfillmentCard({
   currency,
   catalogue,
@@ -500,14 +695,10 @@ export function PurchaseOrderFulfillmentCard({
     };
   }, [active, load, query, readKey]);
 
-  const submitSearch = useCallback(
-    (event: FormEvent<HTMLFormElement>) => {
-      event.preventDefault();
-      setSearch(searchDraft.trim());
-      setPageNumber(1);
-    },
-    [searchDraft]
-  );
+  const submitSearch = useCallback(() => {
+    setSearch(searchDraft.trim());
+    setPageNumber(1);
+  }, [searchDraft]);
 
   const changeStatus = useCallback((next: string) => {
     setStatus(next);
@@ -524,148 +715,30 @@ export function PurchaseOrderFulfillmentCard({
   const current = read.key === readKey;
   const loading = !current || read.loading;
   const readError = current ? read.error : "";
-  const loadedPage = current ? read.page : null;
-  const displayCurrency = loadedPage?.filter.currency ?? currency;
-  const entry =
-    catalogue?.find((item) => item.code === displayCurrency) ?? null;
+  const page = current ? read.page : null;
   const bounds = fulfillmentPageBounds(
-    loadedPage?.total ?? 0,
-    loadedPage?.pageSize ?? FULFILLMENT_DEFAULT_PAGE_SIZE,
+    page?.total ?? 0,
+    page?.pageSize ?? FULFILLMENT_DEFAULT_PAGE_SIZE,
     pageNumber
   );
 
   return (
-    <Card
-      data-purchase-order-fulfillment=""
-      className="min-w-0 p-5"
-      aria-labelledby="fulfillment-heading"
-    >
-      <header className="flex flex-wrap items-start justify-between gap-3">
-        <div className="min-w-0">
-          <h2
-            id="fulfillment-heading"
-            className="text-title font-semibold text-ink-950"
-          >
-            Fulfillment
-          </h2>
-          <p className="mt-1 max-w-3xl text-small leading-relaxed text-ink-500">
-            What each quotation asked for, what saved purchase orders actually
-            bought, and what is still unsold or closed. No date filter: bought
-            state spans revisions and time, so a date range would answer half
-            the question.
-          </p>
-        </div>
-        <p className="tnum whitespace-nowrap text-caption text-ink-500">
-          {loadedPage === null
-            ? " "
-            : `${loadedPage.total} ${
-                loadedPage.total === 1 ? "quotation" : "quotations"
-              } · Page ${bounds.page} of ${bounds.totalPages}`}
-        </p>
-      </header>
-
-      <div className="mt-4 flex flex-wrap items-end gap-3">
-        <label className="flex flex-col gap-1 text-caption font-medium text-ink-600">
-          Status
-          <select
-            aria-label="Fulfillment status"
-            className="min-h-9 rounded-md border border-rule-strong bg-white px-2 text-small text-ink-900"
-            value={status}
-            onChange={(event) => changeStatus(event.target.value)}
-          >
-            {FULFILLMENT_STATUS_OPTIONS.map((option) => (
-              <option key={option.value} value={option.value}>
-                {option.label}
-              </option>
-            ))}
-          </select>
-        </label>
-        <form
-          className="flex flex-wrap items-end gap-2"
-          onSubmit={submitSearch}
-        >
-          <label className="flex flex-col gap-1 text-caption font-medium text-ink-600">
-            Search
-            <input
-              aria-label="Search quotations"
-              className="min-h-9 w-56 rounded-md border border-rule-strong bg-white px-2 text-small text-ink-900"
-              placeholder="Quote number or customer"
-              type="search"
-              value={searchDraft}
-              onChange={(event) => setSearchDraft(event.target.value)}
-            />
-          </label>
-          <Button aria-label="Search fulfillment" type="submit">
-            Search
-          </Button>
-          <Button
-            aria-label="Clear fulfillment filters"
-            type="button"
-            onClick={clearFilters}
-          >
-            Clear
-          </Button>
-        </form>
-        <div className="ml-auto flex items-center gap-2">
-          <Button
-            aria-label="Previous fulfillment page"
-            disabled={!bounds.hasPrevious || loading}
-            onClick={() => setPageNumber(Math.max(1, bounds.page - 1))}
-          >
-            Previous
-          </Button>
-          <Button
-            aria-label="Next fulfillment page"
-            disabled={!bounds.hasNext || loading}
-            onClick={() => setPageNumber(bounds.page + 1)}
-          >
-            Next
-          </Button>
-        </div>
-      </div>
-
-      {loading ? (
-        <p role="status" className="mt-4 text-small text-ink-500">
-          Loading fulfillment…
-        </p>
-      ) : readError !== "" ? (
-        <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
-          <StatusBanner tone="danger">{readError}</StatusBanner>
-          <Button
-            aria-label="Retry fulfillment"
-            onClick={() => setRetry((current) => current + 1)}
-          >
-            Retry
-          </Button>
-        </div>
-      ) : loadedPage === null || loadedPage.quotations.length === 0 ? (
-        <div className="mt-4 rounded-lg border border-dashed border-rule-strong px-4 py-6">
-          <p className="text-small font-medium text-ink-700">
-            No quotations match these filters.
-          </p>
-          <p className="mt-1 text-small text-ink-500">
-            No date filter applies: every saved purchase-order buy for the
-            selected currency is considered, across revisions.
-          </p>
-        </div>
-      ) : (
-        <div className="mt-4 space-y-3">
-          {loadedPage.quotations.map((quotation) => (
-            <QuotationBlock
-              key={quotation.quotationId}
-              quotation={quotation}
-              entry={entry}
-            />
-          ))}
-        </div>
-      )}
-
-      {loadedPage === null ? null : (
-        <p className="mt-3 text-caption text-ink-500">
-          As of {loadedPage.asOf}. Aggregate titles are presentation only: they
-          add no row and no quantity of their own.
-        </p>
-      )}
-    </Card>
+    <PurchaseOrderFulfillmentCardView
+      page={page}
+      currency={currency}
+      catalogue={catalogue}
+      status={status}
+      searchDraft={searchDraft}
+      pageNumber={pageNumber}
+      loading={loading}
+      error={readError}
+      onStatusChange={changeStatus}
+      onSearchDraftChange={setSearchDraft}
+      onSearchSubmit={submitSearch}
+      onClearFilters={clearFilters}
+      onPreviousPage={() => setPageNumber(Math.max(1, bounds.page - 1))}
+      onNextPage={() => setPageNumber(bounds.page + 1)}
+      onRetry={() => setRetry((current) => current + 1)}
+    />
   );
 }
