@@ -34,30 +34,154 @@ concurrency:
   group: gates-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
+# The API race suite is sharded. Each matrix copy of `go-api-shard` gets its own
+# runner, Postgres service, tmpfs PGDATA, DSN, cache restore and Postgres
+# client. The shard list is generated from `go test -list` at run time -- no
+# API test name is written in this file -- and partitioned by
+# FNV-1a(name) % SHARD_COUNT, so a new test joins a shard without anyone
+# editing the workflow.
+#
+# Raising the shard count: add the index to the matrix below and to
+# SHARD_INDICES, then raise SHARD_COUNT. The partition program fails when
+# SHARD_COUNT and SHARD_INDICES disagree, and a shard fails when its own index
+# is not listed. The matrix is the one thing the guard cannot see, so keep all
+# three together: a matrix entry missing for a listed index would leave that
+# shard's share unrun while the guard, computing the same list, still passed.
+#
+# SHARD_PARTITION_PY is one program, not a copy per step: the shard step runs
+# it in `shard <index>` mode and the union guard runs the same string in
+# `verify` mode, so selection and proof cannot drift. 64-bit FNV-1a (offset
+# 14695981039346656037, prime 1099511628211) is fixed: changing it would move
+# every test between shards, which is why it is documented here rather than
+# tuned.
+env:
+  SHARD_COUNT: 2
+  SHARD_INDICES: "0 1"
+  SHARD_PARTITION_PY: |
+    import os
+    import re
+    import sys
+
+    FNV_OFFSET = 14695981039346656037
+    FNV_PRIME = 1099511628211
+    MASK = (1 << 64) - 1
+
+
+    def fnv1a(name):
+        digest = FNV_OFFSET
+        for byte in name.encode("utf-8"):
+            digest = ((digest ^ byte) * FNV_PRIME) & MASK
+        return digest
+
+
+    def fail(message):
+        print("::error::" + message, file=sys.stderr)
+        sys.exit(1)
+
+
+    def main():
+        names = [line.strip() for line in sys.stdin if re.fullmatch(r"Test\S*", line.strip())]
+        if not names:
+            fail("go test -list returned no Test functions")
+        if len(names) != len(set(names)):
+            fail("go test -list returned duplicate test names")
+        names = sorted(names)
+
+        try:
+            count = int(os.environ.get("SHARD_COUNT", ""))
+        except ValueError:
+            fail("SHARD_COUNT must be an integer")
+        try:
+            indices = [int(part) for part in os.environ.get("SHARD_INDICES", "").split()]
+        except ValueError:
+            fail("SHARD_INDICES must be a space-separated list of integers")
+        if len(indices) != count:
+            fail("SHARD_COUNT=" + str(count) + " but SHARD_INDICES names " + str(len(indices)) + " shards")
+        if sorted(indices) != list(range(count)):
+            fail("SHARD_INDICES must be exactly 0..SHARD_COUNT-1")
+
+        shards = {index: [] for index in indices}
+        for name in names:
+            shards[fnv1a(name) % count].append(name)
+
+        mode = sys.argv[1] if len(sys.argv) > 1 else "verify"
+        if mode == "shard":
+            if len(sys.argv) != 3:
+                fail("usage: shard <index>")
+            try:
+                index = int(sys.argv[2])
+            except ValueError:
+                fail("shard index must be an integer")
+            if index not in shards:
+                fail("shard " + str(index) + " is not in SHARD_INDICES")
+            if not shards[index]:
+                fail("shard " + str(index) + " selected no tests")
+            for name in shards[index]:
+                print(name)
+            return
+
+        if mode != "verify":
+            fail("unknown mode " + mode)
+
+        assigned = []
+        owners = {}
+        for index in indices:
+            if not shards[index]:
+                fail("shard " + str(index) + " is empty")
+            for name in shards[index]:
+                assigned.append(name)
+                owners.setdefault(name, []).append(index)
+        duplicates = sorted(name for name, owners_for_name in owners.items() if len(owners_for_name) > 1)
+        missing = sorted(set(names) - set(assigned))
+        unexpected = sorted(set(assigned) - set(names))
+        if duplicates:
+            fail("tests assigned to more than one shard: " + ", ".join(duplicates))
+        if missing:
+            fail("tests missing from every shard: " + ", ".join(missing))
+        if unexpected:
+            fail("shard names not present in the full list: " + ", ".join(unexpected))
+        if len(assigned) != len(names):
+            fail("shard union has " + str(len(assigned)) + " names, full list has " + str(len(names)))
+        if sorted(assigned) != names:
+            fail("sorted shard union does not equal the sorted full list")
+
+        print("full list: " + str(len(names)) + " tests")
+        for index in indices:
+            print("shard " + str(index) + ": " + str(len(shards[index])) + " tests")
+        print("union: " + str(len(assigned)) + " tests, exactly one shard each")
+
+
+    main()
+
 jobs:
-  # Two Go jobs, not one.
+  # The API suite, sharded. `backend/api` is the slowest suite and the only
+  # package that shells out to pg_dump/pg_restore. A matrix, not two
+  # hand-written jobs: every shard must get the identical service, tmpfs, DSN,
+  # cache restore, PG client and step list, and a copy that drifts is a shard
+  # that tests something else. Each matrix copy is its own runner, so its
+  # Postgres, locks and tmpfs are not shared with the other shard.
   #
-  # `backend/api` (415 database tests, and the only package that shells out to
-  # pg_dump/pg_restore) and `backend/store` (343 database tests) used to run in
-  # one `go test -p 1`, so the wall clock was their sum and a single service
-  # Postgres carried both. Each now has its own job, its own Postgres service
-  # and its own DSN: the suites overlap, and a lock-table problem in one cannot
-  # fail the other. The steps that need no database -- gofmt, vet, the chromedp
-  # build, the PDF tools and proof, the #495 tag matrix, the remaining-packages
-  # race run and the cache save -- all live in the store job, so they still run
-  # exactly once rather than once per job.
-  go-api:
-    name: Go gates (API)
-    # A hung job otherwise runs the 360-minute default before anyone is told.
-    # This job owns the single slowest suite in the repo; the `go test
-    # -timeout 30m` inside the step is the stopwatch, so this cap sits above it
-    # as a hang tripwire. It is deliberately not a target: the 45166770885
-    # baseline spent 1059s in `backend/api` alone.
+  # The steps that need no database -- gofmt, vet, the frontend build, the
+  # chromedp build, the PDF tools and proof, the #495 tag matrix, the store
+  # suite, the remaining-packages race run and the cache save -- stay in the
+  # store job, so they run exactly once rather than once per shard.
+  go-api-shard:
+    name: Go gates (API shard ${{ matrix.shard }})
+    # A hung shard otherwise runs the 360-minute default. The
+    # `go test -timeout 30m` inside the step is the stopwatch; this cap sits
+    # above it as a hang tripwire.
     timeout-minutes: 45
     # Pinned, not ubuntu-latest. The runner image is part of the setup-go cache
     # key, so the migration to Ubuntu 26 (beginning 2026-10-19) would cold-start
     # every job on the day it rolls out. Here the durability fix is the speed fix.
     runs-on: ubuntu-24.04
+    strategy:
+      # One failing shard must not cancel the other: both lists are part of the
+      # evidence, and the failed shard is rerun on its own afterwards.
+      fail-fast: false
+      # Keep in step with SHARD_INDICES and SHARD_COUNT (env at the top).
+      matrix:
+        shard: [0, 1]
     services:
       postgres:
         image: postgres:18-alpine
@@ -67,16 +191,10 @@ jobs:
           POSTGRES_DB: quotes
         ports:
           - 55432:5432
-        # PGDATA on tmpfs. The Postgres 18 image moved its data directory to
-        # /var/lib/postgresql/18/docker (`SHOW data_directory` on
-        # postgres:18-alpine), so the tmpfs is mounted on the parent: whatever
-        # major the image puts underneath lands on it. Without this the test
-        # database was fsync'd through the runner disk and the service spent
-        # 49-208s per checkpoint -- ten of them in the 45166770885 baseline,
-        # ~1050s of write time total -- which is why the same suite swung from
-        # 684s to 1620s. `size` is a cap, not an allocation: tmpfs consumes RAM
-        # as it is written, and 4g is roughly 2.5x the largest test database
-        # measured after a full local run (1.5 GB).
+        # PGDATA on tmpfs: same path and 4g cap reasoning as the store job.
+        # The Postgres 18 image moved its data directory to
+        # /var/lib/postgresql/18/docker, so the tmpfs is mounted on the parent;
+        # whatever major the image puts underneath lands on it.
         options: >-
           --tmpfs /var/lib/postgresql:rw,size=4g
           --health-cmd "pg_isready -U vera -d quotes"
@@ -85,6 +203,7 @@ jobs:
           --health-retries 10
     env:
       VERA_POSTGRES_TEST_DSN: postgres://vera:secret@localhost:55432/quotes?sslmode=disable
+      SHARD_INDEX: ${{ matrix.shard }}
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -93,68 +212,25 @@ jobs:
           # base, which needs the base commit to be present locally.
           fetch-depth: 0
 
-      - name: Decide whether the Go suite needs to run
-        # Skips the heavy steps ONLY for a diff that is entirely frontend UI
-        # source; every other path -- root *.md (the changelog-copy test),
-        # backend/** (embeds frontend/dist), configs, workflows -- keeps the
-        # full suite. The heavy steps run unless this step explicitly writes
-        # needs_go=false, so a crashed or confused filter fails OPEN: the
-        # worst case is an unnecessary full run, never a false green.
-        #
-        # It also decides the #495 tag matrix (needs_tags). The `dev` and
-        # `production` constraints exist only in the root package and
-        # `backend/auth`, and a Wails version bump is what the dev+production
-        # root-package collision depends on, so those two paths plus
-        # `wails.json` and the Go module files are the whole surface that can
-        # change the matrix's outcome. Written the same way round -- true
-        # unless the diff proves otherwise -- so a broken filter runs the
-        # matrix rather than silently skipping it, and an empty diff (nothing
-        # to compare) fails open too.
+      - name: Decide whether the API shard needs to run
+        # The same fail-open rule as the store job: the shard runs unless the
+        # diff is proved to be entirely frontend UI source. Only the Go
+        # decision is needed here; the #495 tag matrix and the frontend build
+        # live in the store job.
         id: scope
         continue-on-error: true
         run: |
-          # A push to main always runs the full suite. There is no merge base to
-          # diff against, and main is the branch every PR inherits its cache
-          # from, so it has to be seeded with the whole thing rather than a
-          # subset. This used to happen by accident -- the empty base made git
-          # fail, and continue-on-error hid it -- which is not a behaviour worth
-          # depending on.
           if [ "${{ github.event_name }}" != "pull_request" ]; then
-            echo "not a pull request: running the full suite and the tag matrix"
-            {
-              echo "needs_go=true"
-              echo "needs_tags=true"
-            } >> "$GITHUB_OUTPUT"
+            echo "needs_go=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi
           base="${{ github.event.pull_request.base.sha }}"
           files="$(git diff --no-renames --name-only "$base"...HEAD)"
-          echo "changed files:"; printf '%s\n' "$files"
           needs_go=true
-          if [ -n "$files" ]; then
-            # skip only when EVERY changed path is frontend UI source;
-            # --no-renames makes a rename two paths, so a move out of
-            # frontend/src cannot sneak through as one matching path.
-            if ! printf '%s\n' "$files" | grep -qvE '^frontend/(src|public)/'; then
-              needs_go=false
-            fi
+          if [ -n "$files" ] && ! printf '%s\n' "$files" | grep -qvE '^frontend/(src|public)/'; then
+            needs_go=false
           fi
-          echo "Go suite runs: $needs_go"
           echo "needs_go=$needs_go" >> "$GITHUB_OUTPUT"
-          needs_tags=true
-          if [ -n "$files" ]; then
-            needs_tags=false
-            # Root package: any *.go directly at the repo root, including the
-            # tagged variants (apibase_dev.go, apibase_packaged.go) and their
-            # tests. Auth package: everything under backend/auth/. Wails
-            # configuration: wails.json, plus go.mod/go.sum because the tag
-            # collision this matrix guards is a Wails dependency property.
-            if printf '%s\n' "$files" | grep -qE '^[^/]+\.go$|^backend/auth/|^wails\.json$|^go\.(mod|sum)$'; then
-              needs_tags=true
-            fi
-          fi
-          echo "Tag matrix runs: $needs_tags"
-          echo "needs_tags=$needs_tags" >> "$GITHUB_OUTPUT"
 
       - name: Restore the Go caches
         # Explicit, rather than setup-go's built-in cache, for two reasons.
@@ -167,7 +243,7 @@ jobs:
         # content-addressed, so a nearest-match restore is exactly right:
         # unchanged packages are reused and only genuinely-changed ones rebuild.
         #
-        # And it is saved from one place. See the save step at the bottom.
+        # And it is saved from one place. See the save step in the store job.
         id: go-cache
         if: steps.scope.outputs.needs_go != 'false'
         uses: actions/cache/restore@v6
@@ -208,26 +284,113 @@ jobs:
           echo "deb [signed-by=/usr/share/keyrings/pgdg.gpg] https://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" | sudo tee /etc/apt/sources.list.d/pgdg.list
           sudo apt-get update -qq && sudo apt-get install -y -qq postgresql-client-18
 
-      - name: go test with race detector (backend/api)
-        # This is the package that made `-p 1` necessary: its restore tests
-        # dump the whole database while every earlier test's schema is still
-        # in it, so pg_dump locks thousands of tables and the default lock
-        # table runs out (`out of shared memory`, SQLSTATE 53200). The full
-        # history is on the store job's race step below. What changed here is
-        # that this suite is now alone with its own Postgres, so nothing else
-        # shares that lock table and no other package waits behind it -- the
-        # store, seed and CLI suites run in the other job at the same time.
-        # The dump scope and the per-test migration replay are #670 phase 2's
-        # work, not something this workflow change can fix.
+      - name: Generate this shard's test list
+        # `go test -list` compiles the test binary and prints top-level test
+        # names without running one. backend/api has no TestMain and its init
+        # only registers an image codec, so this step needs no database. The
+        # partition program is the same string the union guard runs in verify
+        # mode, so selection and proof cannot drift.
+        #
+        # `-race` is repeated here deliberately: it builds the same
+        # race-instrumented test binary the run step needs, so the run step
+        # reuses it instead of paying a second build.
         if: steps.scope.outputs.needs_go != 'false'
-        run: go test -race -timeout 30m ./backend/api/...
+        run: |
+          set -euo pipefail
+          if [ -z "${SHARD_PARTITION_PY:-}" ]; then
+            echo "::error::SHARD_PARTITION_PY is empty; refusing to select an empty shard"
+            exit 1
+          fi
+          go test -race -list '^Test' ./backend/api/... \
+            | python3 -c "$SHARD_PARTITION_PY" shard "$SHARD_INDEX" > shard-tests.txt
+          count="$(wc -l < shard-tests.txt | tr -d '[:space:]')"
+          if [ "$count" -eq 0 ]; then
+            echo "::error::API shard $SHARD_INDEX of $SHARD_COUNT selected zero tests"
+            exit 1
+          fi
+          echo "API shard $SHARD_INDEX of $SHARD_COUNT selected $count tests."
+          {
+            echo "### API shard $SHARD_INDEX of $SHARD_COUNT"
+            echo
+            echo "$count tests selected by FNV-1a(name) % $SHARD_COUNT."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: go test with race detector (backend/api shard)
+        # `-run` is the generated shard list, never a typed name. A top-level
+        # test name is a Go identifier, so joining the sorted names with `|`
+        # inside ^(...)$ is a literal match, not a pattern. The non-empty check
+        # is repeated here as well as in the generator: a shard that runs zero
+        # tests must fail, not pass with a green tick.
+        #
+        # This package is the only one that shells out to pg_dump/pg_restore
+        # (the restore drill dumps its own clone). It is the longest suite, so
+        # it is the one split: each half has its own Postgres and its own lock
+        # table, and a failed half can be rerun without the other.
+        if: steps.scope.outputs.needs_go != 'false'
+        run: |
+          set -euo pipefail
+          count="$(wc -l < shard-tests.txt | tr -d '[:space:]')"
+          if [ "$count" -eq 0 ]; then
+            echo "::error::API shard $SHARD_INDEX of $SHARD_COUNT has no tests to run"
+            exit 1
+          fi
+          echo "Running $count tests in API shard $SHARD_INDEX of $SHARD_COUNT."
+          go test -race -count=1 -timeout 30m \
+            -run "^($(paste -sd '|' shard-tests.txt))$" ./backend/api/...
+
+  # The union guard. It needs no database and no shard: it lists the same tests
+  # the shards list and runs the same partition program, then proves the sorted
+  # union is exactly the sorted full list, every name is in exactly one shard,
+  # and no shard is empty. It runs beside the shards, not before them: a
+  # preflight would put its compile on every run's critical path, and a broken
+  # partition is reported alongside the shards rather than instead of them.
+  go-api-union:
+    name: Go gates (API shard union)
+    # A listing job; 15 minutes is a hang tripwire, not a budget.
+    timeout-minutes: 15
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Restore the Go caches
+        # Same key as the shard and store jobs: a listing still has to compile
+        # the API test binary, and the nearest-match restore is what keeps that
+        # to seconds instead of a cold build.
+        uses: actions/cache/restore@v6
+        with:
+          path: |
+            ~/.cache/go-build
+            ~/go/pkg/mod
+          key: go-${{ runner.os }}-${{ hashFiles('go.sum') }}
+          restore-keys: |
+            go-${{ runner.os }}-
+
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: false
+
+      - name: Verify the shard partition covers every API test exactly once
+        # No Postgres service and no DSN: listing compiles the test binary but
+        # runs nothing. This is also why the guard cannot become a database
+        # test by accident.
+        run: |
+          set -euo pipefail
+          if [ -z "${SHARD_PARTITION_PY:-}" ]; then
+            echo "::error::SHARD_PARTITION_PY is empty; the union guard cannot run"
+            exit 1
+          fi
+          go test -list '^Test' ./backend/api/... \
+            | python3 -c "$SHARD_PARTITION_PY" verify
 
   # The store job. It owns the store suite and every step that needs to run
-  # once rather than once per Go job.
+  # once rather than once per shard.
   go-store:
     name: Go gates (store)
-    # Same reasoning as the API job: 45 minutes is a hang tripwire above the
-    # `go test -timeout 30m` budget, not a target. This job also carries
+    # Same reasoning as the API shard job: 45 minutes is a hang tripwire above
+    # the `go test -timeout 30m` budget, not a target. This job also carries
     # gofmt/vet, so it is the one that reports a formatting or static-analysis
     # failure.
     timeout-minutes: 45
@@ -242,8 +405,8 @@ jobs:
         ports:
           - 55432:5432
         # Its own service, so its own tmpfs PGDATA -- same path and size
-        # reasoning as the API job. Nothing in this job dumps the whole
-        # database, so the data here stays smaller than the API job's until
+        # reasoning as the API shard jobs. Nothing in this job dumps the whole
+        # database, so the data here stays smaller than a shard's until
         # #670 phase 2 bounds the schemas.
         options: >-
           --tmpfs /var/lib/postgresql:rw,size=4g
