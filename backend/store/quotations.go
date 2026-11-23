@@ -142,6 +142,9 @@ type QuotationSummary struct {
 	ID             int64
 	GrandTotal     int64
 	RevisionNumber int16
+	// Closed is the archive badge (#656). The closure itself is quotation-level,
+	// so the summary reports it beside the latest revision it is showing.
+	Closed bool
 }
 
 type QuotationRecord struct {
@@ -175,8 +178,13 @@ type QuotationRecord struct {
 	// Currency is the code the revision was issued in, for money displays
 	// built from this record. History, not the live profile.
 	Currency string
-	Items    []RevisionItem
-	PDFData  []byte
+	// Closure (#656): who closed the quotation, when and why. A reopen clears
+	// all three; quotation_closure_events keeps the history.
+	ClosedAt     *time.Time
+	ClosedByName string
+	ClosedReason string
+	Items        []RevisionItem
+	PDFData      []byte
 	QuotationSummary
 	Totals          RevisionTotals
 	CustomerCode    int16
@@ -204,7 +212,8 @@ func (s *Store) ListQuotations(ctx context.Context) ([]QuotationSummary, error) 
 		SELECT DISTINCT ON (q.id)
 		       q.id, q.quote_number, r.revision_number,
 		       COALESCE(NULLIF(r.recipient_company, ''), c.legal_name),
-		       r.subject, r.created_at, t.customer_grand_total, r.currency
+		       r.subject, r.created_at, t.customer_grand_total, r.currency,
+		       (q.closed_at IS NOT NULL)
 		FROM %s.quotations q
 		JOIN %s.customers c ON c.id = q.customer_id
 		JOIN %s.quotation_revisions r ON r.quotation_id = q.id
@@ -227,6 +236,7 @@ func (s *Store) ListQuotations(ctx context.Context) ([]QuotationSummary, error) 
 			&quotation.CreatedAt,
 			&quotation.GrandTotal,
 			&quotation.Currency,
+			&quotation.Closed,
 		); err != nil {
 			return nil, fmt.Errorf("scan quotation summary: %w", err)
 		}
@@ -266,9 +276,11 @@ func (s *Store) GetQuotation(ctx context.Context, quotationID int64, revision *i
 		       t.marginalized_subtotal, t.marginalized_discount,
 		       t.marginalized_grand_total, t.tax_amount,
 		       t.marginalized_grand_after_tax, t.profit_amount, t.nett_profit,
-		       t.ppn_amount, t.customer_grand_total
+		       t.ppn_amount, t.customer_grand_total,
+		       q.closed_at, q.closed_reason, COALESCE(cb.display_name, '')
 		FROM %s.quotations q
 		JOIN %s.customers c ON c.id = q.customer_id
+		LEFT JOIN %s.users cb ON cb.id = q.closed_by
 		LEFT JOIN LATERAL (
 			SELECT address FROM %s.customer_addresses
 			WHERE customer_id = c.id AND is_primary = TRUE LIMIT 1
@@ -276,7 +288,7 @@ func (s *Store) GetQuotation(ctx context.Context, quotationID int64, revision *i
 		JOIN %s.quotation_revisions r ON r.quotation_id = q.id
 		JOIN %s.quotation_revision_totals t ON t.revision_id = r.id
 		JOIN %s.quotation_documents d ON d.revision_id = r.id
-		WHERE q.id = $1`, schema, schema, schema, schema, schema, schema)
+		WHERE q.id = $1`, schema, schema, schema, schema, schema, schema, schema)
 	args := []any{quotationID}
 	if revision == nil {
 		filter += " ORDER BY r.revision_number DESC LIMIT 1"
@@ -329,6 +341,9 @@ func (s *Store) GetQuotation(ctx context.Context, quotationID int64, revision *i
 		&record.Totals.NettProfit,
 		&record.Totals.PpnAmount,
 		&record.Totals.CustomerGrandTotal,
+		&record.ClosedAt,
+		&record.ClosedReason,
+		&record.ClosedByName,
 	)
 	if err != nil {
 		return QuotationRecord{}, fmt.Errorf("get quotation %d: %w", quotationID, err)

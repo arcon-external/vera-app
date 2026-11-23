@@ -872,8 +872,8 @@ type reportPipelineJSON struct {
 }
 
 // reportPipelineAndVariance decodes the one pipeline/variance object. Closed
-// loss is deliberately zero: quotation closure belongs to #656 and this build
-// must not invent a closed population.
+// loss is real since #656: an explicit quotation close moves the unbought
+// remainder out of Unsold and into a realized loss the net subtracts.
 func reportPipelineAndVariance(raw []byte) (poreport.PipelineSummary, poreport.VarianceSummary, error) {
 	var row reportPipelineJSON
 	if err := json.Unmarshal(raw, &row); err != nil {
@@ -944,27 +944,30 @@ func reportPipelineAndVariance(raw []byte) (poreport.PipelineSummary, poreport.V
 // expands each quotation's latest issued revision into its priced leaves and
 // joins the cross-revision saved allocations by leaf, so:
 //
-//   - Unsold is the quoted quantity not yet bought, at the row-discounted
-//     quotation baseline;
+//   - Unsold is the quoted quantity not yet bought on an open quotation, at the
+//     row-discounted quotation baseline;
+//   - closed loss is the same remainder once an admin closes the quotation
+//     (#656): it leaves Unsold and becomes a realized loss the net subtracts;
 //   - quantity extra income is the over-bought quantity at that same baseline
 //     (and its frozen cost);
 //   - price variance is the actual allocation revenue compared with the
 //     baseline revenue already recorded in the allocation.
 //
 // Unknown supplier cost is zero for the capital side rather than profit, the
-// same honesty rule the Actual report uses. Closed loss is hard zero until
-// #656 implements closure. The query deliberately does not filter by the
-// report's date or category: bought state spans revisions and categories, so a
-// date-filtered half-answer would misstate what is still orderable.
+// same honesty rule the Actual report uses. The query deliberately does not
+// filter by the report's date or category: bought state spans revisions and
+// categories, so a date-filtered half-answer would misstate what is still
+// orderable.
 func purchaseOrderPipelineSQL(schema string) string {
 	return fmt.Sprintf(`
 WITH latest_revision AS (
     -- Currency is part of the partition: a USD quotation must never add its
     -- cents to an IDR report's Unsold. Select the latest revision's currency
-    -- and filter the leaves by the report currency below.
+    -- and closure, and filter the leaves by the report currency below.
     SELECT DISTINCT ON (r.quotation_id) r.id AS revision_id,
-           r.quotation_id, r.currency
+           r.quotation_id, r.currency, q.closed_at
     FROM %[1]s.quotation_revisions r
+    JOIN %[1]s.quotations q ON q.id = r.quotation_id
     ORDER BY r.quotation_id, r.revision_number DESC
 ),
 leaves AS (
@@ -973,7 +976,8 @@ leaves AS (
     SELECT lr.quotation_id, i.item_no, NULL::integer AS sub_no,
            (i.qty::numeric * 10000) AS quoted_qty_scaled,
            i.marginalized_unit_price::numeric AS quoted_unit_price_minor,
-           i.unit_price::numeric AS cost_unit_minor
+           i.unit_price::numeric AS cost_unit_minor,
+           lr.closed_at
     FROM latest_revision lr
     JOIN %[1]s.quotation_revision_items i ON i.revision_id = lr.revision_id
     WHERE lr.currency = $2
@@ -985,7 +989,8 @@ leaves AS (
     SELECT lr.quotation_id, i.item_no, s.sub_no,
            (s.qty::numeric * 10000),
            s.unit_price::numeric,
-           s.unit_cost::numeric
+           s.unit_cost::numeric,
+           lr.closed_at
     FROM latest_revision lr
     JOIN %[1]s.quotation_revision_items i ON i.revision_id = lr.revision_id
     JOIN %[1]s.quotation_revision_sub_items s ON s.revision_item_id = i.id
@@ -1008,14 +1013,17 @@ bought AS (
 position AS (
     -- A FULL OUTER JOIN keeps a bought allocation whose leaf was removed in a
     -- later revision or whose quotation was deleted. Its realized price
-    -- variance survives; the nullable quoted columns make the unsold and
-    -- quantity-extra gates below contribute zero for that row.
+    -- variance survives; the nullable quoted columns make the unsold, closed
+    -- loss and quantity-extra gates below contribute zero for that row. A
+    -- bought-only row has no closed_at either, so a close can never turn a
+    -- removed bought leaf into a loss: there is no quoted quantity to close.
     SELECT COALESCE(b.bought_qty_scaled, 0) AS bought_qty_scaled,
            COALESCE(b.bought_revenue_minor, 0) AS bought_revenue_minor,
            COALESCE(b.bought_at_quoted_minor, 0) AS bought_at_quoted_minor,
            l.quoted_qty_scaled,
            l.quoted_unit_price_minor,
-           l.cost_unit_minor
+           l.cost_unit_minor,
+           l.closed_at
     FROM leaves l
     FULL OUTER JOIN bought b
       ON b.quotation_id = l.quotation_id
@@ -1037,14 +1045,28 @@ classified AS (
                 ELSE 0 END AS quantity_extra_cost,
            CASE WHEN quoted_qty_scaled IS NOT NULL
                      AND bought_qty_scaled < quoted_qty_scaled
+                     AND closed_at IS NULL
                 THEN ROUND((quoted_qty_scaled - bought_qty_scaled)
                            * quoted_unit_price_minor / 10000)
                 ELSE 0 END AS unsold_amount,
            CASE WHEN quoted_qty_scaled IS NOT NULL
                      AND bought_qty_scaled < quoted_qty_scaled
+                     AND closed_at IS NULL
                 THEN ROUND((quoted_qty_scaled - bought_qty_scaled)
                            * cost_unit_minor / 10000)
-                ELSE 0 END AS unsold_cost
+                ELSE 0 END AS unsold_cost,
+           CASE WHEN quoted_qty_scaled IS NOT NULL
+                     AND bought_qty_scaled < quoted_qty_scaled
+                     AND closed_at IS NOT NULL
+                THEN ROUND((quoted_qty_scaled - bought_qty_scaled)
+                           * quoted_unit_price_minor / 10000)
+                ELSE 0 END AS closed_loss_amount,
+           CASE WHEN quoted_qty_scaled IS NOT NULL
+                     AND bought_qty_scaled < quoted_qty_scaled
+                     AND closed_at IS NOT NULL
+                THEN ROUND((quoted_qty_scaled - bought_qty_scaled)
+                           * cost_unit_minor / 10000)
+                ELSE 0 END AS closed_loss_cost
     FROM position
 )
 SELECT jsonb_build_object(
@@ -1055,13 +1077,16 @@ SELECT jsonb_build_object(
         COALESCE(SUM(quantity_extra_amount - quantity_extra_cost), 0),
     'priceExtraIncomeMinor', COALESCE(SUM(price_extra), 0),
     'priceLossMinor', COALESCE(SUM(price_loss), 0),
-    'closedLossAmountMinor', 0,
-    'closedLossMarginMinor', 0,
+    'closedLossAmountMinor', COALESCE(SUM(closed_loss_amount), 0),
+    'closedLossMarginMinor',
+        COALESCE(SUM(closed_loss_amount - closed_loss_cost), 0),
     'netRealizedVarianceAmountMinor',
-        COALESCE(SUM(quantity_extra_amount + price_extra - price_loss), 0),
+        COALESCE(SUM(quantity_extra_amount + price_extra - price_loss
+                     - closed_loss_amount), 0),
     'netRealizedVarianceMarginMinor',
         COALESCE(SUM(quantity_extra_amount - quantity_extra_cost
-                     + price_extra - price_loss), 0)
+                     + price_extra - price_loss
+                     - (closed_loss_amount - closed_loss_cost)), 0)
 )
 FROM classified
 `, schema)

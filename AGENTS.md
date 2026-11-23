@@ -279,6 +279,16 @@ skip the same way (`resetTestSchema` carries the empty-DSN guard the other
 helpers have), so a bare `go test -race ./...` passes with no database — and
 the DSN is what makes the integration paths actually run.
 
+The store suite does not replay the migrations per test. `openTestSchema` is a
+thin wrapper over a test-only provisioning helper (`backend/store/testsupport_test.go`)
+that, once per test process, creates and migrates a template database, then gives
+each test a `CREATE DATABASE … TEMPLATE` clone opened with `Schema: "public"` and
+drops it in `t.Cleanup`. The role in `VERA_POSTGRES_TEST_DSN` therefore needs
+`CREATEDB` (the helper names the missing privilege rather than falling back).
+Tests that assert migration behaviour are the exception: they keep a genuinely
+fresh scratch schema on the base database (`resetTestSchema` + `loadMigrations`),
+because a clone is already migrated and cannot replay the chain.
+
 The Postgres repository test is skipped unless a test DSN is supplied. Use a
 throwaway database/schema, never the production one:
 

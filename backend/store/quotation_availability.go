@@ -4,9 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgtype"
 )
 
 // Issue #651: bought-state availability. Each quotation leaf reports the
@@ -47,6 +47,13 @@ type QuotationAvailabilityItem struct {
 // room. LegacyHeaderDiscount reports a stored whole-order quotation discount:
 // the plan blocks new allocation-backed POs on such a revision until it is
 // reissued with row-only pricing.
+//
+// Closure and expiry are quotation-level facts (#656), reported here because
+// this one read feeds the selector, the workspace and the quotation detail.
+// Closed means the remainder is Closed Loss, not Unsold; ClosedByName carries
+// who made that call. ValidUntil is the last valid day of the latest issued
+// revision (a new revision resets the clock); ExpiredUnclosed is true only while
+// the quotation is open, because expiry never becomes a loss by itself.
 type QuotationAvailability struct {
 	QuotationID          int64
 	RevisionNumber       int16
@@ -55,6 +62,12 @@ type QuotationAvailability struct {
 	LegacyHeaderDiscount bool
 	SavedPOCount         int
 	DraftPOCount         int
+	Closed               bool
+	ClosedAt             *time.Time
+	ClosedReason         string
+	ClosedByName         string
+	ValidUntil           *time.Time
+	ExpiredUnclosed      bool
 	Items                []QuotationAvailabilityItem
 }
 
@@ -79,6 +92,15 @@ func (s *Store) GetQuotationAvailabilityForRevision(
 func (s *Store) quotationAvailability(
 	ctx context.Context, quotationID int64, revision int16,
 ) (QuotationAvailability, error) {
+	return s.quotationAvailabilityAt(ctx, quotationID, revision, time.Now())
+}
+
+// quotationAvailabilityAt is the clock-injected seam: the expiry boundary is
+// calendar arithmetic in WIB, so a test pins it with a fixed now instead of
+// sleeping or waiting for a real month to pass.
+func (s *Store) quotationAvailabilityAt(
+	ctx context.Context, quotationID int64, revision int16, now time.Time,
+) (QuotationAvailability, error) {
 	org, err := s.RequireOrg(ctx)
 	if err != nil {
 		return QuotationAvailability{}, err
@@ -90,12 +112,12 @@ func (s *Store) quotationAvailability(
 	if err != nil {
 		return QuotationAvailability{}, err
 	}
-	return getQuotationAvailability(ctx, pool, s.configSchema(), org.ID, quotationID, revision)
+	return getQuotationAvailabilityAt(ctx, pool, s.configSchema(), org.ID, quotationID, revision, now)
 }
 
-// getQuotationAvailability reads one revision's leaves and the cross-revision
-// allocation sums beside them. A revision below zero selects the latest issued
-// revision. The caller owns any transaction; the read is repeatable within it.
+// getQuotationAvailability is the production clock's answer for callers that
+// have no as-of instant of their own (the selector, the workspace, the quotation
+// detail).
 func getQuotationAvailability(
 	ctx context.Context,
 	q purchaseOrderQuerier,
@@ -103,25 +125,56 @@ func getQuotationAvailability(
 	quotationID int64,
 	revision int16,
 ) (QuotationAvailability, error) {
-	var latest pgtype.Int2
-	if err := q.QueryRow(ctx, fmt.Sprintf(`
-		SELECT MAX(revision_number)
-		FROM %s.quotation_revisions
-		WHERE quotation_id = $1`, schema), quotationID).Scan(&latest); err != nil {
+	return getQuotationAvailabilityAt(ctx, q, schema, orgID, quotationID, revision, time.Now())
+}
+
+// getQuotationAvailabilityAt reads one revision's leaves and the cross-revision
+// allocation sums beside them. A revision below zero selects the latest issued
+// revision. The caller owns any transaction; the read is repeatable within it.
+// Closure and expiry always come from the quotation and its latest revision,
+// even when the caller asked for an older one: a quotation is not expired while
+// its reissued document is valid, and it is not open while it is closed.
+func getQuotationAvailabilityAt(
+	ctx context.Context,
+	q purchaseOrderQuerier,
+	schema, orgID string,
+	quotationID int64,
+	revision int16,
+	now time.Time,
+) (QuotationAvailability, error) {
+	var latestRevision, latestValidityDays int16
+	var latestIssuedAt time.Time
+	var closedAt *time.Time
+	var closedReason, closedByName string
+	err := q.QueryRow(ctx, fmt.Sprintf(`
+		SELECT r.revision_number, r.created_at, r.validity_days,
+		       q.closed_at, q.closed_reason, COALESCE(cb.display_name, '')
+		FROM %s.quotations q
+		LEFT JOIN %s.users cb ON cb.id = q.closed_by
+		JOIN LATERAL (
+			SELECT revision_number, created_at, validity_days
+			FROM %s.quotation_revisions
+			WHERE quotation_id = q.id
+			ORDER BY revision_number DESC
+			LIMIT 1
+		) r ON TRUE
+		WHERE q.id = $1`, schema, schema, schema), quotationID).Scan(
+		&latestRevision, &latestIssuedAt, &latestValidityDays,
+		&closedAt, &closedReason, &closedByName)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return QuotationAvailability{}, ErrPOSourceNotFound
+	}
+	if err != nil {
 		return QuotationAvailability{}, fmt.Errorf(
 			"read quotation %d latest revision: %w", quotationID, err)
 	}
-	if !latest.Valid {
-		return QuotationAvailability{}, ErrPOSourceNotFound
-	}
-	latestRevision := latest.Int16
 	if revision < 0 {
 		revision = latestRevision
 	}
 
 	var revisionID int64
 	var revisionNumber, discountPercent int16
-	err := q.QueryRow(ctx, fmt.Sprintf(`
+	err = q.QueryRow(ctx, fmt.Sprintf(`
 		SELECT r.id, r.revision_number, r.discount_percent
 		FROM %s.quotation_revisions r
 		WHERE r.quotation_id = $1 AND r.revision_number = $2`, schema),
@@ -176,11 +229,18 @@ func getQuotationAvailability(
 			"iterate quotation %d bought quantities: %w", quotationID, err)
 	}
 
+	validUntil, expired := quotationExpiryAt(latestIssuedAt, latestValidityDays, now)
 	availability := QuotationAvailability{
 		QuotationID:          quotationID,
 		RevisionNumber:       revisionNumber,
 		LatestRevision:       latestRevision,
 		LegacyHeaderDiscount: discountPercent > 0,
+		Closed:               closedAt != nil,
+		ClosedAt:             closedAt,
+		ClosedReason:         closedReason,
+		ClosedByName:         closedByName,
+		ValidUntil:           &validUntil,
+		ExpiredUnclosed:      expired && closedAt == nil,
 		Items:                make([]QuotationAvailabilityItem, 0, len(lines)),
 	}
 	availability.AllBought = len(lines) > 0
@@ -246,4 +306,20 @@ func availabilityLeaf(availability QuotationAvailability, itemNo int, subNo *int
 		}
 	}
 	return QuotationAvailabilityItem{}, false
+}
+
+// quotationExpiryAt answers "when does this quotation's offer lapse, and has it
+// yet?" for the latest issued revision. The issue date is the revision's
+// created_at read in the company's WIB calendar (a document issued at 00:30 in
+// Jakarta is dated that Jakarta day, not the previous UTC one), and
+// validity_days counts whole calendar days from there. The last valid day itself
+// is still valid: only the day after expires the offer.
+//
+// Expiry is never a loss: the caller keeps reporting Unsold and flags
+// ExpiredUnclosed until an admin closes the quotation explicitly (#656).
+func quotationExpiryAt(issuedAt time.Time, validityDays int16, now time.Time) (time.Time, bool) {
+	issued := issuedAt.In(companyLocation)
+	issuedDay := time.Date(issued.Year(), issued.Month(), issued.Day(), 0, 0, 0, 0, time.UTC)
+	validUntil := issuedDay.AddDate(0, 0, int(validityDays))
+	return validUntil, companyToday(now).After(validUntil)
 }

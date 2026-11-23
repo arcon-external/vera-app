@@ -126,7 +126,7 @@ func TestOrganizationSeedFollowsProfileAndFallsBack(t *testing.T) {
 	}
 	schema := database.configSchema()
 
-	migrations, err := loadMigrations("vera_test_orgs_seed")
+	migrations, err := loadMigrations(database.config.Schema)
 	if err != nil {
 		t.Fatalf("loadMigrations: %v", err)
 	}

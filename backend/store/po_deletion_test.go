@@ -1437,7 +1437,7 @@ func TestPausedIssuanceFindsTheChainGoneAndStoresNoFingerprint(t *testing.T) {
 		t.Fatalf("install the challenge insert pause: %v", err)
 	}
 
-	conn, err := pgx.Connect(ctx, testDSN(t))
+	conn, err := pgx.Connect(ctx, testStoreDSN(database))
 	if err != nil {
 		t.Fatalf("connect the deletion: %v", err)
 	}
@@ -1528,7 +1528,7 @@ func TestExpiryDuringTheChainLockWaitLeavesNoChallenge(t *testing.T) {
 		t.Fatalf("create challenge: %v", err)
 	}
 
-	conn, err := pgx.Connect(ctx, testDSN(t))
+	conn, err := pgx.Connect(ctx, testStoreDSN(database))
 	if err != nil {
 		t.Fatalf("connect the chain lock: %v", err)
 	}
