@@ -342,3 +342,28 @@ func TestQuotationClosureResponseCarriesNoSupplierCost(t *testing.T) {
 		t.Errorf("close response carries a supplier cost: %s", encoded)
 	}
 }
+
+// TestClosedQuotationRefusesANewIssuedRevisionOverHTTP proves the export path
+// carries the same typed refusal as the store: a closed quotation cannot be
+// reissued until it is reopened, so the closed population cannot change under a
+// report that already counted it.
+func TestClosedQuotationRefusesANewIssuedRevisionOverHTTP(t *testing.T) {
+	server, _, token := closureTestServer(t, "vera_api_quotation_closure_revision")
+	id, quoteNumber := exportForSelector(t, server, token,
+		poSourceInput("Closure revision", "Closure revision item"))
+
+	if code, body := closeQuotationOverHTTP(t, server, token, id, "customer cancelled"); code != http.StatusOK {
+		t.Fatalf("close = %d; want 200 (%v)", code, body)
+	}
+	code, body := doJSON(t, server, http.MethodPost, "/v1/quotations/export", token, map[string]any{
+		"input":       poSourceInput("Closure revision", "Closure revision item"),
+		"quoteNumber": quoteNumber,
+		"revision":    1,
+	})
+	if code != http.StatusConflict {
+		t.Fatalf("export a revision on a closed quotation = %d; want 409 (%v)", code, body)
+	}
+	if body["code"] != "quotation_closed" {
+		t.Errorf("closed export code = %v; want quotation_closed", body["code"])
+	}
+}
