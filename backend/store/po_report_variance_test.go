@@ -377,6 +377,82 @@ func TestPurchaseOrderReportKeepsRealizedVarianceAfterQuotationDeletion(t *testi
 	}
 }
 
+// TestPurchaseOrderReportFulfillmentCoverageIsBoughtOverQuoted pins the second
+// coverage ratio the report contract separates from cost coverage: the bought
+// quantity over the quoted quantity of the latest revision, in basis points,
+// rounded half away from zero. It is measured on the latest revision's leaves,
+// so a bought leaf a later revision removed is realized history, not current
+// fulfillment. An over-buy is a real over-buy and reads above 10000; a
+// partition with no quoted quantity reads 0 instead of dividing.
+func TestPurchaseOrderReportFulfillmentCoverageIsBoughtOverQuoted(t *testing.T) {
+	database := openTestSchema(t, "vera_po_report_fulfillment_bps")
+	ctx := poContext(t, database)
+	user := poTestUser(t, database)
+	quotation := seedVarianceQuotation(t, database, 2, "PT. Fulfillment", "Fulfillment source")
+
+	empty := mustReport(t, database, ctx,
+		reportQuery("2026-01-01", "2027-01-01", poreport.BucketYear, poreport.CategoryAll, "USD"))
+	if empty.Pipeline.FulfillmentBps != 0 {
+		t.Errorf("an empty USD partition reads %d bps; want 0 with no quoted quantity",
+			empty.Pipeline.FulfillmentBps)
+	}
+
+	finalizeReportPO(t, database, ctx, user, quotation, "PO-FULFILL-3", "2026-03-10",
+		PurchaseOrderBusinessCategoryFm, func(input *PurchaseOrderFinalize) {
+			input.Items[0].QuantityScaled = 3 * QuantityScale
+			input.Decisions = []PurchaseOrderDecision{
+				varianceDecision("line:1:quantity"),
+			}
+		})
+	three := varianceReport(t, database)
+	if three.Pipeline.FulfillmentBps != 6000 {
+		t.Errorf("3 of 5 bought = %d bps; want 6000", three.Pipeline.FulfillmentBps)
+	}
+	// The ratio is a separate figure: Unsold keeps its exact two-unit value.
+	if three.Pipeline.UnsoldAmountMinor != 20_000 || three.Pipeline.UnsoldMarginMinor != 8_000 {
+		t.Errorf("unsold moved with the ratio: %d/%d; want 20000/8000",
+			three.Pipeline.UnsoldAmountMinor, three.Pipeline.UnsoldMarginMinor)
+	}
+
+	// The two remaining units plus two extra: seven bought of five quoted is an
+	// over-buy and must read 14000, never a silent cap at 10000.
+	finalizeReportPO(t, database, ctx, user, quotation, "PO-FULFILL-7", "2026-03-11",
+		PurchaseOrderBusinessCategoryFm, func(input *PurchaseOrderFinalize) {
+			input.Items[0].QuantityScaled = 4 * QuantityScale
+			input.Decisions = []PurchaseOrderDecision{
+				varianceDecision("line:1:quantity"),
+			}
+		})
+	seven := varianceReport(t, database)
+	if seven.Pipeline.FulfillmentBps != 14000 {
+		t.Errorf("7 of 5 bought = %d bps; want 14000 (an over-buy is never capped)",
+			seven.Pipeline.FulfillmentBps)
+	}
+	if seven.Pipeline.UnsoldAmountMinor != 0 || seven.Pipeline.UnsoldMarginMinor != 0 {
+		t.Errorf("over-bought unsold = %d/%d; want 0/0",
+			seven.Pipeline.UnsoldAmountMinor, seven.Pipeline.UnsoldMarginMinor)
+	}
+
+	// Half away from zero: 1 of 32 is exactly 312.5 bps and must read 313.
+	tie := seedReportQuotation(t, database, 3, "PT. Fulfillment Tie", "Tie source", "USD", "FTZ",
+		[]reportQuotationLine{{
+			Description: "Tie line", UoM: "Pc", Qty: 32, Cost: 6_000, Sell: 10_000,
+		}})
+	finalizeReportPO(t, database, ctx, user, tie, "PO-FULFILL-TIE", "2026-03-10",
+		PurchaseOrderBusinessCategoryFm, func(input *PurchaseOrderFinalize) {
+			input.Items[0].QuantityScaled = 1 * QuantityScale
+			input.Decisions = []PurchaseOrderDecision{
+				varianceDecision("line:1:quantity"),
+			}
+		})
+	tied := mustReport(t, database, ctx,
+		reportQuery("2026-01-01", "2027-01-01", poreport.BucketYear, poreport.CategoryAll, "USD"))
+	if tied.Pipeline.FulfillmentBps != 313 {
+		t.Errorf("1 of 32 bought = %d bps; want 313 (half away from zero)",
+			tied.Pipeline.FulfillmentBps)
+	}
+}
+
 // TestPurchaseOrderReportPipelineIsCurrencyIsolated proves the currency
 // partition: an IDR report must never add a USD quotation's cents to Unsold,
 // and a fully bought USD quotation must not appear as IDR Unsold merely
