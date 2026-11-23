@@ -206,11 +206,16 @@ export function sourceItemApplied(
 /**
  * Converts one quotation item into the flat PO rows the store expects. A split
  * item has no parent row; its priced parts carry the shared group key.
+ *
+ * #654: an optional aggregate key lands on every fresh row, so a ghost
+ * materialized inside an aggregate arrives already grouped. The default keeps
+ * the normal ghost flow ungrouped.
  */
 export function linesFromSourceItem(
   item: SourceItem,
   currency: CurrencyInfo,
-  startKey: number
+  startKey: number,
+  aggregateKey: number | null = null
 ): PurchaseOrderLine[] {
   if (item.subItems.length > 0) {
     return item.subItems.map((sub, index) => {
@@ -232,6 +237,7 @@ export function linesFromSourceItem(
         groupKey: `q:${item.itemNo}`,
         parentDescription: item.description,
         descriptionLines: [...sub.descriptionLines],
+        aggregateKey,
         quotedUnitPriceMinor: sub.quotedUnitPriceMinor,
         remainingQuantityScaled:
           sub.remainingQuantityScaled !== null
@@ -259,6 +265,7 @@ export function linesFromSourceItem(
       groupKey: "",
       parentDescription: "",
       descriptionLines: [...item.descriptionLines],
+      aggregateKey,
       quotedUnitPriceMinor: item.quotedUnitPriceMinor,
       remainingQuantityScaled:
         item.remainingQuantityScaled !== null ? quantityScaled : null,

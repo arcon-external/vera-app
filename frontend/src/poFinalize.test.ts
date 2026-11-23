@@ -19,6 +19,8 @@ import {
   initialPurchaseOrderEditorState,
   type PurchaseOrderDTO,
 } from "./purchaseOrder";
+import { planDraftLink, type PurchaseOrderDraftLinkPreviewDTO } from "./poDraftLink";
+import { buildSourceRepairInput } from "./poRepair";
 
 // Issue #471: the final-save review's pure decisions. These tests hold the
 // matching rules, the explicit choice model, the recalculated totals, the
@@ -297,6 +299,7 @@ describe("purchase order matching", () => {
         groupKey: "",
         parentDescription: "",
         descriptionLines: [],
+        aggregateKey: null,
       },
       [candidate],
       USD
@@ -318,6 +321,7 @@ describe("purchase order matching", () => {
         groupKey: "",
         parentDescription: "",
         descriptionLines: [],
+        aggregateKey: null,
       },
       [candidate],
       USD
@@ -339,6 +343,7 @@ describe("purchase order matching", () => {
         groupKey: "",
         parentDescription: "",
         descriptionLines: [],
+        aggregateKey: null,
       },
       [candidate],
       USD
@@ -770,5 +775,116 @@ describe("inline decisions", () => {
     expect(implicit.decisions["line:1:description"]).toBe("po");
     expect(implicit.acknowledgedMissing).toEqual(["3"]);
     expect(implicit.acknowledgedExtra).toEqual([2]);
+  });
+});
+
+// Issue #654: aggregates are presentation over the same priced rows, so every
+// save path that already reuses buildPurchaseOrderUpdate must carry the
+// headers and the membership unchanged, and a review choice must not disturb
+// which aggregate a row belongs to.
+function groupedReviewOrder(): PurchaseOrderDTO {
+  const base = order();
+  return order({
+    AggregateGroups: [
+      {
+        ID: 41,
+        DisplayOrder: 1,
+        Title: "Combined items",
+        OrderedQuantityScaled: 10000,
+        OrderedUoM: "Lot",
+        ShowChildrenToCustomer: true,
+        TotalMinor: 24500,
+        DisplayUnitPriceMinor: 24500,
+      },
+    ],
+    Items: base.Items.map((item) => ({ ...item, AggregateGroupID: 41 })),
+  });
+}
+
+describe("aggregate groups through the finalize, repair and link paths (#654)", () => {
+  it("carries the headers and membership through the final save", () => {
+    const state = stateFrom(groupedReviewOrder());
+    const result = buildFinalizeInput(state, SOURCE, USD, "none", {}, [], [], true);
+    expect(result.error).toBeNull();
+    expect(result.input!.AggregateGroups).toEqual([
+      {
+        Title: "Combined items",
+        OrderedQuantityScaled: 10000,
+        OrderedUoM: "Lot",
+        ShowChildrenToCustomer: true,
+      },
+    ]);
+    expect(result.input!.Items.map((item) => item.AggregateGroupIndex)).toEqual([1, 1]);
+  });
+
+  it("keeps membership when a review choice rewrites a line value", () => {
+    const state = stateFrom(groupedReviewOrder());
+    state.lines[0].description = "Widget revised";
+    const comparison = comparePurchaseOrder(state, SOURCE, USD);
+    const applied = applyReviewChoices(
+      state,
+      SOURCE,
+      comparison,
+      { "line:1:description": "quotation" },
+      USD
+    );
+    expect(applied.lines[0].description).toBe("Widget");
+    expect(applied.lines.map((line) => line.aggregateKey)).toEqual([0, 0]);
+  });
+
+  it("carries the groups through a source repair", () => {
+    const review: PurchaseOrderReviewDTO = {
+      Order: groupedReviewOrder(),
+      Source: SOURCE,
+      DocumentState: "none",
+    };
+    const result = buildSourceRepairInput(
+      stateFrom(groupedReviewOrder()),
+      review,
+      USD,
+      {},
+      [],
+      [],
+      "Repair against the corrected revision"
+    );
+    expect(result.error).toBeNull();
+    expect(result.input!.AggregateGroups).toEqual([
+      {
+        Title: "Combined items",
+        OrderedQuantityScaled: 10000,
+        OrderedUoM: "Lot",
+        ShowChildrenToCustomer: true,
+      },
+    ]);
+    expect(result.input!.Items.map((item) => item.AggregateGroupIndex)).toEqual([1, 1]);
+  });
+
+  it("carries the groups in the draft save that precedes a link", () => {
+    const taxBasis = {
+      TaxZone: "FTZ",
+      TaxType: "Goods",
+      ServiceCategory: "",
+      TaxCategory: "",
+      PpnBps: 0,
+    };
+    const preview: PurchaseOrderDraftLinkPreviewDTO = {
+      Order: groupedReviewOrder(),
+      Source: SOURCE,
+      DocumentState: "none",
+      DraftTax: taxBasis,
+      SourceTax: taxBasis,
+      TaxChoiceRequired: false,
+    };
+    const plan = planDraftLink(stateFrom(groupedReviewOrder()), preview, USD, {}, [], [], "keep");
+    expect(plan.error).toBeNull();
+    expect(plan.update!.AggregateGroups).toEqual([
+      {
+        Title: "Combined items",
+        OrderedQuantityScaled: 10000,
+        OrderedUoM: "Lot",
+        ShowChildrenToCustomer: true,
+      },
+    ]);
+    expect(plan.update!.Items.map((item) => item.AggregateGroupIndex)).toEqual([1, 1]);
   });
 });

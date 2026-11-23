@@ -52,19 +52,6 @@ func (t *recordingTracer) mentions(fragment string) bool {
 	return false
 }
 
-// openTracedSchema is openTestSchema with a tracer attached.
-func openTracedSchema(t *testing.T, schema string) (*Store, *recordingTracer) {
-	t.Helper()
-	resetTestSchema(t, testDSN(t), schema)
-	tracer := &recordingTracer{}
-	database, err := Open(context.Background(), Config{DSN: testDSN(t), Schema: schema, Tracer: tracer})
-	if err != nil {
-		t.Fatalf("open test database: %v", err)
-	}
-	t.Cleanup(database.Close)
-	return database, tracer
-}
-
 // documentColumns are the columns that carry a rendered document. Reaching for
 // any of them to answer a question about revision numbers is the mistake this
 // guards.

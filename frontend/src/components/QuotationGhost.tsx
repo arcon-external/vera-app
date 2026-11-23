@@ -115,6 +115,7 @@ export function QuotationGhost({
   existing = false,
   pointer = false,
   tutorial = false,
+  selection,
 }: {
   item: SourceItem;
   currency: CurrencyInfo;
@@ -128,6 +129,12 @@ export function QuotationGhost({
    * handlers still decide what happens to the line, so this only reports.
    */
   tutorial?: boolean;
+  /**
+   * #654: a ghost not yet on the order can be selected for a new aggregate
+   * line. Present only while the editor's aggregate mode is on; the Use/Ignore
+   * actions keep their normal meaning either way.
+   */
+  selection?: { selected: boolean; onToggle: () => void; label: string };
 }) {
   const { ref, progress } = useScrollReveal();
   const editorItem = editorItemFromSource(item);
@@ -163,15 +170,26 @@ export function QuotationGhost({
       ) : null}
 
       <div className="flex items-start justify-between gap-3 px-3 pb-2 pt-3">
-        <div className="min-w-0">
-          <p className="text-small font-semibold text-accent-800">
-            Quotation {split ? "item" : "line"} {item.label}
-          </p>
-          <p className="mt-0.5 text-caption text-ink-600">
-            {existing
-              ? "Your line already has values. Using this replaces them."
-              : "Not on your order yet. Using this adds it."}
-          </p>
+        <div className="flex min-w-0 items-start gap-2">
+          {selection ? (
+            <input
+              type="checkbox"
+              aria-label={selection.label}
+              checked={selection.selected}
+              onChange={selection.onToggle}
+              className="mt-1 size-4 shrink-0 cursor-pointer rounded border-rule-strong accent-accent-700"
+            />
+          ) : null}
+          <div className="min-w-0">
+            <p className="text-small font-semibold text-accent-800">
+              Quotation {split ? "item" : "line"} {item.label}
+            </p>
+            <p className="mt-0.5 text-caption text-ink-600">
+              {existing
+                ? "Your line already has values. Using this replaces them."
+                : "Not on your order yet. Using this adds it."}
+            </p>
+          </div>
         </div>
         <div
           className="flex shrink-0 items-center gap-1.5"

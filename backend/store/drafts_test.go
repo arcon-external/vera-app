@@ -227,7 +227,9 @@ func TestDraftAcceptsAClientByCode(t *testing.T) {
 	database := draftTestStore(t)
 	owner := draftTestUser(t, database, "draft-a@example.com")
 
-	const schema = "vera_test_drafts"
+	// The store's own schema: a clone carries the migrated tables in "public",
+	// not in the name this test asked for.
+	schema := database.configSchema()
 	var code int64
 	if err := database.pool.QueryRow(ctx, `
 		SELECT c.customer_code FROM `+schema+`.customers c

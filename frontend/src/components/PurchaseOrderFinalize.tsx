@@ -37,6 +37,7 @@ import type {
 } from "../purchaseOrderDocument";
 import { sourceReferenceLabel, sourceRepairActionLabel } from "../poRepair";
 import type { ReconciliationHistoryInput } from "../poReconciliationHistory";
+import { customerPOHeaderOf } from "../poCustomerView";
 import {
   AcknowledgedChip,
   DiffChoice,
@@ -48,6 +49,7 @@ import {
   LineMatchRow,
 } from "./PODiff";
 import { PurchaseOrderDocumentPanel } from "./PurchaseOrderDocumentPanel";
+import { PurchaseOrderCustomerView } from "./PurchaseOrderCustomerView";
 import { PurchaseOrderHistoryPanel } from "./PurchaseOrderHistoryPanel";
 import {
   SavedReconciliationPanel,
@@ -878,6 +880,18 @@ export function PurchaseOrderFinalConfirmationView({
           </p>
         )}
       </Card>
+
+      {/* #654: the pre-save check shows the customer's reading of the applied
+          values. The header comes from the payload — the values this save will
+          store — never from the stored record. */}
+      <PurchaseOrderCustomerView
+        header={customerPOHeaderOf({ ...order, ...payload })}
+        lines={evaluation.applied.lines}
+        aggregateGroups={evaluation.applied.aggregateGroups}
+        totals={evaluation.totals}
+        totalsError={evaluation.calculationError}
+        currency={currency}
+      />
 
       <Card className="p-4">
         <SectionHeading title="Confirmation number" hint="Optional" />
@@ -1745,6 +1759,17 @@ export function PurchaseOrderSavedView({
               </table>
             </div>
           </Card>
+
+          {/* #654: the saved record's customer view reads the same projection
+              and the same stored figures as the pre-save card, so reopening a
+              record cannot disagree with the confirmation that created it. */}
+          <PurchaseOrderCustomerView
+            header={customerPOHeaderOf(order)}
+            lines={state.lines}
+            aggregateGroups={state.aggregateGroups}
+            totals={totals}
+            currency={currency}
+          />
 
           <PurchaseOrderTotals
             totals={totals}

@@ -19,6 +19,7 @@ import {
   finalSaveSendsAbsenceConfirmation,
 } from "./purchaseOrderDocument";
 import type {
+  PurchaseOrderAggregateGroupInput,
   PurchaseOrderBusinessCategory,
   PurchaseOrderDTO,
   PurchaseOrderEditorState,
@@ -544,6 +545,8 @@ export interface PurchaseOrderFinalizeInput {
   /** The #628 reporting category; a saved record always names one. */
   BusinessCategory: PurchaseOrderBusinessCategory;
   Items: PurchaseOrderItemInput[];
+  /** #654: the aggregate headers; an empty array is the deliberate ungroup. */
+  AggregateGroups: PurchaseOrderAggregateGroupInput[];
   Decisions: Array<{ Key: string; Choice: POReviewChoice }>;
   AcknowledgedMissing: string[];
   AcknowledgedExtra: number[];

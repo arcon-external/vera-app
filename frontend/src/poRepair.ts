@@ -16,6 +16,7 @@ import {
   buildPurchaseOrderUpdate,
   sourceStateOf,
   trimAdjustmentReason,
+  type PurchaseOrderAggregateGroupInput,
   type PurchaseOrderDTO,
   type PurchaseOrderEditorState,
   type PurchaseOrderItemInput,
@@ -95,6 +96,8 @@ export interface PurchaseOrderSourceRepairInput {
   AdjustmentReason: string;
   Reason: string;
   Items: PurchaseOrderItemInput[];
+  /** #654: the aggregate headers; preserved across the repair. */
+  AggregateGroups: PurchaseOrderAggregateGroupInput[];
   Decisions: Array<{ Key: string; Choice: POReviewChoice }>;
   AcknowledgedMissing: string[];
   AcknowledgedExtra: number[];

@@ -45,6 +45,27 @@ type PurchaseOrderItemDTO struct {
 	// cost (Story 42).
 	QuotedUnitPriceMinor    *int64
 	RemainingQuantityScaled *int64
+	// AggregateGroupID names the presentation group this line belongs to; 0
+	// means ungrouped (Wails models carry the zero, while the HTTP row uses
+	// null). The id is internal and not stable across saves.
+	AggregateGroupID int64
+}
+
+// PurchaseOrderAggregateGroupDTO is one PO-only presentation group. It groups
+// existing lines on the customer document; the lines remain the priced truth.
+// TotalMinor and DisplayUnitPriceMinor are derived by the server on read, and
+// no group carries cost, margin or variance (Story 42).
+type PurchaseOrderAggregateGroupDTO struct {
+	ID                     int64
+	DisplayOrder           int
+	Title                  string
+	OrderedQuantityScaled  int64
+	OrderedUoM             string
+	ShowChildrenToCustomer bool
+	TotalMinor             int64
+	// DisplayUnitPriceMinor is the exact derived unit price, or null when the
+	// division cannot be represented safely. The total stays authoritative.
+	DisplayUnitPriceMinor *int64
 }
 
 // PurchaseOrderDTO is a draft or saved PO with its editable header, its
@@ -52,29 +73,32 @@ type PurchaseOrderItemDTO struct {
 // sets of totals are deliberately separate: the calculated ones are Vera's
 // arithmetic, the printed ones are evidence.
 type PurchaseOrderDTO struct {
-	PODate                 *string
-	RequestedDeliveryDate  *string
-	UUID                   string
-	State                  string
-	QuoteNumber            string
-	CustomerName           string
-	BillingAddress         string
-	DeliveryAddress        string
-	ShipToCode             string
-	ContactEmail           string
-	ContactPhone           string
-	PONumber               string
-	ReceivedDate           string
-	Incoterms              string
-	Currency               string
-	TaxZone                string
-	TaxType                string
-	ServiceCategory        string
-	TaxCategory            string
-	AdjustmentReason       string
-	CreatedAt              string
-	UpdatedAt              string
-	Items                  []PurchaseOrderItemDTO
+	PODate                *string
+	RequestedDeliveryDate *string
+	UUID                  string
+	State                 string
+	QuoteNumber           string
+	CustomerName          string
+	BillingAddress        string
+	DeliveryAddress       string
+	ShipToCode            string
+	ContactEmail          string
+	ContactPhone          string
+	PONumber              string
+	ReceivedDate          string
+	Incoterms             string
+	Currency              string
+	TaxZone               string
+	TaxType               string
+	ServiceCategory       string
+	TaxCategory           string
+	AdjustmentReason      string
+	CreatedAt             string
+	UpdatedAt             string
+	Items                 []PurchaseOrderItemDTO
+	// AggregateGroups are the record's aggregate presentation headers, ordered
+	// by display order. Empty on a record with no groups.
+	AggregateGroups        []PurchaseOrderAggregateGroupDTO
 	ID                     int64
 	QuotationID            int64
 	SourceRevision         int16
@@ -288,14 +312,17 @@ type PurchaseOrderFinalizeInput struct {
 	BusinessCategory      string
 	AdjustmentReason      string
 	Items                 []PurchaseOrderItemInput
-	Decisions             []PurchaseOrderDecisionInput
-	AcknowledgedMissing   []string
-	AcknowledgedExtra     []int
-	DiscountPercent       int16
-	AdjustmentMinor       int64
-	ExpectedVersion       int64
-	Overwrite             bool
-	DocumentConfirmed     bool
+	// AggregateGroups is the submitted presentation; the final save replaces it
+	// exactly as a draft save does. nil is a legacy caller.
+	AggregateGroups     []PurchaseOrderAggregateGroupInput
+	Decisions           []PurchaseOrderDecisionInput
+	AcknowledgedMissing []string
+	AcknowledgedExtra   []int
+	DiscountPercent     int16
+	AdjustmentMinor     int64
+	ExpectedVersion     int64
+	Overwrite           bool
+	DocumentConfirmed   bool
 	// AssignConfirmationNumber is the final-save checkbox (#474). False leaves
 	// the record unassigned and consumes no sequence. The stored draft request
 	// is derived from this one answer (#579), never carried beside it.
@@ -347,6 +374,20 @@ type PurchaseOrderItemInput struct {
 	GroupKey          string
 	ParentDescription string
 	DescriptionLines  []string
+	// AggregateGroupIndex is the 1-based position of this line's group in the
+	// update input's AggregateGroups; 0 means ungrouped. It is an input handle
+	// only and never persisted.
+	AggregateGroupIndex int
+}
+
+// PurchaseOrderAggregateGroupInput is one submitted presentation group. Its
+// position in the update input's AggregateGroups slice is the handle every line
+// references through its group index; the server derives display order.
+type PurchaseOrderAggregateGroupInput struct {
+	Title                  string
+	OrderedQuantityScaled  int64
+	OrderedUoM             string
+	ShowChildrenToCustomer bool
 }
 
 // PurchaseOrderUpdateInput replaces the editable draft header, the
@@ -372,8 +413,13 @@ type PurchaseOrderUpdateInput struct {
 	// ConfirmationRequested is the draft's confirmation-number request (#581).
 	ConfirmationRequested bool
 	Items                 []PurchaseOrderItemInput
-	DiscountPercent       int16
-	AdjustmentMinor       int64
+	// AggregateGroups is the submitted presentation. A non-nil slice is always
+	// sent as an array (empty means the record has no groups); nil means the
+	// caller does not model aggregates and is sent as null, which the server
+	// refuses on a grouped record. Never normalize nil into an empty slice.
+	AggregateGroups []PurchaseOrderAggregateGroupInput
+	DiscountPercent int16
+	AdjustmentMinor int64
 	// Currency and the tax triple are editable only while a draft has never
 	// been linked (#496). A linked row keeps its frozen basis.
 	Currency        string
@@ -408,10 +454,13 @@ type PurchaseOrderCorrectionInput struct {
 	AdjustmentReason      string
 	Reason                string
 	Items                 []PurchaseOrderItemInput
-	DiscountPercent       int16
-	AdjustmentMinor       int64
-	ExpectedVersion       int64
-	Overwrite             bool
+	// AggregateGroups carries the submitted presentation, exactly as an update
+	// save does. nil is a legacy caller and is refused on a grouped record.
+	AggregateGroups []PurchaseOrderAggregateGroupInput
+	DiscountPercent int16
+	AdjustmentMinor int64
+	ExpectedVersion int64
+	Overwrite       bool
 }
 
 // PurchaseOrderSourceReviewInput asks for a saved record's difference review
@@ -446,12 +495,15 @@ type PurchaseOrderSourceRepairInput struct {
 	AdjustmentReason      string
 	Reason                string
 	Items                 []PurchaseOrderItemInput
-	Decisions             []PurchaseOrderDecisionInput
-	AcknowledgedMissing   []string
-	AcknowledgedExtra     []int
-	DiscountPercent       int16
-	AdjustmentMinor       int64
-	ExpectedVersion       int64
+	// AggregateGroups is the submitted presentation; a repair replaces it with
+	// the rest of the editable values. nil is a legacy caller.
+	AggregateGroups     []PurchaseOrderAggregateGroupInput
+	Decisions           []PurchaseOrderDecisionInput
+	AcknowledgedMissing []string
+	AcknowledgedExtra   []int
+	DiscountPercent     int16
+	AdjustmentMinor     int64
+	ExpectedVersion     int64
 }
 
 // PurchaseOrderSourceRepairDecisionDTO is one recorded difference choice.
@@ -525,6 +577,21 @@ type PurchaseOrderCorrectionItemDTO struct {
 	GroupKey          string
 	ParentDescription string
 	DescriptionLines  []string
+	// AggregateGroupOrder is the snapshot group's display order this line
+	// belonged to; 0 means ungrouped. Groups are keyed by order, not id,
+	// because ids change on every save.
+	AggregateGroupOrder int
+}
+
+// PurchaseOrderCorrectionGroupDTO is one aggregate header frozen into a
+// retained snapshot. Its total is derived from the snapshot lines, never
+// stored, and it carries no cost, margin or variance.
+type PurchaseOrderCorrectionGroupDTO struct {
+	DisplayOrder           int
+	Title                  string
+	OrderedQuantityScaled  int64
+	OrderedUoM             string
+	ShowChildrenToCustomer bool
 }
 
 // PurchaseOrderCorrectionDTO is one immutable snapshot: the values a
@@ -560,20 +627,23 @@ type PurchaseOrderCorrectionDTO struct {
 	ReceivedDate          string
 	CreatedAt             string
 	Items                 []PurchaseOrderCorrectionItemDTO
-	ID                    int64
-	QuotationID           int64
-	SourceRevision        int16
-	CustomerID            int64
-	PreviousVersion       int64
-	ResultingVersion      int64
-	ActorID               int64
-	DiscountPercent       int16
-	SubtotalMinor         int64
-	DiscountMinor         int64
-	PpnBps                int16
-	PpnMinor              int64
-	AdjustmentMinor       int64
-	GrandTotalMinor       int64
+	// Groups are the aggregate headers the snapshot carried, ordered by display
+	// order. Empty on a snapshot taken before #654.
+	Groups           []PurchaseOrderCorrectionGroupDTO
+	ID               int64
+	QuotationID      int64
+	SourceRevision   int16
+	CustomerID       int64
+	PreviousVersion  int64
+	ResultingVersion int64
+	ActorID          int64
+	DiscountPercent  int16
+	SubtotalMinor    int64
+	DiscountMinor    int64
+	PpnBps           int16
+	PpnMinor         int64
+	AdjustmentMinor  int64
+	GrandTotalMinor  int64
 
 	// BusinessCategory is the category the snapshot carried; empty means
 	// Unassigned.
@@ -679,6 +749,8 @@ func (q *Quotation) UpdatePurchaseOrderDraft(input PurchaseOrderUpdateInput) (Pu
 			GroupKey:          item.GroupKey,
 			ParentDescription: item.ParentDescription,
 			DescriptionLines:  item.DescriptionLines,
+
+			AggregateGroupIndex: item.AggregateGroupIndex,
 		})
 	}
 	var response apicontract.PurchaseOrderRow
@@ -704,6 +776,7 @@ func (q *Quotation) UpdatePurchaseOrderDraft(input PurchaseOrderUpdateInput) (Pu
 				Incoterms:             input.Incoterms,
 				BusinessCategory:      input.BusinessCategory,
 				Items:                 items,
+				AggregateGroups:       purchaseOrderAggregateInputs(input.AggregateGroups),
 				DiscountPercent:       input.DiscountPercent,
 				AdjustmentMinor:       input.AdjustmentMinor,
 				AdjustmentReason:      input.AdjustmentReason,
@@ -722,6 +795,30 @@ func stringPointer(value string) *string {
 		return nil
 	}
 	return &value
+}
+
+// purchaseOrderAggregateInputs maps the desktop submission to the shared
+// contract. It preserves nil on purpose: nil means "this caller does not model
+// aggregate lines" and must reach the server as null, while an empty slice is
+// the deliberate ungroup and must reach it as []. Normalizing one into the
+// other would either break the deliberate ungroup or make the legacy refusal
+// unreachable.
+func purchaseOrderAggregateInputs(
+	inputs []PurchaseOrderAggregateGroupInput,
+) []apicontract.PurchaseOrderAggregateGroupInput {
+	if inputs == nil {
+		return nil
+	}
+	groups := make([]apicontract.PurchaseOrderAggregateGroupInput, 0, len(inputs))
+	for _, input := range inputs {
+		groups = append(groups, apicontract.PurchaseOrderAggregateGroupInput{
+			Title:                  input.Title,
+			OrderedQuantityScaled:  input.OrderedQuantityScaled,
+			OrderedUoM:             input.OrderedUoM,
+			ShowChildrenToCustomer: input.ShowChildrenToCustomer,
+		})
+	}
+	return groups
 }
 
 // CorrectPurchaseOrder replaces a saved record. Like a draft save, the version
@@ -751,6 +848,8 @@ func (q *Quotation) CorrectPurchaseOrder(input PurchaseOrderCorrectionInput) (Pu
 			GroupKey:          item.GroupKey,
 			ParentDescription: item.ParentDescription,
 			DescriptionLines:  item.DescriptionLines,
+
+			AggregateGroupIndex: item.AggregateGroupIndex,
 		})
 	}
 	var response apicontract.PurchaseOrderRow
@@ -771,6 +870,7 @@ func (q *Quotation) CorrectPurchaseOrder(input PurchaseOrderCorrectionInput) (Pu
 					Incoterms:             input.Incoterms,
 					BusinessCategory:      input.BusinessCategory,
 					Items:                 items,
+					AggregateGroups:       purchaseOrderAggregateInputs(input.AggregateGroups),
 					DiscountPercent:       input.DiscountPercent,
 					AdjustmentMinor:       input.AdjustmentMinor,
 					AdjustmentReason:      input.AdjustmentReason,
@@ -835,6 +935,8 @@ func (q *Quotation) RepairPurchaseOrderSource(input PurchaseOrderSourceRepairInp
 			GroupKey:          item.GroupKey,
 			ParentDescription: item.ParentDescription,
 			DescriptionLines:  item.DescriptionLines,
+
+			AggregateGroupIndex: item.AggregateGroupIndex,
 		})
 	}
 	decisions := make([]apicontract.PurchaseOrderDecisionRequest, 0, len(input.Decisions))
@@ -863,6 +965,7 @@ func (q *Quotation) RepairPurchaseOrderSource(input PurchaseOrderSourceRepairInp
 					Incoterms:             input.Incoterms,
 					BusinessCategory:      input.BusinessCategory,
 					Items:                 items,
+					AggregateGroups:       purchaseOrderAggregateInputs(input.AggregateGroups),
 					DiscountPercent:       input.DiscountPercent,
 					AdjustmentMinor:       input.AdjustmentMinor,
 					AdjustmentReason:      input.AdjustmentReason,
@@ -1082,6 +1185,18 @@ func mapPurchaseOrderCorrectionDTO(row apicontract.PurchaseOrderCorrectionRow) P
 			GroupKey:          item.GroupKey,
 			ParentDescription: item.ParentDescription,
 			DescriptionLines:  item.DescriptionLines,
+
+			AggregateGroupOrder: item.AggregateGroupOrder,
+		})
+	}
+	entry.Groups = make([]PurchaseOrderCorrectionGroupDTO, 0, len(row.Groups))
+	for _, group := range row.Groups {
+		entry.Groups = append(entry.Groups, PurchaseOrderCorrectionGroupDTO{
+			DisplayOrder:           group.DisplayOrder,
+			Title:                  group.Title,
+			OrderedQuantityScaled:  group.OrderedQuantityScaled,
+			OrderedUoM:             group.OrderedUoM,
+			ShowChildrenToCustomer: group.ShowChildrenToCustomer,
 		})
 	}
 	return entry
@@ -1158,8 +1273,25 @@ func mapPurchaseOrderDTO(row apicontract.PurchaseOrderRow) PurchaseOrderDTO {
 		CreatedAt:              row.CreatedAt,
 		UpdatedAt:              row.UpdatedAt,
 	}
+	dto.AggregateGroups = make([]PurchaseOrderAggregateGroupDTO, 0, len(row.AggregateGroups))
+	for _, group := range row.AggregateGroups {
+		dto.AggregateGroups = append(dto.AggregateGroups, PurchaseOrderAggregateGroupDTO{
+			ID:                     group.ID,
+			DisplayOrder:           group.DisplayOrder,
+			Title:                  group.Title,
+			OrderedQuantityScaled:  group.OrderedQuantityScaled,
+			OrderedUoM:             group.OrderedUoM,
+			ShowChildrenToCustomer: group.ShowChildrenToCustomer,
+			TotalMinor:             group.TotalMinor,
+			DisplayUnitPriceMinor:  group.DisplayUnitPriceMinor,
+		})
+	}
 	dto.Items = make([]PurchaseOrderItemDTO, 0, len(row.Items))
 	for _, item := range row.Items {
+		var aggregateGroupID int64
+		if item.AggregateGroupID != nil {
+			aggregateGroupID = *item.AggregateGroupID
+		}
 		dto.Items = append(dto.Items, PurchaseOrderItemDTO{
 			LineNumber:        item.LineNumber,
 			Description:       item.Description,
@@ -1181,6 +1313,8 @@ func mapPurchaseOrderDTO(row apicontract.PurchaseOrderRow) PurchaseOrderDTO {
 
 			QuotedUnitPriceMinor:    item.QuotedUnitPriceMinor,
 			RemainingQuantityScaled: item.RemainingQuantityScaled,
+
+			AggregateGroupID: aggregateGroupID,
 		})
 	}
 	return dto
@@ -1229,6 +1363,8 @@ func (q *Quotation) FinalizePurchaseOrder(input PurchaseOrderFinalizeInput) (Pur
 			GroupKey:          item.GroupKey,
 			ParentDescription: item.ParentDescription,
 			DescriptionLines:  item.DescriptionLines,
+
+			AggregateGroupIndex: item.AggregateGroupIndex,
 		})
 	}
 	decisions := make([]apicontract.PurchaseOrderDecisionRequest, 0, len(input.Decisions))
@@ -1255,6 +1391,7 @@ func (q *Quotation) FinalizePurchaseOrder(input PurchaseOrderFinalizeInput) (Pur
 				Incoterms:             input.Incoterms,
 				BusinessCategory:      input.BusinessCategory,
 				Items:                 items,
+				AggregateGroups:       purchaseOrderAggregateInputs(input.AggregateGroups),
 				DiscountPercent:       input.DiscountPercent,
 				AdjustmentMinor:       input.AdjustmentMinor,
 				AdjustmentReason:      input.AdjustmentReason,
