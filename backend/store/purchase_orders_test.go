@@ -1542,8 +1542,10 @@ func TestPurchaseOrderMigration031BackfillsAPreCalculationDraft(t *testing.T) {
 		t.Fatalf("zero the calculation: %v", err)
 	}
 
-	// loadMigrations quotes the schema itself, so hand it the bare name.
-	migrations, err := loadMigrations("vera_po_calc_backfill")
+	// loadMigrations quotes the schema itself, so hand it the store's schema
+	// (a clone's is "public") rather than the name this test asked for: the SQL
+	// is executed below against the store's own database.
+	migrations, err := loadMigrations(database.config.Schema)
 	if err != nil {
 		t.Fatalf("load migrations: %v", err)
 	}
