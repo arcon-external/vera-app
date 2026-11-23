@@ -4323,6 +4323,7 @@ export namespace poreport {
 	export class PipelineSummary {
 	    unsoldAmountMinor: number;
 	    unsoldMarginMinor: number;
+	    fulfillmentBps: number;
 
 	    static createFrom(source: any = {}) {
 	        return new PipelineSummary(source);
@@ -4332,12 +4333,16 @@ export namespace poreport {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.unsoldAmountMinor = source["unsoldAmountMinor"];
 	        this.unsoldMarginMinor = source["unsoldMarginMinor"];
+	        this.fulfillmentBps = source["fulfillmentBps"];
 	    }
 	}
 	export class Population {
 	    availableCurrencies: string[];
 	    hasUnassigned: boolean;
 	    sourceMissingPoCount: number;
+	    unallocatedPoCount: number;
+	    legacyFallbackPoCount: number;
+	    expiredUnclosedQuotationCount: number;
 
 	    static createFrom(source: any = {}) {
 	        return new Population(source);
@@ -4348,6 +4353,9 @@ export namespace poreport {
 	        this.availableCurrencies = source["availableCurrencies"];
 	        this.hasUnassigned = source["hasUnassigned"];
 	        this.sourceMissingPoCount = source["sourceMissingPoCount"];
+	        this.unallocatedPoCount = source["unallocatedPoCount"];
+	        this.legacyFallbackPoCount = source["legacyFallbackPoCount"];
+	        this.expiredUnclosedQuotationCount = source["expiredUnclosedQuotationCount"];
 	    }
 	}
 
