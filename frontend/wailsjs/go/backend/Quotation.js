@@ -106,6 +106,10 @@ export function GetPurchaseOrderDocumentVersionContent(arg1, arg2) {
   return window['go']['backend']['Quotation']['GetPurchaseOrderDocumentVersionContent'](arg1, arg2);
 }
 
+export function GetPurchaseOrderFulfillment(arg1) {
+  return window['go']['backend']['Quotation']['GetPurchaseOrderFulfillment'](arg1);
+}
+
 export function GetPurchaseOrderHistory(arg1) {
   return window['go']['backend']['Quotation']['GetPurchaseOrderHistory'](arg1);
 }

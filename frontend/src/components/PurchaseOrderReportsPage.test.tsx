@@ -35,12 +35,14 @@ import { ToastProvider } from "../toast";
 // stale responses dropped, null never rendered as 0%, errors without invented
 // zeros, and an export that receives exactly the visible snapshot.
 
-const { reportMock } = vi.hoisted(() => ({
+const { reportMock, fulfillmentMock } = vi.hoisted(() => ({
   reportMock: vi.fn(),
+  fulfillmentMock: vi.fn(),
 }));
 
 vi.mock("@backend/backend/Quotation", () => ({
   GetPurchaseOrderReport: (...args: unknown[]) => reportMock(...args),
+  GetPurchaseOrderFulfillment: (...args: unknown[]) => fulfillmentMock(...args),
 }));
 
 (globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean })
@@ -116,9 +118,41 @@ function reportFor(query: Query): PurchaseOrderReportData {
 let container: HTMLDivElement;
 let root: Root;
 
+interface FulfillmentQueryInput {
+  currency?: string;
+  status?: string;
+  search?: string;
+  page?: number;
+  pageSize?: number;
+}
+
+function emptyFulfillment(query: FulfillmentQueryInput = {}) {
+  const page = query.page ?? 1;
+  const pageSize = query.pageSize ?? 25;
+  return {
+    asOf: "2026-11-19",
+    filter: {
+      currency: query.currency ?? "IDR",
+      status: query.status ?? "all",
+      search: query.search ?? "",
+      page,
+      pageSize,
+    },
+    quotations: [],
+    page,
+    pageSize,
+    total: 0,
+    totalPages: 1,
+  };
+}
+
 beforeEach(() => {
   reportMock.mockReset();
   reportMock.mockImplementation(async (query: Query) => reportFor(query));
+  fulfillmentMock.mockReset();
+  fulfillmentMock.mockImplementation(async (query: FulfillmentQueryInput) =>
+    emptyFulfillment(query)
+  );
   Element.prototype.scrollIntoView = () => undefined;
   container = document.createElement("div");
   document.body.appendChild(container);
@@ -204,6 +238,7 @@ interface RenderOptions {
   defaultCurrency?: string;
   catalogue?: CurrencyInfo[] | null;
   onExport?: (view: PurchaseOrderReportView) => Promise<string>;
+  mutationEpoch?: number;
 }
 
 async function renderPage(options: RenderOptions = {}): Promise<void> {
@@ -214,6 +249,7 @@ async function renderPage(options: RenderOptions = {}): Promise<void> {
           defaultCurrency={options.defaultCurrency ?? "IDR"}
           currencyCatalogue={options.catalogue ?? CATALOGUE}
           onExport={options.onExport}
+          mutationEpoch={options.mutationEpoch ?? 0}
         />
       </ToastProvider>
     );
@@ -303,6 +339,99 @@ describe("Reports filters (issue #630)", () => {
     await flush();
 
     expect(reportMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("mounts the fulfillment drill-down below the overview in the report currency", async () => {
+    await renderPage();
+
+    const overview = document.querySelector<HTMLElement>(
+      "[data-report-overview]"
+    );
+    const card = document.querySelector<HTMLElement>(
+      "[data-purchase-order-fulfillment]"
+    );
+    if (overview === null || card === null) {
+      throw new Error("the page must mount the fulfillment card");
+    }
+    expect(
+      overview.compareDocumentPosition(card) &
+        Node.DOCUMENT_POSITION_FOLLOWING
+    ).toBeTruthy();
+    expect(fulfillmentMock).toHaveBeenCalledTimes(1);
+    expect(fulfillmentMock.mock.calls[0][0]).toEqual({
+      currency: "IDR",
+      status: "all",
+      search: "",
+      page: 1,
+      pageSize: 25,
+    });
+  });
+
+  it("follows the report's selected currency into the drill-down", async () => {
+    await renderPage({ defaultCurrency: "USD" });
+    expect(fulfillmentMock.mock.calls[0][0]).toMatchObject({ currency: "USD" });
+  });
+
+  it("re-reads fulfillment after a PO mutation and never keeps stale figures", async () => {
+    const quotation = (realized: number) => ({
+      quotationId: 7,
+      quoteNumber: "1502260007",
+      customerName: "PT. Infineon Technologies Batam",
+      currency: "IDR",
+      latestRevision: 1,
+      issuedAt: "2026-10-10",
+      validUntil: "2026-11-09",
+      status: "closed",
+      items: [
+        {
+          quotationItemNo: 1,
+          quotationSubNo: null,
+          label: "1",
+          description: "Fulfillment line",
+          groupTitle: "",
+          removed: false,
+          quotedQuantityScaled: 50000,
+          boughtQuantityScaled: 30000,
+          unsoldQuantityScaled: 0,
+          overBoughtQuantityScaled: 0,
+          realizedAmountMinor: realized,
+          realizedMarginMinor: Math.trunc(realized / 2),
+          unsoldAmountMinor: 0,
+          unsoldMarginMinor: 0,
+          quantityExtraIncomeAmountMinor: 0,
+          quantityExtraIncomeMarginMinor: 0,
+          priceExtraIncomeMinor: 0,
+          priceLossMinor: 0,
+          closedLossAmountMinor: 40000,
+          closedLossMarginMinor: 20000,
+          purchaseOrders: [],
+        },
+      ],
+      extraExpenses: [],
+    });
+    fulfillmentMock
+      .mockReset()
+      .mockImplementationOnce(async (query: FulfillmentQueryInput) => ({
+        ...emptyFulfillment(query),
+        quotations: [quotation(60000)],
+        total: 1,
+      }))
+      .mockImplementationOnce(async (query: FulfillmentQueryInput) => ({
+        ...emptyFulfillment(query),
+        quotations: [quotation(80000)],
+        total: 1,
+      }));
+
+    await renderPage({ mutationEpoch: 0 });
+    const card = document.querySelector<HTMLElement>(
+      "[data-purchase-order-fulfillment]"
+    );
+    expect(card?.textContent).toContain("Rp60.000");
+
+    await renderPage({ mutationEpoch: 1 });
+    expect(fulfillmentMock).toHaveBeenCalledTimes(2);
+    expect(card?.textContent).toContain("Rp80.000");
+    expect(card?.textContent).not.toContain("Rp60.000");
   });
 
   it("sends every filter exactly, one fetch per new scope, including All and Unassigned", async () => {

@@ -140,6 +140,10 @@ func NewServer(database *store.Store, service *auth.Service, templates *backend.
 	// returns the complete snapshot the Reports screen and its PDF render; it
 	// is read-only and adds no role restriction beyond a session.
 	server.echo.GET(apicontract.PurchaseOrderReportPath, server.getPurchaseOrderReport, server.requireSession)
+	// #657: the fulfillment drill-down. It is paged, so it is deliberately not
+	// part of the #629 snapshot: one screen asks for it, and every report read
+	// must not pay for it.
+	server.echo.GET(apicontract.PurchaseOrderFulfillmentPath, server.getPurchaseOrderFulfillment, server.requireSession)
 	server.echo.POST("/v1/purchase-orders", server.createPurchaseOrderDraft, server.requireSession)
 	server.echo.GET("/v1/purchase-orders/:id", server.getPurchaseOrder, server.requireSession)
 	server.echo.PUT("/v1/purchase-orders/:id", server.updatePurchaseOrderDraft, server.requireSession)

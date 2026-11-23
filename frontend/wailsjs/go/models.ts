@@ -3962,6 +3962,234 @@ export namespace poreport {
 	}
 
 
+	export class FulfillmentContribution {
+	    id: number;
+	    poNumber: string;
+	    state: string;
+	    receivedDate: string;
+	    allocatedQuantityScaled: number;
+
+	    static createFrom(source: any = {}) {
+	        return new FulfillmentContribution(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.poNumber = source["poNumber"];
+	        this.state = source["state"];
+	        this.receivedDate = source["receivedDate"];
+	        this.allocatedQuantityScaled = source["allocatedQuantityScaled"];
+	    }
+	}
+	export class FulfillmentExtraExpense {
+	    purchaseOrderId: number;
+	    poNumber: string;
+	    lineNumber: number;
+	    description: string;
+	    quantityScaled: number;
+	    uom: string;
+	    amountMinor: number;
+	    groupTitle?: string;
+
+	    static createFrom(source: any = {}) {
+	        return new FulfillmentExtraExpense(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.purchaseOrderId = source["purchaseOrderId"];
+	        this.poNumber = source["poNumber"];
+	        this.lineNumber = source["lineNumber"];
+	        this.description = source["description"];
+	        this.quantityScaled = source["quantityScaled"];
+	        this.uom = source["uom"];
+	        this.amountMinor = source["amountMinor"];
+	        this.groupTitle = source["groupTitle"];
+	    }
+	}
+	export class FulfillmentItem {
+	    quotationItemNo: number;
+	    quotationSubNo?: number;
+	    label: string;
+	    description: string;
+	    groupTitle?: string;
+	    removed?: boolean;
+	    quotedQuantityScaled: number;
+	    boughtQuantityScaled: number;
+	    unsoldQuantityScaled: number;
+	    overBoughtQuantityScaled: number;
+	    realizedAmountMinor: number;
+	    realizedMarginMinor: number;
+	    unsoldAmountMinor: number;
+	    unsoldMarginMinor: number;
+	    quantityExtraIncomeAmountMinor: number;
+	    quantityExtraIncomeMarginMinor: number;
+	    priceExtraIncomeMinor: number;
+	    priceLossMinor: number;
+	    closedLossAmountMinor: number;
+	    closedLossMarginMinor: number;
+	    purchaseOrders: FulfillmentContribution[];
+
+	    static createFrom(source: any = {}) {
+	        return new FulfillmentItem(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.quotationItemNo = source["quotationItemNo"];
+	        this.quotationSubNo = source["quotationSubNo"];
+	        this.label = source["label"];
+	        this.description = source["description"];
+	        this.groupTitle = source["groupTitle"];
+	        this.removed = source["removed"];
+	        this.quotedQuantityScaled = source["quotedQuantityScaled"];
+	        this.boughtQuantityScaled = source["boughtQuantityScaled"];
+	        this.unsoldQuantityScaled = source["unsoldQuantityScaled"];
+	        this.overBoughtQuantityScaled = source["overBoughtQuantityScaled"];
+	        this.realizedAmountMinor = source["realizedAmountMinor"];
+	        this.realizedMarginMinor = source["realizedMarginMinor"];
+	        this.unsoldAmountMinor = source["unsoldAmountMinor"];
+	        this.unsoldMarginMinor = source["unsoldMarginMinor"];
+	        this.quantityExtraIncomeAmountMinor = source["quantityExtraIncomeAmountMinor"];
+	        this.quantityExtraIncomeMarginMinor = source["quantityExtraIncomeMarginMinor"];
+	        this.priceExtraIncomeMinor = source["priceExtraIncomeMinor"];
+	        this.priceLossMinor = source["priceLossMinor"];
+	        this.closedLossAmountMinor = source["closedLossAmountMinor"];
+	        this.closedLossMarginMinor = source["closedLossMarginMinor"];
+	        this.purchaseOrders = this.convertValues(source["purchaseOrders"], FulfillmentContribution);
+	    }
+
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	export class FulfillmentQuotation {
+	    quotationId: number;
+	    quoteNumber: string;
+	    customerName: string;
+	    currency: string;
+	    latestRevision: number;
+	    issuedAt: string;
+	    validUntil: string;
+	    status: string;
+	    items: FulfillmentItem[];
+	    extraExpenses: FulfillmentExtraExpense[];
+
+	    static createFrom(source: any = {}) {
+	        return new FulfillmentQuotation(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.quotationId = source["quotationId"];
+	        this.quoteNumber = source["quoteNumber"];
+	        this.customerName = source["customerName"];
+	        this.currency = source["currency"];
+	        this.latestRevision = source["latestRevision"];
+	        this.issuedAt = source["issuedAt"];
+	        this.validUntil = source["validUntil"];
+	        this.status = source["status"];
+	        this.items = this.convertValues(source["items"], FulfillmentItem);
+	        this.extraExpenses = this.convertValues(source["extraExpenses"], FulfillmentExtraExpense);
+	    }
+
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	export class FulfillmentQuery {
+	    currency: string;
+	    status: string;
+	    search: string;
+	    page: number;
+	    pageSize: number;
+
+	    static createFrom(source: any = {}) {
+	        return new FulfillmentQuery(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.currency = source["currency"];
+	        this.status = source["status"];
+	        this.search = source["search"];
+	        this.page = source["page"];
+	        this.pageSize = source["pageSize"];
+	    }
+	}
+	export class FulfillmentPage {
+	    asOf: string;
+	    filter: FulfillmentQuery;
+	    quotations: FulfillmentQuotation[];
+	    page: number;
+	    pageSize: number;
+	    total: number;
+	    totalPages: number;
+
+	    static createFrom(source: any = {}) {
+	        return new FulfillmentPage(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.asOf = source["asOf"];
+	        this.filter = this.convertValues(source["filter"], FulfillmentQuery);
+	        this.quotations = this.convertValues(source["quotations"], FulfillmentQuotation);
+	        this.page = source["page"];
+	        this.pageSize = source["pageSize"];
+	        this.total = source["total"];
+	        this.totalPages = source["totalPages"];
+	    }
+
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+
+
 
 	export class MonthSummaryProjection {
 	    status: string;

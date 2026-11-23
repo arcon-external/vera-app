@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { errorMessage } from "../errors";
 import type { CurrencyInfo } from "../format";
 import { formatMoney } from "../format";
@@ -55,6 +55,7 @@ import {
 } from "./PurchaseOrderReportCategoryBrowser";
 import { PurchaseOrderReportOverview } from "./PurchaseOrderReportOverview";
 import { PurchaseOrderReportPicker } from "./PurchaseOrderReportPicker";
+import { PurchaseOrderFulfillmentCard } from "./PurchaseOrderFulfillmentCard";
 import { Badge, Button, Card, SectionHeading, StatusBanner } from "./ui";
 
 // Issue #630: the global Reports workspace. It turns the #629 report endpoint
@@ -127,6 +128,12 @@ export interface PurchaseOrderReportsViewProps {
     PurchaseOrderReportCategoryBrowserProps,
     "entry"
   > | null;
+  /**
+   * #657: the fulfillment drill-down, mounted directly below the overview.
+   * Optional so a direct fixture/harness caller that does not supply the
+   * paginated read keeps the pre-#657 composition.
+   */
+  fulfillment?: ReactNode;
 }
 
 function money(entry: CurrencyInfo | null, minor: number): string {
@@ -352,6 +359,7 @@ export function PurchaseOrderReportsView({
   onRetryMonth,
   monthBrowser,
   categoryBrowser,
+  fulfillment,
 }: PurchaseOrderReportsViewProps) {
   const reportCurrency = report?.filter.currency ?? filters.currency;
   const entry =
@@ -515,6 +523,8 @@ export function PurchaseOrderReportsView({
         onCurrencyChange={onCurrencyChange}
       />
 
+      {fulfillment ?? null}
+
       {showFigures && report !== null ? (
         <>
           {monthSection ?? (
@@ -571,6 +581,9 @@ export function PurchaseOrderReportsPage({
   const [pickerOpen, setPickerOpen] = useState(false);
   const [pickerYear, setPickerYear] = useState("");
   const [categoryPickerOpen, setCategoryPickerOpen] = useState(false);
+  // #657: the drill-down is its own paginated read. Refresh revalidates it
+  // alongside the report sources, without folding it into the report snapshot.
+  const [fulfillmentRefresh, setFulfillmentRefresh] = useState(0);
   const pickerTriggerRef = useRef<HTMLButtonElement | null>(null);
   const categoryTriggerRef = useRef<HTMLButtonElement | null>(null);
 
@@ -874,6 +887,7 @@ export function PurchaseOrderReportsPage({
 
   const refresh = useCallback(() => {
     invalidateAll();
+    setFulfillmentRefresh((current) => current + 1);
   }, [invalidateAll]);
 
   const handleExport = useCallback(() => {
@@ -992,6 +1006,15 @@ export function PurchaseOrderReportsPage({
           onNext: categoryComparison.selectNext,
           onRetry: categoryComparison.retry,
         }}
+        fulfillment={
+          <PurchaseOrderFulfillmentCard
+            currency={filters.currency}
+            catalogue={currencyCatalogue}
+            active={active}
+            mutationEpoch={mutationEpoch}
+            refreshToken={fulfillmentRefresh}
+          />
+        }
       />
       <PurchaseOrderReportPicker
         title={

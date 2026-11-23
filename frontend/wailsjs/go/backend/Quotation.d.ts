@@ -57,6 +57,8 @@ export function GetPurchaseOrderDocumentState(arg1:number):Promise<backend.Purch
 
 export function GetPurchaseOrderDocumentVersionContent(arg1:number,arg2:number):Promise<backend.PurchaseOrderDocumentContentDTO>;
 
+export function GetPurchaseOrderFulfillment(arg1:poreport.FulfillmentQuery):Promise<poreport.FulfillmentPage>;
+
 export function GetPurchaseOrderHistory(arg1:number):Promise<Array<backend.PurchaseOrderCorrectionDTO>>;
 
 export function GetPurchaseOrderReport(arg1:poreport.Query):Promise<poreport.Report>;
