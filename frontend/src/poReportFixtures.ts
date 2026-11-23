@@ -26,6 +26,8 @@ import type {
 const PIPELINE_FIXTURE: PurchaseOrderReportPipeline = {
   unsoldAmountMinor: 42_000_000,
   unsoldMarginMinor: 15_000_000,
+  // 60.00% of the quoted quantity is bought: a pipeline ratio, not coverage.
+  fulfillmentBps: 6000,
 };
 
 const VARIANCE_FIXTURE: PurchaseOrderReportVariance = {
@@ -156,6 +158,9 @@ export function purchaseOrderReportFixture(): PurchaseOrderReportData {
       availableCurrencies: ["IDR", "USD"],
       hasUnassigned: true,
       sourceMissingPoCount: 1,
+      unallocatedPoCount: 2,
+      legacyFallbackPoCount: 1,
+      expiredUnclosedQuotationCount: 3,
     },
     periods,
     categories: [
@@ -446,6 +451,9 @@ export function purchaseOrderReportMonthFixture(): PurchaseOrderReportData {
       availableCurrencies: ["IDR", "USD"],
       hasUnassigned: false,
       sourceMissingPoCount: 0,
+      unallocatedPoCount: 0,
+      legacyFallbackPoCount: 0,
+      expiredUnclosedQuotationCount: 1,
     },
     periods,
     categories: categoryRows,

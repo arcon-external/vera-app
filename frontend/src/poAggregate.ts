@@ -43,14 +43,33 @@ export const MAX_EXACT_MINOR = Number.MAX_SAFE_INTEGER;
 const MAX_EXACT_MINOR_BIGINT = BigInt(MAX_EXACT_MINOR);
 
 /**
+ * Sanitizes one quantity keystroke for display: digits and at most one decimal
+ * separator, with four places. A comma is accepted as the decimal separator and
+ * normalized to a dot, because the office types both and `parseQuantityScaled`
+ * reads both; dropping the comma would silently turn "2,5" into 25.
+ *
+ * This is the one implementation the quotation editor's line fields and the
+ * aggregate header's display quantity share, so the two fields cannot drift.
+ * It never parses, rounds or validates — saving does that.
+ */
+export function sanitizeQuantityInput(raw: string): string {
+  const cleaned = raw.replace(/[^\d.,]/g, "").replace(/,/g, ".");
+  const dot = cleaned.indexOf(".");
+  if (dot === -1) return cleaned;
+  return `${cleaned.slice(0, dot)}.${cleaned
+    .slice(dot + 1)
+    .replace(/\./g, "")
+    .slice(0, 4)}`;
+}
+
+/**
  * Parses a quantity typed as a decimal string into the exact 10^4-scaled
  * integer. Up to four decimal places; a comma is accepted as the decimal
  * separator because the office types both. Positive only: a zero-quantity
  * line is not an order line, and the database refuses it too. Null means the
  * field cannot be saved.
  */
-export function parseQuantityScaled(raw: string): number | null {
-  const text = raw.trim();
+export function parseQuantityScaled(raw: string): number | null {  const text = raw.trim();
   if (text === "") return null;
   const match = /^(\d+)(?:([.,])(\d{0,4}))?$/.exec(text);
   if (!match) return null;
@@ -256,40 +275,6 @@ function displayGroupsOf(lines: PurchaseOrderLine[]): DisplayGroup[] {
     groups.push(group);
   }
   return groups;
-}
-
-/** One consecutive display run: the rows an aggregate header wraps. */
-export interface AggregateRun {
-  /** A unique, stable display key; never submitted. */
-  key: string;
-  aggregateKey: number | null;
-  lines: PurchaseOrderLine[];
-}
-
-/**
- * Splits the rows into consecutive aggregate runs. The boundary is decided per
- * display group, not per row, so a split package whose rows are interrupted by
- * an unrelated line is still one run and its aggregate can never be rendered
- * in halves. A group whose rows disagree about membership (invalid data the
- * save refuses) takes its first row's key and stays whole.
- */
-export function aggregateRuns(lines: PurchaseOrderLine[]): AggregateRun[] {
-  const runs: AggregateRun[] = [];
-  for (const group of displayGroupsOf(lines)) {
-    const runAggregateKey = aggregateKeyOf(group.lines[0]);
-    const previous = runs[runs.length - 1];
-    if (previous !== undefined && previous.aggregateKey === runAggregateKey) {
-      previous.lines.push(...group.lines);
-      continue;
-    }
-    const prefix = runAggregateKey === null ? "u" : "a";
-    runs.push({
-      key: `${prefix}:${group.lines[0].key}`,
-      aggregateKey: runAggregateKey,
-      lines: [...group.lines],
-    });
-  }
-  return runs;
 }
 
 /**

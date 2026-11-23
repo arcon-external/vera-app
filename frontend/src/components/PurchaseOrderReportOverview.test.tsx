@@ -657,6 +657,38 @@ describe("PurchaseOrderReportOverview (issue #644)", () => {
     expect(variance?.textContent).toContain("Rp4.000.000");
   });
 
+  it("shows fulfillment coverage as its own ratio in the Pipeline card, never folded into cost coverage (#648)", async () => {
+    await render({
+      filters: BASE_FILTERS,
+      report: purchaseOrderReportFixture(),
+    });
+    const pipeline = overview().querySelector<HTMLElement>(
+      "[data-report-pipeline-card]"
+    );
+    expect(pipeline?.textContent).toContain("Fulfillment");
+    expect(pipeline?.textContent).toContain("60.00%");
+    // It is not a cost-coverage restatement: the coverage disclosure keeps its
+    // own ratio and its own sentence.
+    const coverage = overview().querySelector<HTMLElement>(
+      "[data-report-coverage]"
+    );
+    expect(coverage?.textContent).toContain("Coverage: 90.00%");
+    expect(coverage?.textContent).not.toContain("Fulfillment");
+  });
+
+  it("shows the fulfillment quantity ratio even when it is a measured zero (#648)", async () => {
+    const report = purchaseOrderReportFixture();
+    report.pipeline = { ...report.pipeline, fulfillmentBps: 0 };
+    await render({ report });
+    const pipeline = overview().querySelector<HTMLElement>(
+      "[data-report-pipeline-card]"
+    );
+    expect(pipeline?.textContent).toContain("Fulfillment");
+    // 0 is the server's own value when nothing is quoted, not an unavailable
+    // figure, so it reads as a measured percentage.
+    expect(pipeline?.textContent).toContain("0.00%");
+  });
+
   it("keeps a signed KPI loss and a null percentage instead of inventing zero", async () => {
     const loss = purchaseOrderReportYearFixture();
     loss.totals = {

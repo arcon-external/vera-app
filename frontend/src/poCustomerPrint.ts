@@ -42,8 +42,8 @@ function text(value: string | null | undefined): string {
   return escapeHtmlText(value);
 }
 
-function money(currency: CurrencyInfo, minor: number): string {
-  return formatMoney(currency, minor);
+function money(currency: CurrencyInfo, minor: number | null): string {
+  return minor === null ? NOT_AVAILABLE : formatMoney(currency, minor);
 }
 
 /** One aggregate header row: the whole group's exact figures on one line. */

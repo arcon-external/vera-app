@@ -224,7 +224,7 @@ function StepOne({
                     dispatch({
                       type: "quotationSelected",
                       quotation: row,
-                      allowAllBought: !isEntry,
+                      allowUnavailable: !isEntry,
                     })
                   }
                   className={`grid w-full gap-1 rounded-lg border px-4 py-3 text-left transition ${

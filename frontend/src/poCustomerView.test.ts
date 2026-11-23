@@ -486,15 +486,60 @@ describe("projectCustomerRows: exact money", () => {
     });
   });
 
-  it("carries a null unit price and zero amount for a line that cannot be totalled", () => {
+  it("carries a null amount, never a fabricated zero, for a line that cannot be totalled", () => {
     // Only reachable from a draft the editor refuses to save: the view gates
-    // the projection on a complete calculation, so this row never prints.
+    // the projection on a complete calculation, so this row never prints. A
+    // zero here would still be a lie, so the projection keeps it unknown.
     const rows = projectCustomerRows(
       [line({ key: 1, description: "Pending", unitPrice: "", aggregateKey: null })],
       [],
       USD
     );
-    expect(rows[0]).toMatchObject({ unitPriceMinor: null, amountMinor: 0 });
+    expect(rows[0]).toMatchObject({ unitPriceMinor: null, amountMinor: null });
+  });
+
+  it("keeps the group total unknown when one child cannot be totalled, never a partial sum", () => {
+    const rows = projectCustomerRows(
+      [
+        line({ key: 1, quantity: "1", unitPrice: "$4.00", aggregateKey: 0 }),
+        line({ key: 2, quantity: "abc", unitPrice: "$6.00", aggregateKey: 0 }),
+      ],
+      [group({ key: 0, title: "Partly unknown", orderedQuantity: "2" })],
+      USD
+    );
+    expect(rows[0]).toMatchObject({
+      kind: "aggregate",
+      totalMinor: null,
+      unitPriceMinor: null,
+    });
+  });
+
+  it("keeps a split package heading unknown when one of its sub-items cannot be totalled", () => {
+    const rows = projectCustomerRows(
+      [
+        line({
+          key: 1,
+          description: "Frame",
+          quantity: "1",
+          unitPrice: "$10.00",
+          groupKey: "q:1",
+          parentDescription: "Welded frame",
+        }),
+        line({
+          key: 2,
+          description: "Panel",
+          quantity: "1",
+          unitPrice: "",
+          groupKey: "q:1",
+          parentDescription: "Welded frame",
+        }),
+      ],
+      [],
+      USD
+    );
+    expect(rows[0]).toMatchObject({ depth: 0, amountMinor: null });
+    expect(rows[1]).toMatchObject({ depth: 1, amountMinor: 1000 });
+    expect(rows[2]).toMatchObject({ depth: 1, amountMinor: null });
   });
 });
 

@@ -3291,6 +3291,9 @@ function App() {
             defaultCurrency={companyCurrency}
             currencyCatalogue={currencyCatalogue}
             onExport={handleExportPurchaseOrderReport}
+            isAdmin={isAdmin}
+            onCloseQuotation={closeQuotationFromDetail}
+            onReopenQuotation={reopenQuotationFromDetail}
           />
         </div>
       ) : null}

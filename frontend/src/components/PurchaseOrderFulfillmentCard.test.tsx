@@ -183,6 +183,18 @@ function text(): string {
   return card().textContent ?? "";
 }
 
+function button(label: string): HTMLButtonElement {
+  const found = buttonOrNull(label);
+  if (found === null) throw new Error(`no button labelled ${label}`);
+  return found;
+}
+
+function buttonOrNull(label: string): HTMLButtonElement | null {
+  return container.querySelector<HTMLButtonElement>(
+    `button[aria-label="${label}"]`
+  );
+}
+
 describe("PurchaseOrderFulfillmentCard", () => {
   it("renders the status, quantities, figures and contributing saved POs", async () => {
     await render();
@@ -578,6 +590,115 @@ describe("PurchaseOrderFulfillmentCard", () => {
     await flush();
     expect(text()).toContain("Rp80.000");
     expect(text()).not.toContain("Rp60.000");
+  });
+
+  it("shows the admin close and reopen actions, and nothing to staff (#648)", async () => {
+    const open = page({
+      quotations: [{ ...page().quotations[0], status: "open" }],
+    });
+    const closeQuotation = vi.fn(async () => undefined);
+    const reopenQuotation = vi.fn(async () => undefined);
+
+    await render({
+      load: vi.fn(async () => open),
+      isAdmin: true,
+      onCloseQuotation: closeQuotation,
+      onReopenQuotation: reopenQuotation,
+    });
+    expect(buttonOrNull("Close quotation 1502260007")).not.toBeNull();
+    expect(buttonOrNull("Reopen quotation 1502260007")).toBeNull();
+
+    const closed = page();
+    await render({
+      load: vi.fn(async () => closed),
+      isAdmin: true,
+      onCloseQuotation: closeQuotation,
+      onReopenQuotation: reopenQuotation,
+    });
+    expect(buttonOrNull("Reopen quotation 1502260007")).not.toBeNull();
+    expect(buttonOrNull("Close quotation 1502260007")).toBeNull();
+
+    await render({
+      load: vi.fn(async () => open),
+      isAdmin: false,
+      onCloseQuotation: closeQuotation,
+      onReopenQuotation: reopenQuotation,
+    });
+    expect(buttonOrNull("Close quotation 1502260007")).toBeNull();
+    expect(buttonOrNull("Reopen quotation 1502260007")).toBeNull();
+  });
+
+  it("closes with the typed reason, and keeps the dialog open on a refusal (#648)", async () => {
+    const open = page({
+      quotations: [{ ...page().quotations[0], status: "open" }],
+    });
+    const closeQuotation = vi
+      .fn<(id: number, reason: string) => Promise<unknown>>()
+      .mockRejectedValueOnce(new Error("quotation_close_forbidden"));
+    await render({
+      load: vi.fn(async () => open),
+      isAdmin: true,
+      onCloseQuotation: closeQuotation,
+      onReopenQuotation: vi.fn(async () => undefined),
+    });
+
+    await act(async () => {
+      button("Close quotation 1502260007").click();
+    });
+    const reason = document.querySelector<HTMLTextAreaElement>(
+      'textarea[aria-label="Close reason"]'
+    );
+    if (reason === null) throw new Error("no close reason field");
+    act(() => {
+      const setter = Object.getOwnPropertyDescriptor(
+        HTMLTextAreaElement.prototype,
+        "value"
+      )?.set;
+      setter?.call(reason, "Customer cancelled the remainder");
+      reason.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    await act(async () => {
+      button("Confirm close quotation").click();
+    });
+    await flush();
+
+    expect(closeQuotation).toHaveBeenCalledTimes(1);
+    expect(closeQuotation).toHaveBeenCalledWith(
+      7,
+      "Customer cancelled the remainder"
+    );
+    // No optimistic close: the refusal and the typed sentence stay on screen.
+    expect(document.body.textContent).toContain("quotation_close_forbidden");
+    expect(
+      document.querySelector<HTMLTextAreaElement>(
+        'textarea[aria-label="Close reason"]'
+      )?.value
+    ).toBe("Customer cancelled the remainder");
+
+    closeQuotation.mockResolvedValueOnce(undefined);
+    await act(async () => {
+      button("Confirm close quotation").click();
+    });
+    await flush();
+    expect(closeQuotation).toHaveBeenCalledTimes(2);
+    expect(document.querySelector('textarea[aria-label="Close reason"]')).toBeNull();
+  });
+
+  it("reopens a closed quotation through the binding (#648)", async () => {
+    const reopenQuotation = vi.fn(async () => undefined);
+    await render({
+      isAdmin: true,
+      onCloseQuotation: vi.fn(async () => undefined),
+      onReopenQuotation: reopenQuotation,
+    });
+
+    await act(async () => {
+      button("Reopen quotation 1502260007").click();
+    });
+    await flush();
+
+    expect(reopenQuotation).toHaveBeenCalledTimes(1);
+    expect(reopenQuotation).toHaveBeenCalledWith(7);
   });
 
   it("surfaces an error with a retry, and never invents figures", async () => {

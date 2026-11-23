@@ -8,12 +8,12 @@ import type {
 import {
   aggregateDisplayUnitPriceMinor,
   aggregateKeyOf,
-  aggregateRuns,
   aggregateTotalMinor,
   buildAggregatePayload,
   groupIntoAggregate,
   lineNetMinor,
   pruneEmptyAggregates,
+  sanitizeQuantityInput,
   ungroupAggregate,
   validateAggregateLayout,
 } from "./poAggregate";
@@ -226,40 +226,16 @@ describe("aggregate total (#654)", () => {
   });
 });
 
-describe("aggregate display runs (#654)", () => {
-  it("joins only consecutive rows that share a group", () => {
-    const lines = [
-      line({ key: 1, aggregateKey: 4 }),
-      line({ key: 2, aggregateKey: 4 }),
-      line({ key: 3, aggregateKey: null }),
-      line({ key: 4, aggregateKey: 5 }),
-      line({ key: 5, aggregateKey: 5 }),
-      line({ key: 6, aggregateKey: null }),
-    ];
-    const runs = aggregateRuns(lines);
-    expect(runs.map((run) => [run.aggregateKey, run.lines.map((row) => row.key)])).toEqual([
-      [4, [1, 2]],
-      [null, [3]],
-      [5, [4, 5]],
-      [null, [6]],
-    ]);
-    expect(new Set(runs.map((run) => run.key)).size).toBe(runs.length);
-  });
-
-  it("never splits one split package across runs", () => {
-    // The stored rows of q:2 are interrupted by a plain line, exactly the
-    // shape #573 already regroups for display. The package moves as one
-    // display group, so its aggregate cannot be torn in half.
-    const lines = [
-      line({ key: 1, groupKey: "q:2", quotationItemNo: 2, quotationSubNo: 1, aggregateKey: 7 }),
-      line({ key: 2, aggregateKey: null }),
-      line({ key: 3, groupKey: "q:2", quotationItemNo: 2, quotationSubNo: 2, aggregateKey: 7 }),
-    ];
-    const runs = aggregateRuns(lines);
-    expect(runs.map((run) => [run.aggregateKey, run.lines.map((row) => row.key)])).toEqual([
-      [7, [1, 3]],
-      [null, [2]],
-    ]);
+describe("quantity input sanitizing (#648)", () => {
+  it("keeps digits and one decimal separator, accepting a comma as the decimal point", () => {
+    // The office types both separators; the field shows the value the parser
+    // reads, so a comma becomes the dot rather than being dropped.
+    expect(sanitizeQuantityInput("2,5")).toBe("2.5");
+    expect(sanitizeQuantityInput("1.23456")).toBe("1.2345");
+    expect(sanitizeQuantityInput("1..2")).toBe("1.2");
+    expect(sanitizeQuantityInput("1,2,3")).toBe("1.23");
+    expect(sanitizeQuantityInput("abc")).toBe("");
+    expect(sanitizeQuantityInput(" 7 ")).toBe("7");
   });
 });
 

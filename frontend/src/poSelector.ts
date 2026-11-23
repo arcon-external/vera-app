@@ -207,8 +207,13 @@ export type POSourceSelectorAction =
   | {
       type: "quotationSelected";
       quotation: POSourceQuotation;
-      /** Repair and link may target an All bought quotation (#651 B1). */
-      allowAllBought?: boolean;
+      /**
+       * Repair and link may target a quotation an entry flow refuses: one that
+       * is fully bought (#651 B1) or closed (#656). The name says what it
+       * admits — an unavailable source — not just the first state that needed
+       * it.
+       */
+      allowUnavailable?: boolean;
     }
   | { type: "revisionsLoading" }
   | { type: "revisionsLoaded"; quotationId: number; revisions: POSourceRevision[] }
@@ -395,7 +400,7 @@ export function poSourceSelectorReducer(
       // because moving or creating a link is not a new order.
       if (
         state.step !== 1 ||
-        (quotationBlocked(action.quotation) && !action.allowAllBought)
+        (quotationBlocked(action.quotation) && !action.allowUnavailable)
       ) {
         return state;
       }

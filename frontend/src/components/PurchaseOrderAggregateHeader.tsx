@@ -1,5 +1,5 @@
 import { formatMoney, type CurrencyInfo } from "../format";
-import { MAX_AGGREGATE_TITLE_LENGTH } from "../poAggregate";
+import { MAX_AGGREGATE_TITLE_LENGTH, sanitizeQuantityInput } from "../poAggregate";
 import type { PurchaseOrderAggregateGroupState } from "../purchaseOrder";
 import { Button, fieldClass } from "./ui";
 
@@ -34,18 +34,6 @@ export interface PurchaseOrderAggregateHeaderProps {
     >
   ) => void;
   onUngroup: () => void;
-}
-
-/** Keeps digits and one decimal point, with at most four places, exactly as a
- *  line's quantity field does. It is not parsed here; saving parses it. */
-function sanitizeQuantityInput(raw: string): string {
-  const cleaned = raw.replace(/[^\d.,]/g, "").replace(/,/g, ".");
-  const dot = cleaned.indexOf(".");
-  if (dot === -1) return cleaned;
-  return `${cleaned.slice(0, dot)}.${cleaned
-    .slice(dot + 1)
-    .replace(/\./g, "")
-    .slice(0, 4)}`;
 }
 
 function codePointLength(value: string): number {

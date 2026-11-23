@@ -235,11 +235,51 @@ describe("renderCustomerPrintHTML: safety", () => {
     expect(document).toMatch(/white-space:\s*nowrap/s);
   });
 
-  it("prints an unavailable unit price as an em dash, never a made-up figure", () => {
+  it("prints an unavailable unit price or amount as an em dash, never a made-up figure", () => {
     const document = render([
-      aggregate({ unitPriceMinor: null, totalMinor: 4450 }),
+      aggregate({ unitPriceMinor: null, totalMinor: null }),
     ]);
     expect(document).toContain("—");
+  });
+
+  it("never fabricates Rp0 for an unparseable line in an IDR document", () => {
+    const idr: CurrencyInfo = {
+      code: "IDR",
+      exponent: 0,
+      symbol: "Rp",
+      position: "before",
+      groupSep: ".",
+      decimalSep: ",",
+      symbolSpaced: false,
+    };
+    const document = renderCustomerPrintHTML(
+      [
+        aggregate({
+          totalMinor: null,
+          unitPriceMinor: null,
+          children: [
+            leaf({
+              description: "Known child",
+              quantity: "1",
+              unitPriceMinor: 5000,
+              amountMinor: 5000,
+            }),
+            leaf({
+              description: "Unparseable child",
+              quantity: "abc",
+              unitPriceMinor: null,
+              amountMinor: null,
+            }),
+          ],
+        }),
+      ],
+      HEADER,
+      TOTALS,
+      idr
+    );
+    expect(document).toContain("—");
+    expect(document).not.toContain("Rp0");
+    expect(document).toContain("Rp5.000");
   });
 
   it("contains no supplier cost, margin, variance, quoted baseline or remaining quantity", () => {

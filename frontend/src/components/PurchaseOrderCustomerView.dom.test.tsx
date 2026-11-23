@@ -221,6 +221,50 @@ describe("PurchaseOrderCustomerView", () => {
     }
   });
 
+  it("shows an unknown amount as an em dash, never a fabricated Rp0", () => {
+    const idr: CurrencyInfo = {
+      code: "IDR",
+      exponent: 0,
+      symbol: "Rp",
+      position: "before",
+      groupSep: ".",
+      decimalSep: ",",
+      symbolSpaced: false,
+    };
+    act(() => {
+      root.render(
+        <PurchaseOrderCustomerView
+          header={HEADER}
+          lines={[
+            line({
+              key: 1,
+              description: "Known child",
+              quantity: "1",
+              unitPrice: "5000",
+              aggregateKey: 0,
+            }),
+            line({
+              key: 2,
+              description: "Unparseable child",
+              quantity: "abc",
+              unitPrice: "5000",
+              aggregateKey: 0,
+            }),
+          ]}
+          aggregateGroups={[group({ showChildrenToCustomer: true })]}
+          totals={TOTALS}
+          currency={idr}
+        />
+      );
+    });
+    act(() => button("Expand customer view").click());
+
+    const text = document.body.textContent ?? "";
+    expect(text).toContain("Unparseable child");
+    expect(text).toContain("—");
+    expect(text).not.toContain("Rp0");
+  });
+
   it("refuses to project or print while a line cannot be totalled", () => {
     renderCard({ totals: null });
     act(() => button("Expand customer view").click());
