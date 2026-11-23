@@ -18,7 +18,28 @@
 import type {
   PurchaseOrderReportData,
   PurchaseOrderReportMetrics,
+  PurchaseOrderReportPipeline,
+  PurchaseOrderReportVariance,
 } from "./poReport";
+
+/** #653: the two non-Actual cards, constant across the report fixtures. */
+const PIPELINE_FIXTURE: PurchaseOrderReportPipeline = {
+  unsoldAmountMinor: 42_000_000,
+  unsoldMarginMinor: 15_000_000,
+};
+
+const VARIANCE_FIXTURE: PurchaseOrderReportVariance = {
+  quantityExtraIncomeAmountMinor: 6_000_000,
+  quantityExtraIncomeMarginMinor: 2_400_000,
+  unsoldAmountMinor: 42_000_000,
+  unsoldMarginMinor: 15_000_000,
+  closedLossAmountMinor: 0,
+  closedLossMarginMinor: 0,
+  priceExtraIncomeMinor: 1_500_000,
+  priceLossMinor: 3_500_000,
+  netRealizedVarianceAmountMinor: 4_000_000,
+  netRealizedVarianceMarginMinor: 400_000,
+};
 
 /**
  * Basis points as the server computes them: numerator/denominator rounded half
@@ -100,6 +121,8 @@ export function purchaseOrderReportFixture(): PurchaseOrderReportData {
   }));
 
   const totals = metrics(12, 480_000_000, 48_000_000, 390_000_000);
+  const pipeline = PIPELINE_FIXTURE;
+  const variance = VARIANCE_FIXTURE;
   const basis = {
     historyFrom: "2026-03-01",
     historyTo: "2026-11-01",
@@ -111,6 +134,9 @@ export function purchaseOrderReportFixture(): PurchaseOrderReportData {
   return {
     generatedAt: "2026-11-19T05:00:00Z",
     asOf: "2026-11-19",
+    totals,
+    pipeline,
+    variance,
     filter: {
       from: "2026-01-01",
       to: "2026-11-20",
@@ -127,7 +153,6 @@ export function purchaseOrderReportFixture(): PurchaseOrderReportData {
       hasUnassigned: true,
       sourceMissingPoCount: 1,
     },
-    totals,
     periods,
     categories: [
       {
@@ -334,6 +359,9 @@ export function purchaseOrderReportMonthFixture(): PurchaseOrderReportData {
   return {
     generatedAt: "2026-11-19T05:00:00Z",
     asOf: "2026-11-19",
+    totals,
+    pipeline: PIPELINE_FIXTURE,
+    variance: VARIANCE_FIXTURE,
     filter: {
       from: "2026-11-01",
       to: "2026-12-01",
@@ -350,7 +378,6 @@ export function purchaseOrderReportMonthFixture(): PurchaseOrderReportData {
       hasUnassigned: false,
       sourceMissingPoCount: 0,
     },
-    totals,
     periods,
     categories: categoryRows,
     categorySeries: [],

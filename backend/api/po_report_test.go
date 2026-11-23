@@ -555,3 +555,87 @@ func TestPurchaseOrderReportFailsClosedOnAggregateOverflow(t *testing.T) {
 		t.Errorf("overflow code = %q; want report_value_out_of_range", got)
 	}
 }
+
+// TestPurchaseOrderReportExposesPipelineAndVarianceSeparately pins the #653
+// HTTP contract: Actual, Pipeline (Unsold) and Realized Variance are three
+// separate objects. A 5 -> 3 buy at 9.000 reports the sold three as Actual, the
+// two still orderable units as Unsold, and the 3.000 price decrease as a
+// realized loss that is never netted against the open Unsold.
+func TestPurchaseOrderReportExposesPipelineAndVarianceSeparately(t *testing.T) {
+	server, token := testQuotationServer(t, "vera_api_po_report_variance")
+	input := map[string]any{
+		"Items": []map[string]any{{
+			"Description": "WIP rack", "Qty": 5, "UoM": "Pc", "UnitPrice": 5_000,
+			"MarginEnabled": true, "MarginPercent": 100,
+		}},
+		"Subject":       "Variance source",
+		"RecipientName": "Test Recipient",
+		"TaxZone":       "FTZ",
+		"Validity":      30,
+		"PaymentTerm":   30,
+		"LeadTimeDays":  10,
+		"CustomerID":    2,
+		"Incoterm":      "EXW",
+	}
+	quotationID, _ := exportForSelector(t, server, token, input)
+
+	code, body := createPODraft(t, server, token, quotationID, 0, map[string]any{
+		"receivedDate":     "2026-03-10",
+		"businessCategory": "FM",
+	})
+	if code != http.StatusCreated {
+		t.Fatalf("create = %d (%v); want 201", code, body)
+	}
+	draft := decodePurchaseOrder(t, body)
+	path := "/v1/purchase-orders/" + strconv.FormatInt(draft.ID, 10)
+	payload := finalizeBody(draft, "PO-API-653")
+	items := payload["items"].([]map[string]any)
+	items[0]["quantityScaled"] = 30_000
+	items[0]["unitPriceMinor"] = 9_000
+	payload["decisions"] = []map[string]any{
+		{"key": "line:1:quantity", "choice": "po"},
+		{"key": "line:1:unitPrice", "choice": "po"},
+	}
+	code, body = doJSON(t, server, http.MethodPost, path+"/finalize", token, payload)
+	if code != http.StatusOK {
+		t.Fatalf("finalize = %d (%v); want 200", code, body)
+	}
+
+	values := reportQueryParams("2026-01-01", "2027-01-01", "month", "all", "IDR")
+	code, body = doJSON(t, server, http.MethodGet, reportURL(values), token, nil)
+	if code != http.StatusOK {
+		t.Fatalf("report = %d (%v); want 200", code, body)
+	}
+	report := decodeReport(t, body)
+	if report.Totals.AmountMinor != 27_000 || report.Totals.CapitalMinor != 15_000 ||
+		report.Totals.MarginMinor != 12_000 {
+		t.Errorf("actual = %d/%d/%d; want 27000/15000/12000",
+			report.Totals.AmountMinor, report.Totals.CapitalMinor, report.Totals.MarginMinor)
+	}
+	if report.Pipeline.UnsoldAmountMinor != 20_000 || report.Pipeline.UnsoldMarginMinor != 10_000 {
+		t.Errorf("pipeline = %d/%d; want 20000/10000",
+			report.Pipeline.UnsoldAmountMinor, report.Pipeline.UnsoldMarginMinor)
+	}
+	if report.Variance.PriceLossMinor != 3_000 || report.Variance.PriceExtraIncomeMinor != 0 ||
+		report.Variance.QuantityExtraIncomeAmountMinor != 0 {
+		t.Errorf("variance components = loss %d / extra %d / qty extra %d; want 3000/0/0",
+			report.Variance.PriceLossMinor, report.Variance.PriceExtraIncomeMinor,
+			report.Variance.QuantityExtraIncomeAmountMinor)
+	}
+	if report.Variance.ClosedLossAmountMinor != 0 || report.Variance.ClosedLossMarginMinor != 0 {
+		t.Errorf("closed loss = %d/%d; want the zero placeholder",
+			report.Variance.ClosedLossAmountMinor, report.Variance.ClosedLossMarginMinor)
+	}
+	if report.Variance.NetRealizedVarianceAmountMinor != -3_000 ||
+		report.Variance.NetRealizedVarianceMarginMinor != -3_000 {
+		t.Errorf("net realized = %d/%d; want -3000/-3000 (open Unsold excluded)",
+			report.Variance.NetRealizedVarianceAmountMinor,
+			report.Variance.NetRealizedVarianceMarginMinor)
+	}
+	if report.Variance.UnsoldAmountMinor != report.Pipeline.UnsoldAmountMinor ||
+		report.Variance.UnsoldMarginMinor != report.Pipeline.UnsoldMarginMinor {
+		t.Errorf("variance/pipeline unsold disagree: %d/%d vs %d/%d",
+			report.Variance.UnsoldAmountMinor, report.Variance.UnsoldMarginMinor,
+			report.Pipeline.UnsoldAmountMinor, report.Pipeline.UnsoldMarginMinor)
+	}
+}

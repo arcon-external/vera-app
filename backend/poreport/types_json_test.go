@@ -33,6 +33,19 @@ func TestReportJSONUsesContractNamesAndNullRatios(t *testing.T) {
 			MarginBps:     &marginBps,
 			CoverageBps:   &coverageBps,
 		},
+		Pipeline: PipelineSummary{UnsoldAmountMinor: 20_000, UnsoldMarginMinor: 8_000},
+		Variance: VarianceSummary{
+			QuantityExtraIncomeAmountMinor: 0,
+			QuantityExtraIncomeMarginMinor: 0,
+			UnsoldAmountMinor:              20_000,
+			UnsoldMarginMinor:              8_000,
+			ClosedLossAmountMinor:          0,
+			ClosedLossMarginMinor:          0,
+			PriceExtraIncomeMinor:          0,
+			PriceLossMinor:                 3_000,
+			NetRealizedVarianceAmountMinor: -3_000,
+			NetRealizedVarianceMarginMinor: -3_000,
+		},
 		Periods: []Period{{
 			PeriodStart: "2026-01-01",
 			// The range starts on this bucket's first day and the as-of date is
@@ -101,6 +114,7 @@ func TestReportJSONUsesContractNamesAndNullRatios(t *testing.T) {
 
 	for _, key := range []string{
 		"generatedAt", "asOf", "filter", "company", "population", "totals",
+		"pipeline", "variance",
 		"periods", "categories", "categorySeries", "projection",
 		"currentProjection", "notes",
 	} {
@@ -123,6 +137,16 @@ func TestReportJSONUsesContractNamesAndNullRatios(t *testing.T) {
 	}
 	if totals["marginBps"] != float64(0) {
 		t.Errorf("marginBps = %v; want the exact zero pointer", totals["marginBps"])
+	}
+	pipeline := decoded["pipeline"].(map[string]any)
+	if pipeline["unsoldAmountMinor"] != float64(20_000) {
+		t.Errorf("pipeline unsold = %v; want 20000", pipeline["unsoldAmountMinor"])
+	}
+	variance := decoded["variance"].(map[string]any)
+	if variance["priceLossMinor"] != float64(3_000) ||
+		variance["netRealizedVarianceAmountMinor"] != float64(-3_000) ||
+		variance["closedLossAmountMinor"] != float64(0) {
+		t.Errorf("variance JSON = %v; want price loss 3000, net -3000, closed 0", variance)
 	}
 	series := decoded["categorySeries"].([]any)[0].(map[string]any)["marginBps"].([]any)
 	if series[0] != nil {

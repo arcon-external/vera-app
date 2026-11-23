@@ -201,25 +201,32 @@ func TestPurchaseOrderDraftCreatesFromTheExactIssuedRevision(t *testing.T) {
 		t.Errorf("received date = %s; want today %s", got, want)
 	}
 
-	// The customer-facing lines: the plain item keeps its printed list price,
-	// and the package is represented by its priced parts because that is what
-	// the customer document shows (ShowSubPrices).
+	// The customer-facing lines: the plain item carries the row-discounted
+	// quotation baseline as its negotiated price, and the package is
+	// represented by its priced parts because that is what the customer
+	// document shows (ShowSubPrices). The row discount is already inside the
+	// baseline, so no discount is copied onto the PO line.
 	if len(draft.Items) != 3 {
 		t.Fatalf("lines = %d; want 3 (%v)", len(draft.Items), draft.Items)
 	}
 	first := draft.Items[0]
 	if first.Description != "Plain widget" || first.QuantityScaled != 30000 ||
-		first.UoM != "Pc" || first.UnitPriceMinor != 650 {
-		t.Errorf("plain line = %+v; want widget qty 3.0000 at 650", first)
+		first.UoM != "Pc" || first.UnitPriceMinor != 600 {
+		t.Errorf("plain line = %+v; want widget qty 3.0000 at the row-discounted 600", first)
+	}
+	if first.QuotedUnitPriceMinor == nil || *first.QuotedUnitPriceMinor != 600 ||
+		first.RemainingQuantityScaled == nil || *first.RemainingQuantityScaled != 30000 {
+		t.Errorf("plain line baseline/remaining = %v/%v; want 600/30000",
+			first.QuotedUnitPriceMinor, first.RemainingQuantityScaled)
 	}
 	if first.QuotationItemNo == nil || *first.QuotationItemNo != 1 || first.QuotationSubNo != nil {
 		t.Errorf("plain line reference = %v/%v; want item 1", first.QuotationItemNo, first.QuotationSubNo)
 	}
 	second := draft.Items[1]
 	if second.Description != "Mounting" || second.QuantityScaled != 20000 ||
-		second.UnitPriceMinor != 420 || second.QuotationItemNo == nil ||
+		second.UnitPriceMinor != 400 || second.QuotationItemNo == nil ||
 		*second.QuotationItemNo != 2 || second.QuotationSubNo == nil || *second.QuotationSubNo != 1 {
-		t.Errorf("package line 1 = %+v; want item 2.1 at 420", second)
+		t.Errorf("package line 1 = %+v; want item 2.1 at the row-discounted 400", second)
 	}
 	third := draft.Items[2]
 	if third.Description != "Commissioning" || third.QuantityScaled != 10000 ||
@@ -811,20 +818,19 @@ func TestPurchaseOrderDraftStoresTheExplainedCalculation(t *testing.T) {
 		t.Fatalf("create: %v", err)
 	}
 
-	// Creation copies customer-facing prices, so the whole order is its lines.
-	// The seeded first line carries a 5% row discount, and #471 copies it too:
-	// starting from the list price alone would raise the PO above the printed
-	// row. 1950 less its 97 discount, plus 840 plus 450 = 3143.
+	// Creation copies the row-discounted quotation baseline as the negotiated
+	// price, so the whole order is its lines and no legacy discount column is
+	// carried onto the PO. 3 x 600 + 2 x 400 + 1 x 450 = 3050.
 	if got := poCalculationLines(draft.Items); !reflect.DeepEqual(got, [][3]int64{
-		{1950, 97, 1853}, {840, 0, 840}, {450, 0, 450},
+		{1800, 0, 1800}, {800, 0, 800}, {450, 0, 450},
 	}) {
-		t.Errorf("created lines = %v; want gross/discount/net 1950/97/1853, 840, 450", got)
+		t.Errorf("created lines = %v; want gross/discount/net 1800, 800, 450", got)
 	}
-	if draft.SubtotalMinor != 3143 || draft.DiscountMinor != 0 ||
+	if draft.SubtotalMinor != 3050 || draft.DiscountMinor != 0 ||
 		draft.PpnBps != 0 || draft.PpnMinor != 0 ||
 		draft.AdjustmentMinor != 0 || draft.AdjustmentReason != "" ||
-		draft.GrandTotalMinor != 3143 {
-		t.Errorf("created totals = %+v; want subtotal/grand 3143 and no PPN", draft)
+		draft.GrandTotalMinor != 3050 {
+		t.Errorf("created totals = %+v; want subtotal/grand 3050 and no PPN", draft)
 	}
 	// The source document's printed figures are evidence, copied once. The
 	// seeded revision printed 3050 after its own discount basis, 0 PPN and a
@@ -836,9 +842,10 @@ func TestPurchaseOrderDraftStoresTheExplainedCalculation(t *testing.T) {
 			draft.PrintedPpnMinor, draft.PrintedGrandTotalMinor)
 	}
 
-	// Now enter a row discount, plus a whole-PO discount and a signed
-	// adjustment. The latter two are retired (#573): they are still sent so
-	// this test can prove the write ignores them.
+	// The API still accepts a legacy row discount and the retired whole-PO
+	// discount/adjustment fields so an older payload loads, but the editor no
+	// longer offers them (#653). They are sent here to prove the stored
+	// calculation and the retired-field rule rather than a UI assumption.
 	itemNo1, itemNo2 := 1, 2
 	subNo1, subNo2 := 1, 2
 	updated, err := updateDraft(t, database, ctx, PurchaseOrderUpdate{

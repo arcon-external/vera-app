@@ -28,6 +28,7 @@ import {
   type ReportPreset,
 } from "../poReportPage";
 import { PurchaseOrderReportChart } from "./PurchaseOrderReportChart";
+import { PurchaseOrderReportPipelineVarianceCards } from "./PurchaseOrderReportPipelineVarianceCard";
 import { PurchaseOrderReportPeriodToggle } from "./PurchaseOrderReportPeriod";
 import { Select } from "./Select";
 import { Badge, Card, StatusBanner, fieldClass } from "./ui";
@@ -337,6 +338,13 @@ export function PurchaseOrderReportOverview({
             ) : null}
           </div>
         </div>
+      ) : null}
+
+      {showFigures && report !== null ? (
+        <PurchaseOrderReportPipelineVarianceCards
+          report={report}
+          currency={entry}
+        />
       ) : null}
 
       {showEmpty && report !== null ? (

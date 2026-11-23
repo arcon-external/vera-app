@@ -53,6 +53,10 @@ type purchaseOrderRow struct {
 		GrossMinor      int64  `json:"grossMinor"`
 		DiscountMinor   int64  `json:"discountMinor"`
 		NetMinor        int64  `json:"netMinor"`
+		// #653: the frozen row-discounted quotation baseline and the quantity
+		// still orderable. Workspace-only; never supplier cost.
+		QuotedUnitPriceMinor    *int64 `json:"quotedUnitPriceMinor"`
+		RemainingQuantityScaled *int64 `json:"remainingQuantityScaled"`
 	} `json:"items"`
 	DiscountPercent        int16   `json:"discountPercent"`
 	PpnBps                 int16   `json:"ppnBps"`
@@ -208,19 +212,29 @@ func TestPurchaseOrderDraftCreateReopenAndUpdate(t *testing.T) {
 	if draft.PONumber != "" || draft.PODate != nil || draft.RequestedDeliveryDate != nil {
 		t.Errorf("optional customer fields were invented: %+v", draft)
 	}
-	// Two customer-facing lines, from the quotation's two items. The first
-	// was margin-enabled at 20% and keeps its marginalised list price.
+	// Two customer-facing lines, from the quotation's two items. #653 starts
+	// each line at the row-discounted quotation baseline and copies no
+	// discount: 120000 less 10% = 108000, and 50000 less 10% = 45000.
 	if len(draft.Items) != 2 {
 		t.Fatalf("lines = %d; want 2", len(draft.Items))
 	}
 	if draft.Items[0].Description != "Test item" || draft.Items[0].QuantityScaled != 20000 ||
-		draft.Items[0].UnitPriceMinor != 120000 || draft.Items[0].QuotationItemNo == nil ||
+		draft.Items[0].UnitPriceMinor != 108000 || draft.Items[0].QuotationItemNo == nil ||
 		*draft.Items[0].QuotationItemNo != 1 {
-		t.Errorf("line 1 = %+v; want Test item 2.0000 at 120000 item 1", draft.Items[0])
+		t.Errorf("line 1 = %+v; want Test item 2.0000 at the row-discounted 108000 item 1",
+			draft.Items[0])
+	}
+	if draft.Items[0].QuotedUnitPriceMinor == nil ||
+		*draft.Items[0].QuotedUnitPriceMinor != 108000 ||
+		draft.Items[0].RemainingQuantityScaled == nil ||
+		*draft.Items[0].RemainingQuantityScaled != 20000 {
+		t.Errorf("line 1 baseline/remaining = %v/%v; want 108000/20000",
+			draft.Items[0].QuotedUnitPriceMinor, draft.Items[0].RemainingQuantityScaled)
 	}
 	if draft.Items[1].Description != "Plain item" || draft.Items[1].QuantityScaled != 10000 ||
-		draft.Items[1].UnitPriceMinor != 50000 {
-		t.Errorf("line 2 = %+v; want Plain item 1.0000 at 50000", draft.Items[1])
+		draft.Items[1].UnitPriceMinor != 45000 {
+		t.Errorf("line 2 = %+v; want Plain item 1.0000 at the row-discounted 45000",
+			draft.Items[1])
 	}
 
 	// Reopen.
@@ -1082,11 +1096,12 @@ func TestPurchaseOrderReviewAndFinalizeOverTheAPI(t *testing.T) {
 			PaymentTerms   string `json:"paymentTerms"`
 			Incoterms      string `json:"incoterms"`
 			Lines          []struct {
-				QuotationItemNo int    `json:"quotationItemNo"`
-				LineLabel       string `json:"lineLabel"`
-				Description     string `json:"description"`
-				QuantityScaled  int64  `json:"quantityScaled"`
-				UnitPriceMinor  int64  `json:"unitPriceMinor"`
+				QuotationItemNo      int    `json:"quotationItemNo"`
+				LineLabel            string `json:"lineLabel"`
+				Description          string `json:"description"`
+				QuantityScaled       int64  `json:"quantityScaled"`
+				UnitPriceMinor       int64  `json:"unitPriceMinor"`
+				QuotedUnitPriceMinor int64  `json:"quotedUnitPriceMinor"`
 			} `json:"lines"`
 			PrintedGrandTotalMinor int64 `json:"printedGrandTotalMinor"`
 		} `json:"source"`
@@ -1102,8 +1117,9 @@ func TestPurchaseOrderReviewAndFinalizeOverTheAPI(t *testing.T) {
 	}
 	if len(review.Source.Lines) != 2 || review.Source.Lines[0].LineLabel != "1" ||
 		review.Source.Lines[1].LineLabel != "2" ||
-		review.Source.Lines[0].UnitPriceMinor != 120000 {
-		t.Errorf("source lines = %+v", review.Source.Lines)
+		review.Source.Lines[0].UnitPriceMinor != 108000 ||
+		review.Source.Lines[0].QuotedUnitPriceMinor != 108000 {
+		t.Errorf("source lines = %+v; want row-discounted 108000/45000", review.Source.Lines)
 	}
 
 	// Final save requires the explicit review; none of it is preselected.

@@ -13,6 +13,10 @@ import {
   parseMoneyInput,
   type CurrencyInfo,
 } from "../format";
+import {
+  purchaseOrderVarianceBadges,
+  type PurchaseOrderVarianceBadge,
+} from "../purchaseOrder";
 
 // The IDR entry, transcribed field-for-field from
 // backend/currency/currency.go. This is the prop default only -- the live
@@ -71,6 +75,9 @@ export interface EditorSubItem {
   discountPercent: string;
   /** Detail lines under the sub-item: plain text with no values of their own. */
   bullets: string[];
+  /** #653: the quotation baseline and remaining quantity for variance badges. */
+  quotedUnitPriceMinor?: number | null;
+  remainingQuantityScaled?: number | null;
 }
 
 export interface EditorItem {
@@ -101,6 +108,9 @@ export interface EditorItem {
    * unbilled scope lines. The pricing is identical either way.
    */
   showSubPrices: boolean;
+  /** #653: the quotation baseline and remaining quantity for variance badges. */
+  quotedUnitPriceMinor?: number | null;
+  remainingQuantityScaled?: number | null;
 }
 
 /** Builds one empty priced sub-item with its stable id. The unit is the
@@ -165,6 +175,31 @@ function sanitizeQuantityInput(raw: string): string {
     .slice(dot + 1)
     .replace(/\./g, "")
     .slice(0, 4)}`;
+}
+
+/** One inline PO variance badge set. The text and tone come from the pure
+ *  rule in purchaseOrder.ts; this only paints them. */
+function VarianceBadges({ badges }: { badges: PurchaseOrderVarianceBadge[] }) {
+  if (badges.length === 0) return null;
+  return (
+    <>
+      {badges.map((badge) => (
+        <span
+          key={badge.kind}
+          data-variance-badge={badge.kind}
+          className={`inline-flex items-center rounded-full border px-2 py-0.5 text-caption font-medium ${
+            badge.tone === "danger"
+              ? "border-danger-300 bg-danger-50 text-danger-700"
+              : badge.tone === "positive"
+                ? "border-success-300 bg-success-50 text-success-700"
+                : "border-rule bg-paper-subtle text-ink-600"
+          }`}
+        >
+          {badge.label}
+        </span>
+      ))}
+    </>
+  );
 }
 
 /** The line rollup: cost, sell, and the blended margin between them. */
@@ -1084,6 +1119,7 @@ export function ItemRow({
     </Captioned>
     )}
 
+    {purchaseOrder ? null : (
     <Captioned label="Discount">
       <div className="flex items-center gap-2">
         <button
@@ -1145,6 +1181,7 @@ export function ItemRow({
       </div>
 
     </Captioned>
+    )}
 
     <Captioned label="Sells for">
       <div className="tnum text-body font-semibold text-ink-950">
@@ -1231,10 +1268,19 @@ export function ItemRow({
             </button>
           )}
           {purchaseOrder ? (
-            hasSubItems ? null : item.discountEnabled ? (
-              <span className="tnum text-accent-700">−{discountPercent}% row discount</span>
-            ) : (
-              <span className="text-ink-400">No row discount</span>
+            hasSubItems ? null : (
+              <VarianceBadges
+                badges={purchaseOrderVarianceBadges(
+                  {
+                    quantityScaled: scaledQuantity(item.qty),
+                    unitPriceMinor:
+                      item.unitPrice.trim() === "" ? null : sellUnit,
+                    quotedUnitPriceMinor: item.quotedUnitPriceMinor,
+                    remainingQuantityScaled: item.remainingQuantityScaled,
+                  },
+                  currency
+                )}
+              />
             )
           ) : hasSubItems ? null : item.discountEnabled ? (
             <span className="tnum text-accent-700">
@@ -1534,6 +1580,22 @@ function SubRow({
         </div>
       </div>
       {meta === undefined ? null : <div className="mt-1">{meta}</div>}
+      {purchaseOrder ? (
+        <div className="mt-1 flex flex-wrap gap-1.5">
+          <VarianceBadges
+            badges={purchaseOrderVarianceBadges(
+              {
+                quantityScaled: scaledQuantity(sub.qty),
+                unitPriceMinor:
+                  sub.unitCost.trim() === "" ? null : sellUnit,
+                quotedUnitPriceMinor: sub.quotedUnitPriceMinor,
+                remainingQuantityScaled: sub.remainingQuantityScaled,
+              },
+              currency
+            )}
+          />
+        </div>
+      ) : null}
 
       <div className={`mt-2 grid grid-cols-1 gap-3 ${purchaseOrder ? "lg:grid-cols-[240px_minmax(0,1fr)]" : "lg:grid-cols-[290px_minmax(0,1fr)]"}`}>
         <div className="min-w-0">
@@ -1652,6 +1714,7 @@ function SubRow({
         </Captioned>
         )}
 
+        {purchaseOrder ? null : (
         <Captioned label="Discount">
           <div className="flex h-9 items-center gap-2">
             <button
@@ -1711,6 +1774,7 @@ function SubRow({
             </div>
           </div>
         </Captioned>
+        )}
 
         <Captioned label="Sells for">
           <div className="tnum pt-0.5 text-caption font-semibold text-ink-950">

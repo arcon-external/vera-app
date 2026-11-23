@@ -39,6 +39,12 @@ type PurchaseOrderItemDTO struct {
 	GroupKey          string
 	ParentDescription string
 	DescriptionLines  []string
+	// QuotedUnitPriceMinor is the frozen row-discounted quotation baseline for
+	// this line, and RemainingQuantityScaled is the quantity still orderable on
+	// its leaf. Both are workspace-only customer-facing values, never supplier
+	// cost (Story 42).
+	QuotedUnitPriceMinor    *int64
+	RemainingQuantityScaled *int64
 }
 
 // PurchaseOrderDTO is a draft or saved PO with its editable header, its
@@ -129,6 +135,9 @@ type PurchaseOrderSourceLineDTO struct {
 	DiscountPercent   int16
 	ParentDescription string
 	DescriptionLines  []string
+	// QuotedUnitPriceMinor is the row-discounted quotation price a negotiated
+	// PO line is compared against. It is never supplier cost.
+	QuotedUnitPriceMinor int64
 }
 
 // PurchaseOrderSourceDTO is the exact revision the final-save review compares
@@ -1169,6 +1178,9 @@ func mapPurchaseOrderDTO(row apicontract.PurchaseOrderRow) PurchaseOrderDTO {
 			GroupKey:          item.GroupKey,
 			ParentDescription: item.ParentDescription,
 			DescriptionLines:  item.DescriptionLines,
+
+			QuotedUnitPriceMinor:    item.QuotedUnitPriceMinor,
+			RemainingQuantityScaled: item.RemainingQuantityScaled,
 		})
 	}
 	return dto
@@ -1490,6 +1502,8 @@ func mapPurchaseOrderReviewDTO(row apicontract.PurchaseOrderReviewRow) PurchaseO
 			DiscountPercent:   line.DiscountPercent,
 			ParentDescription: line.ParentDescription,
 			DescriptionLines:  line.DescriptionLines,
+
+			QuotedUnitPriceMinor: line.QuotedUnitPriceMinor,
 		})
 	}
 	return review

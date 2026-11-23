@@ -46,6 +46,8 @@ export interface PurchaseOrderSourceLineDTO {
   UoM: string;
   QuantityScaled: number;
   UnitPriceMinor: number;
+  /** The row-discounted quotation baseline (#653). Older servers omit it. */
+  QuotedUnitPriceMinor?: number;
   DiscountEnabled: boolean;
   DiscountPercent: number;
   /** The split item's title, empty for a plain line. */
@@ -280,7 +282,10 @@ export function comparePurchaseOrder(
         `${prefix}:unitPrice`,
         `${name} unit price`,
         formatMoney(currency, price),
-        formatMoney(currency, sourceLine.UnitPriceMinor)
+        formatMoney(
+          currency,
+          sourceLine.QuotedUnitPriceMinor ?? sourceLine.UnitPriceMinor
+        )
       );
     }
     const percent = parseDiscountPercent(line.discountPercent);
@@ -400,7 +405,10 @@ export function applyReviewChoices(
         line.uom = sourceLine.UoM;
         break;
       case "unitPrice":
-        line.unitPrice = formatUnitPriceMinor(currency, sourceLine.UnitPriceMinor);
+        line.unitPrice = formatUnitPriceMinor(
+          currency,
+          sourceLine.QuotedUnitPriceMinor ?? sourceLine.UnitPriceMinor
+        );
         break;
       case "discount":
         line.discountEnabled = sourceLine.DiscountEnabled;

@@ -8,6 +8,8 @@ import (
 	"sort"
 	"time"
 
+	"github.com/jackc/pgx/v5"
+
 	"vera-app/backend/poreport"
 )
 
@@ -73,6 +75,12 @@ type PurchaseOrderReportSnapshot struct {
 	AsOf time.Time
 	// Totals carries ratios derived from the exact aggregate numerators.
 	Totals poreport.Metrics
+	// Pipeline is the open Unsold remaining, valued at the row-discounted
+	// quotation baseline. It is never added to Totals.
+	Pipeline poreport.PipelineSummary
+	// Variance is the realized quantity and price comparison, plus the open
+	// Unsold mirror. It is never added to Totals.
+	Variance poreport.VarianceSummary
 	// Periods are continuous calendar buckets covering the requested range,
 	// including zero rows for gaps.
 	Periods []poreport.Period
@@ -174,9 +182,21 @@ func (s *Store) ReportPurchaseOrders(ctx context.Context, query poreport.Query, 
 	asOf := companyToday(now)
 	historyTo := reportHistoryCutoff(to, asOf)
 
+	// The actual aggregate and the pipeline/variance aggregate are two reads,
+	// so they run inside one REPEATABLE READ snapshot. The report must never
+	// pair an Actual figure with a bought quantity from a later transaction.
+	tx, err := pool.BeginTx(ctx, pgx.TxOptions{
+		IsoLevel:   pgx.RepeatableRead,
+		AccessMode: pgx.ReadOnly,
+	})
+	if err != nil {
+		return PurchaseOrderReportSnapshot{}, fmt.Errorf("begin purchase order report read: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
 	var totalsRaw, periodsRaw, categoriesRaw, categoryPeriodsRaw, historyRaw, dailyRaw, currenciesRaw []byte
 	var hasUnassigned bool
-	if err := pool.QueryRow(ctx, purchaseOrderReportSQL(s.configSchema()),
+	if err := tx.QueryRow(ctx, purchaseOrderReportSQL(s.configSchema()),
 		org.ID,
 		query.Currency,
 		query.From,
@@ -196,6 +216,14 @@ func (s *Store) ReportPurchaseOrders(ctx context.Context, query poreport.Query, 
 		&hasUnassigned,
 	); err != nil {
 		return PurchaseOrderReportSnapshot{}, fmt.Errorf("read purchase order report: %w", err)
+	}
+	var pipelineRaw []byte
+	if err := tx.QueryRow(ctx, purchaseOrderPipelineSQL(s.configSchema()),
+		org.ID, query.Currency).Scan(&pipelineRaw); err != nil {
+		return PurchaseOrderReportSnapshot{}, fmt.Errorf("read purchase order pipeline and variance: %w", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return PurchaseOrderReportSnapshot{}, fmt.Errorf("commit purchase order report read: %w", err)
 	}
 
 	var totalsRow reportTotalsJSON
@@ -223,6 +251,10 @@ func (s *Store) ReportPurchaseOrders(ctx context.Context, query poreport.Query, 
 	}
 	if err := poreport.CheckExact(totalsRow.LegacyAdjustmentPoCount); err != nil {
 		return PurchaseOrderReportSnapshot{}, fmt.Errorf("legacy adjustment count: %w", err)
+	}
+	pipeline, variance, err := reportPipelineAndVariance(pipelineRaw)
+	if err != nil {
+		return PurchaseOrderReportSnapshot{}, err
 	}
 
 	periods, err := reportPeriods(periodsRaw, from, to, asOf, query.Bucket)
@@ -253,6 +285,8 @@ func (s *Store) ReportPurchaseOrders(ctx context.Context, query poreport.Query, 
 	return PurchaseOrderReportSnapshot{
 		AsOf:                    asOf,
 		Totals:                  totals,
+		Pipeline:                pipeline,
+		Variance:                variance,
 		Periods:                 periods,
 		Categories:              categories,
 		CategorySeries:          series,
@@ -819,6 +853,208 @@ func reportNextPeriod(start time.Time, bucket string) time.Time {
 	default:
 		return start.AddDate(0, 1, 0)
 	}
+}
+
+// reportPipelineJSON is the exact pipeline/variance object Postgres returns.
+// Every money field is a json.Number so a value outside the exact JSON range is
+// refused rather than wrapped.
+type reportPipelineJSON struct {
+	UnsoldAmountMinor              json.Number `json:"unsoldAmountMinor"`
+	UnsoldMarginMinor              json.Number `json:"unsoldMarginMinor"`
+	QuantityExtraIncomeAmountMinor json.Number `json:"quantityExtraIncomeAmountMinor"`
+	QuantityExtraIncomeMarginMinor json.Number `json:"quantityExtraIncomeMarginMinor"`
+	PriceExtraIncomeMinor          json.Number `json:"priceExtraIncomeMinor"`
+	PriceLossMinor                 json.Number `json:"priceLossMinor"`
+	ClosedLossAmountMinor          json.Number `json:"closedLossAmountMinor"`
+	ClosedLossMarginMinor          json.Number `json:"closedLossMarginMinor"`
+	NetRealizedVarianceAmountMinor json.Number `json:"netRealizedVarianceAmountMinor"`
+	NetRealizedVarianceMarginMinor json.Number `json:"netRealizedVarianceMarginMinor"`
+}
+
+// reportPipelineAndVariance decodes the one pipeline/variance object. Closed
+// loss is deliberately zero: quotation closure belongs to #656 and this build
+// must not invent a closed population.
+func reportPipelineAndVariance(raw []byte) (poreport.PipelineSummary, poreport.VarianceSummary, error) {
+	var row reportPipelineJSON
+	if err := json.Unmarshal(raw, &row); err != nil {
+		return poreport.PipelineSummary{}, poreport.VarianceSummary{},
+			fmt.Errorf("decode purchase order pipeline and variance: %w", err)
+	}
+	read := func(value json.Number, field string) (int64, error) {
+		return reportExactNumber(value, field)
+	}
+	unsoldAmount, err := read(row.UnsoldAmountMinor, "pipeline unsold amount")
+	if err != nil {
+		return poreport.PipelineSummary{}, poreport.VarianceSummary{}, err
+	}
+	unsoldMargin, err := read(row.UnsoldMarginMinor, "pipeline unsold margin")
+	if err != nil {
+		return poreport.PipelineSummary{}, poreport.VarianceSummary{}, err
+	}
+	quantityExtraAmount, err := read(row.QuantityExtraIncomeAmountMinor, "quantity extra income amount")
+	if err != nil {
+		return poreport.PipelineSummary{}, poreport.VarianceSummary{}, err
+	}
+	quantityExtraMargin, err := read(row.QuantityExtraIncomeMarginMinor, "quantity extra income margin")
+	if err != nil {
+		return poreport.PipelineSummary{}, poreport.VarianceSummary{}, err
+	}
+	priceExtra, err := read(row.PriceExtraIncomeMinor, "price extra income")
+	if err != nil {
+		return poreport.PipelineSummary{}, poreport.VarianceSummary{}, err
+	}
+	priceLoss, err := read(row.PriceLossMinor, "price loss")
+	if err != nil {
+		return poreport.PipelineSummary{}, poreport.VarianceSummary{}, err
+	}
+	closedLossAmount, err := read(row.ClosedLossAmountMinor, "closed loss amount")
+	if err != nil {
+		return poreport.PipelineSummary{}, poreport.VarianceSummary{}, err
+	}
+	closedLossMargin, err := read(row.ClosedLossMarginMinor, "closed loss margin")
+	if err != nil {
+		return poreport.PipelineSummary{}, poreport.VarianceSummary{}, err
+	}
+	netAmount, err := read(row.NetRealizedVarianceAmountMinor, "net realized variance amount")
+	if err != nil {
+		return poreport.PipelineSummary{}, poreport.VarianceSummary{}, err
+	}
+	netMargin, err := read(row.NetRealizedVarianceMarginMinor, "net realized variance margin")
+	if err != nil {
+		return poreport.PipelineSummary{}, poreport.VarianceSummary{}, err
+	}
+	return poreport.PipelineSummary{
+			UnsoldAmountMinor: unsoldAmount,
+			UnsoldMarginMinor: unsoldMargin,
+		}, poreport.VarianceSummary{
+			QuantityExtraIncomeAmountMinor: quantityExtraAmount,
+			QuantityExtraIncomeMarginMinor: quantityExtraMargin,
+			UnsoldAmountMinor:              unsoldAmount,
+			UnsoldMarginMinor:              unsoldMargin,
+			ClosedLossAmountMinor:          closedLossAmount,
+			ClosedLossMarginMinor:          closedLossMargin,
+			PriceExtraIncomeMinor:          priceExtra,
+			PriceLossMinor:                 priceLoss,
+			NetRealizedVarianceAmountMinor: netAmount,
+			NetRealizedVarianceMarginMinor: netMargin,
+		}, nil
+}
+
+// purchaseOrderPipelineSQL is the second read in the report snapshot. It
+// expands each quotation's latest issued revision into its priced leaves and
+// joins the cross-revision saved allocations by leaf, so:
+//
+//   - Unsold is the quoted quantity not yet bought, at the row-discounted
+//     quotation baseline;
+//   - quantity extra income is the over-bought quantity at that same baseline
+//     (and its frozen cost);
+//   - price variance is the actual allocation revenue compared with the
+//     baseline revenue already recorded in the allocation.
+//
+// Unknown supplier cost is zero for the capital side rather than profit, the
+// same honesty rule the Actual report uses. Closed loss is hard zero until
+// #656 implements closure. The query deliberately does not filter by the
+// report's date or category: bought state spans revisions and categories, so a
+// date-filtered half-answer would misstate what is still orderable.
+func purchaseOrderPipelineSQL(schema string) string {
+	return fmt.Sprintf(`
+WITH latest_revision AS (
+    SELECT DISTINCT ON (r.quotation_id) r.id AS revision_id, r.quotation_id
+    FROM %[1]s.quotation_revisions r
+    ORDER BY r.quotation_id, r.revision_number DESC
+),
+leaves AS (
+    -- A plain line is one leaf. A package whose parts print with prices is
+    -- its parts, exactly as the customer document and the PO source show it.
+    SELECT lr.quotation_id, i.item_no, NULL::integer AS sub_no,
+           (i.qty::numeric * 10000) AS quoted_qty_scaled,
+           i.marginalized_unit_price::numeric AS quoted_unit_price_minor,
+           i.unit_price::numeric AS cost_unit_minor
+    FROM latest_revision lr
+    JOIN %[1]s.quotation_revision_items i ON i.revision_id = lr.revision_id
+    WHERE NOT (i.show_sub_prices AND EXISTS (
+        SELECT 1 FROM %[1]s.quotation_revision_sub_items s
+        WHERE s.revision_item_id = i.id
+    ))
+    UNION ALL
+    SELECT lr.quotation_id, i.item_no, s.sub_no,
+           (s.qty::numeric * 10000),
+           s.unit_price::numeric,
+           s.unit_cost::numeric
+    FROM latest_revision lr
+    JOIN %[1]s.quotation_revision_items i ON i.revision_id = lr.revision_id
+    JOIN %[1]s.quotation_revision_sub_items s ON s.revision_item_id = i.id
+    WHERE i.show_sub_prices
+),
+bought AS (
+    -- Bought state is cross-revision: a leaf keyed by item/sub is the same
+    -- leaf in every revision that carries it. Only saved POs buy quantity.
+    SELECT a.quotation_id, a.quotation_item_no AS item_no,
+           COALESCE(a.quotation_sub_no, 0) AS sub_no,
+           SUM(a.quantity_scaled::numeric) AS bought_qty_scaled,
+           SUM(a.revenue_minor::numeric) AS bought_revenue_minor,
+           SUM(ROUND(a.quantity_scaled::numeric * a.quoted_unit_price_minor / 10000))
+               AS bought_at_quoted_minor,
+           SUM(ROUND(a.quantity_scaled::numeric * COALESCE(a.cost_unit_minor, 0) / 10000))
+               AS bought_cost_minor
+    FROM %[1]s.purchase_order_allocations a
+    JOIN %[1]s.purchase_orders po ON po.id = a.purchase_order_id
+    WHERE po.org_id = $1 AND po.state = 'saved' AND po.currency = $2
+    GROUP BY a.quotation_id, a.quotation_item_no, COALESCE(a.quotation_sub_no, 0)
+),
+position AS (
+    SELECT COALESCE(b.bought_qty_scaled, 0) AS bought_qty_scaled,
+           COALESCE(b.bought_revenue_minor, 0) AS bought_revenue_minor,
+           COALESCE(b.bought_at_quoted_minor, 0) AS bought_at_quoted_minor,
+           COALESCE(b.bought_cost_minor, 0) AS bought_cost_minor,
+           l.quoted_qty_scaled,
+           l.quoted_unit_price_minor,
+           l.cost_unit_minor
+    FROM leaves l
+    LEFT JOIN bought b
+      ON b.quotation_id = l.quotation_id
+     AND b.item_no = l.item_no
+     AND b.sub_no = COALESCE(l.sub_no, 0)
+),
+classified AS (
+    SELECT GREATEST(bought_revenue_minor - bought_at_quoted_minor, 0) AS price_extra,
+           GREATEST(bought_at_quoted_minor - bought_revenue_minor, 0) AS price_loss,
+           CASE WHEN bought_qty_scaled > quoted_qty_scaled
+                THEN ROUND((bought_qty_scaled - quoted_qty_scaled)
+                           * quoted_unit_price_minor / 10000)
+                ELSE 0 END AS quantity_extra_amount,
+           CASE WHEN bought_qty_scaled > quoted_qty_scaled
+                THEN ROUND((bought_qty_scaled - quoted_qty_scaled)
+                           * cost_unit_minor / 10000)
+                ELSE 0 END AS quantity_extra_cost,
+           CASE WHEN bought_qty_scaled < quoted_qty_scaled
+                THEN ROUND((quoted_qty_scaled - bought_qty_scaled)
+                           * quoted_unit_price_minor / 10000)
+                ELSE 0 END AS unsold_amount,
+           CASE WHEN bought_qty_scaled < quoted_qty_scaled
+                THEN ROUND((quoted_qty_scaled - bought_qty_scaled)
+                           * cost_unit_minor / 10000)
+                ELSE 0 END AS unsold_cost
+    FROM position
+)
+SELECT jsonb_build_object(
+    'unsoldAmountMinor', COALESCE(SUM(unsold_amount), 0),
+    'unsoldMarginMinor', COALESCE(SUM(unsold_amount - unsold_cost), 0),
+    'quantityExtraIncomeAmountMinor', COALESCE(SUM(quantity_extra_amount), 0),
+    'quantityExtraIncomeMarginMinor',
+        COALESCE(SUM(quantity_extra_amount - quantity_extra_cost), 0),
+    'priceExtraIncomeMinor', COALESCE(SUM(price_extra), 0),
+    'priceLossMinor', COALESCE(SUM(price_loss), 0),
+    'closedLossAmountMinor', 0,
+    'closedLossMarginMinor', 0,
+    'netRealizedVarianceAmountMinor',
+        COALESCE(SUM(quantity_extra_amount + price_extra - price_loss), 0),
+    'netRealizedVarianceMarginMinor',
+        COALESCE(SUM(quantity_extra_amount - quantity_extra_cost
+                     + price_extra - price_loss), 0)
+)
+FROM classified
+`, schema)
 }
 
 // purchaseOrderReportSQL is the one aggregate statement behind the report. It
