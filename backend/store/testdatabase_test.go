@@ -8,6 +8,8 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"vera-app/backend/testdb"
 )
 
 // TestEachTestGetsItsOwnMigratedClone pins the contract of the provisioning
@@ -33,7 +35,8 @@ func TestEachTestGetsItsOwnMigratedClone(t *testing.T) {
 		// 011. A clone of an unmigrated database would have no table at all.
 		var seeded int
 		if err := first.Store.pool.QueryRow(ctx,
-			`SELECT COUNT(*) FROM public.customers WHERE customer_code BETWEEN 2 AND 6`).Scan(&seeded); err != nil {
+			`SELECT COUNT(*) FROM `+quoteIdentifier(first.Schema)+`.customers
+			WHERE customer_code BETWEEN 2 AND 6`).Scan(&seeded); err != nil {
 			t.Fatalf("read the migrated seed: %v", err)
 		}
 		if seeded != 5 {
@@ -41,7 +44,8 @@ func TestEachTestGetsItsOwnMigratedClone(t *testing.T) {
 		}
 
 		if _, err := first.Store.pool.Exec(ctx,
-			`INSERT INTO public.customers (customer_code, legal_name) VALUES (99, 'PT. First Test')`); err != nil {
+			`INSERT INTO `+quoteIdentifier(first.Schema)+`.customers (customer_code, legal_name)
+			VALUES (99, 'PT. First Test')`); err != nil {
 			t.Fatalf("write the first test's row: %v", err)
 		}
 
@@ -51,19 +55,22 @@ func TestEachTestGetsItsOwnMigratedClone(t *testing.T) {
 		}
 		var leaked int
 		if err := second.Store.pool.QueryRow(ctx,
-			`SELECT COUNT(*) FROM public.customers WHERE customer_code = 99`).Scan(&leaked); err != nil {
+			`SELECT COUNT(*) FROM `+quoteIdentifier(second.Schema)+`.customers
+			WHERE customer_code = 99`).Scan(&leaked); err != nil {
 			t.Fatalf("read across the clone boundary: %v", err)
 		}
 		if leaked != 0 {
 			t.Errorf("the second test sees %d row(s) the first test wrote; the clones share data", leaked)
 		}
 		if _, err := second.Store.pool.Exec(ctx,
-			`INSERT INTO public.customers (customer_code, legal_name) VALUES (98, 'PT. Second Test')`); err != nil {
+			`INSERT INTO `+quoteIdentifier(second.Schema)+`.customers (customer_code, legal_name)
+			VALUES (98, 'PT. Second Test')`); err != nil {
 			t.Fatalf("write the second test's row: %v", err)
 		}
 		var back int
 		if err := first.Store.pool.QueryRow(ctx,
-			`SELECT COUNT(*) FROM public.customers WHERE customer_code = 98`).Scan(&back); err != nil {
+			`SELECT COUNT(*) FROM `+quoteIdentifier(first.Schema)+`.customers
+			WHERE customer_code = 98`).Scan(&back); err != nil {
 			t.Fatalf("read back into the first clone: %v", err)
 		}
 		if back != 0 {
@@ -87,7 +94,7 @@ func TestEachTestGetsItsOwnMigratedClone(t *testing.T) {
 func TestDatabaseCloneDSNRenamesTheDatabase(t *testing.T) {
 	const base = "postgres://vera:secret@127.0.0.1:55433/veratest?sslmode=disable&application_name=vera"
 
-	renamed, err := dsnForDatabase(base, "vera_probe_clone_1a2b3c4d")
+	renamed, err := testdb.DSNFor(base, "vera_probe_clone_1a2b3c4d")
 	if err != nil {
 		t.Fatalf("rename the DSN: %v", err)
 	}
@@ -117,7 +124,7 @@ func TestDatabaseCloneDSNRenamesTheDatabase(t *testing.T) {
 		"host=127.0.0.1 port=55433 user=vera password=secret database=veratest sslmode=disable",
 		"host=127.0.0.1 port=55433 user=vera password=secret sslmode=disable",
 	} {
-		keyword, err := dsnForDatabase(dsn, "vera_probe_keyword")
+		keyword, err := testdb.DSNFor(dsn, "vera_probe_keyword")
 		if err != nil {
 			t.Fatalf("rename %q: %v", dsn, err)
 		}
@@ -145,12 +152,12 @@ func TestTheTemplateIsBuiltOncePerProcessAndReused(t *testing.T) {
 	first := openTestDatabase(t, "vera_probe_template_a")
 	second := openTestDatabase(t, "vera_probe_template_b")
 
-	if testDatabases.builds != 1 {
+	if testdb.Builds() != 1 {
 		t.Errorf("templates built = %d after two tests; want the process-wide one (a per-test template pays the chain again)",
-			testDatabases.builds)
+			testdb.Builds())
 	}
 
-	migrations, err := loadMigrations(testDatabaseSchema)
+	migrations, err := loadMigrations(first.Schema)
 	if err != nil {
 		t.Fatalf("load migrations: %v", err)
 	}
@@ -158,7 +165,7 @@ func TestTheTemplateIsBuiltOncePerProcessAndReused(t *testing.T) {
 	for _, handle := range []*testDatabase{first, second} {
 		var applied int
 		if err := handle.Store.pool.QueryRow(ctx,
-			`SELECT COUNT(*) FROM public.schema_migrations`).Scan(&applied); err != nil {
+			`SELECT COUNT(*) FROM `+quoteIdentifier(handle.Schema)+`.schema_migrations`).Scan(&applied); err != nil {
 			t.Fatalf("read %s's migration ledger: %v", handle.Database, err)
 		}
 		if applied != len(migrations) {
@@ -173,7 +180,7 @@ func TestTheTemplateIsBuiltOncePerProcessAndReused(t *testing.T) {
 // one test corrupting another.
 func TestTestDatabaseNameIsSafeUniqueAndBounded(t *testing.T) {
 	for _, schema := range []string{"vera_test_units_seeds", strings.Repeat("a", 80), ""} {
-		name := testDatabaseName(schema)
+		name := testdb.CloneNameFor(schema, testdb.BinaryName(), t.Name())
 		if len(name) > testDatabaseMaxIdentifier {
 			t.Errorf("name for %q is %d characters; Postgres truncates past %d: %q",
 				schema, len(name), testDatabaseMaxIdentifier, name)
@@ -181,7 +188,7 @@ func TestTestDatabaseNameIsSafeUniqueAndBounded(t *testing.T) {
 		if !regexp.MustCompile(`^[a-z0-9_]+$`).MatchString(name) {
 			t.Errorf("name for %q is not a bare identifier: %q", schema, name)
 		}
-		if again := testDatabaseName(schema); again != name {
+		if again := testdb.CloneNameFor(schema, testdb.BinaryName(), t.Name()); again != name {
 			t.Errorf("name for %q is not stable: %q then %q", schema, name, again)
 		}
 	}
@@ -189,10 +196,10 @@ func TestTestDatabaseNameIsSafeUniqueAndBounded(t *testing.T) {
 	// Truncation must not make two long names collide: a 60-character name with
 	// a different tail still has to get its own database.
 	long := strings.Repeat("b", 60)
-	if testDatabaseName(long) == testDatabaseName(long+"x") {
+	if testdb.CloneNameFor(long, testdb.BinaryName(), t.Name()) == testdb.CloneNameFor(long+"x", testdb.BinaryName(), t.Name()) {
 		t.Error("two different long schema names map to one database; a clone would be shared")
 	}
-	if !strings.HasPrefix(testDatabaseName("vera_po_report_history_amount_overflow_empty"),
+	if !strings.HasPrefix(testdb.CloneNameFor("vera_po_report_history_amount_overflow_empty", testdb.BinaryName(), t.Name()),
 		"vera_po_report_history_amount_overflow_empty_") {
 		t.Error("a 44-character schema lost its readable name; the clone should be identifiable in psql")
 	}
@@ -203,7 +210,7 @@ func TestTestDatabaseNameIsSafeUniqueAndBounded(t *testing.T) {
 // and how to fix it, and it must not drift back to a schema replay, which is
 // what this helper replaced.
 func TestMissingCreatedbPrivilegeIsNamed(t *testing.T) {
-	err := testDatabaseCreatedbError("vera_reader")
+	err := testdb.CreatedbError("vera_reader")
 	if err == nil {
 		t.Fatal("a role without CREATEDB produced no error; the helper would fall back to the slow path")
 	}
@@ -227,8 +234,8 @@ func TestTheCloneDSNIsUsable(t *testing.T) {
 	if parsed.ConnConfig.Database != handle.Database {
 		t.Errorf("the clone DSN names %q; want the clone %q", parsed.ConnConfig.Database, handle.Database)
 	}
-	if handle.Identity != "vera_probe_dsn" || handle.Schema != testDatabaseSchema {
-		t.Errorf("handle identity = %q/%q; want the requested name and the public schema",
+	if handle.Identity != "vera_probe_dsn" || handle.Schema != testdb.Schema {
+		t.Errorf("handle identity = %q/%q; want the requested name and the app schema",
 			handle.Identity, handle.Schema)
 	}
 
@@ -239,16 +246,76 @@ func TestTheCloneDSNIsUsable(t *testing.T) {
 	}
 	defer pool.Close()
 	if _, err := pool.Exec(ctx,
-		`INSERT INTO public.customers (customer_code, legal_name) VALUES (97, 'PT. Raw Connection')`); err != nil {
+		`INSERT INTO `+quoteIdentifier(handle.Schema)+`.customers (customer_code, legal_name)
+		VALUES (97, 'PT. Raw Connection')`); err != nil {
 		t.Fatalf("write through the clone DSN: %v", err)
 	}
 	var seen int
 	if err := handle.Store.pool.QueryRow(ctx,
-		`SELECT COUNT(*) FROM public.customers WHERE customer_code = 97`).Scan(&seen); err != nil {
+		`SELECT COUNT(*) FROM `+quoteIdentifier(handle.Schema)+`.customers
+		WHERE customer_code = 97`).Scan(&seen); err != nil {
 		t.Fatalf("read the raw connection's row through the store: %v", err)
 	}
 	if seen != 1 {
 		t.Errorf("the store sees %d of the raw connection's rows; the DSN does not point at the clone", seen)
+	}
+}
+
+// TestAcquireReturnsOneClonePerTestAndIdentity pins the contract the API
+// helpers depend on: one test asks for the same identity from several helpers
+// (a server, a direct store, a signing key), and every one of them must land in
+// the same physical database. Two clones would give the test two empty copies
+// of the same schema, so the second helper would assert against data the first
+// never wrote.
+func TestAcquireReturnsOneClonePerTestAndIdentity(t *testing.T) {
+	dsn := testDSN(t)
+	first := testdb.Acquire(t, dsn, "vera_probe_shared_identity", migrateTestDatabase)
+	second := testdb.Acquire(t, dsn, "vera_probe_shared_identity", migrateTestDatabase)
+
+	if first.Name != second.Name {
+		t.Errorf("one test's two lookups got databases %q and %q; the helpers would not share data",
+			first.Name, second.Name)
+	}
+	if first.DSN != second.DSN {
+		t.Error("one test's two lookups got different DSNs; the helpers would not share data")
+	}
+	if first.Identity != "vera_probe_shared_identity" || first.Schema != testdb.Schema {
+		t.Errorf("clone identity = %q/%q; want the requested name and the app schema %q",
+			first.Identity, first.Schema, testdb.Schema)
+	}
+}
+
+// TestTemplateNamesArePerTestBinary pins why the template is named after the
+// test binary: `go test ./...` runs store.test and api.test in parallel against
+// one test database, and a shared template name would let one process drop and
+// recreate the template while the other is cloning it.
+func TestTemplateNamesArePerTestBinary(t *testing.T) {
+	api := testdb.TemplateNameFor("api.test")
+	store := testdb.TemplateNameFor("store.test")
+	if api == store {
+		t.Fatalf("api.test and store.test share the template %q; a parallel run would drop it under the other", api)
+	}
+	if again := testdb.TemplateNameFor("/tmp/go-build123/b001/api.test"); again != api {
+		t.Errorf("template name depends on the build path: %q then %q", api, again)
+	}
+	for _, name := range []string{api, store} {
+		if len(name) > testdb.MaxIdentifierLength {
+			t.Errorf("template %q is %d characters; Postgres truncates past %d",
+				name, len(name), testdb.MaxIdentifierLength)
+		}
+		if !regexp.MustCompile(`^[a-z0-9_]+$`).MatchString(name) {
+			t.Errorf("template %q is not a bare identifier", name)
+		}
+	}
+}
+
+// TestCloneNamesAreScopedToTheTestBinary pins the other half: even if two test
+// binaries picked the same identity, their clones may not collide.
+func TestCloneNamesAreScopedToTheTestBinary(t *testing.T) {
+	api := testdb.CloneNameFor("vera_api_shared_identity", "api.test", "TestX")
+	store := testdb.CloneNameFor("vera_api_shared_identity", "store.test", "TestX")
+	if api == store {
+		t.Fatalf("one identity under two test binaries maps to one clone %q", api)
 	}
 }
 

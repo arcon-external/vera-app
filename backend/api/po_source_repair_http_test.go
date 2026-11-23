@@ -4,9 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
-	"os"
 	"strconv"
-	"strings"
 	"testing"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -330,7 +328,7 @@ func TestPurchaseOrderSourceRepairOfAMissingRecordIsNotFound(t *testing.T) {
 	saved := savedPOOverAPI(t, server, adminToken, originalID)
 	purchaseOrderTestExec(t, "vera_api_po_475_missing",
 		fmt.Sprintf(`DELETE FROM %s.purchase_orders WHERE id = $1`,
-			quoteIdentForTest("vera_api_po_475_missing")), saved.ID)
+			testSchemaIdent()), saved.ID)
 
 	code, body := doJSON(t, server, http.MethodPost,
 		"/v1/purchase-orders/"+strconv.FormatInt(saved.ID, 10)+"/source-repair", adminToken,
@@ -348,11 +346,7 @@ func TestPurchaseOrderSourceRepairOfAMissingRecordIsNotFound(t *testing.T) {
 // an id, so a non-zero count would be a regression, not a fixture effect.
 func countPurchaseOrderRows(t *testing.T, schema string, id int64) int {
 	t.Helper()
-	dsn := strings.TrimSpace(os.Getenv("VERA_POSTGRES_TEST_DSN"))
-	if dsn == "" {
-		t.Skip("set VERA_POSTGRES_TEST_DSN to run API integration tests")
-	}
-	pool, err := pgxpool.New(context.Background(), dsn)
+	pool, err := pgxpool.New(context.Background(), testDatabase(t, schema).DSN)
 	if err != nil {
 		t.Fatalf("connect to count rows: %v", err)
 	}
@@ -360,7 +354,7 @@ func countPurchaseOrderRows(t *testing.T, schema string, id int64) int {
 	var count int
 	if err := pool.QueryRow(context.Background(), fmt.Sprintf(
 		`SELECT COUNT(*) FROM %s.purchase_orders WHERE id = $1`,
-		quoteIdentForTest(schema)), id).Scan(&count); err != nil {
+		testSchemaIdent()), id).Scan(&count); err != nil {
 		t.Fatalf("count purchase order rows: %v", err)
 	}
 	return count

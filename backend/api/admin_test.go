@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"strconv"
 	"strings"
 	"testing"
@@ -16,23 +15,13 @@ import (
 	"vera-app/backend/store"
 )
 
-// adminTestSetup opens an isolated schema, migrates, and bootstraps one admin.
-// It returns the server, DB handle (for seeding), and an admin bearer token.
-func adminTestSetup(t *testing.T, schema string) (*Server, *store.Store, string) {
+// adminTestSetup opens an isolated clone, already migrated, and bootstraps one
+// admin. It returns the server, DB handle (for seeding), and an admin bearer
+// token.
+func adminTestSetup(t *testing.T, identity string) (*Server, *store.Store, string) {
 	t.Helper()
-	dsn := strings.TrimSpace(os.Getenv("VERA_POSTGRES_TEST_DSN"))
-	if dsn == "" {
-		t.Skip("set VERA_POSTGRES_TEST_DSN to run API integration tests")
-	}
 	ctx := context.Background()
-	// Warm-database reruns must behave like a fresh one: this setup
-	// bootstraps an admin, which fails if a previous run left one behind.
-	resetTestSchema(t, schema)
-	database, err := store.Open(ctx, store.Config{DSN: dsn, Schema: schema})
-	if err != nil {
-		t.Fatalf("open test database: %v", err)
-	}
-	t.Cleanup(database.Close)
+	database := openTestDatabaseStore(t, identity)
 	service := auth.NewService(database)
 	if _, err := service.Bootstrap(ctx, "api-admin@example.com", "API Admin", "test-password"); err != nil {
 		t.Fatalf("bootstrap: %v", err)
@@ -306,15 +295,7 @@ func TestCreateUserRejectsInvalidEmail(t *testing.T) {
 // Compare BenchmarkRedeemUnknownToken against BenchmarkPasswordHash to
 // measure the cost avoided for a dead token (not a timing assertion).
 func BenchmarkRedeemUnknownToken(b *testing.B) {
-	dsn := strings.TrimSpace(os.Getenv("VERA_POSTGRES_TEST_DSN"))
-	if dsn == "" {
-		b.Skip("set VERA_POSTGRES_TEST_DSN to benchmark redeem")
-	}
-	database, err := store.Open(context.Background(), store.Config{DSN: dsn, Schema: "vera_api_bench_redeem"})
-	if err != nil {
-		b.Fatal(err)
-	}
-	b.Cleanup(database.Close)
+	database := openTestDatabaseStore(b, "vera_api_bench_redeem")
 	server := NewServer(database, nil, nil)
 	server.redeemLimiter = newIPRateLimiter(b.N+1, time.Minute)
 	body := `{"token":"unknown","newPassword":"long-enough-password"}`

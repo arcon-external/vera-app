@@ -3,9 +3,7 @@ package api
 import (
 	"context"
 	"net/http"
-	"os"
 	"strconv"
-	"strings"
 	"testing"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -65,14 +63,13 @@ func TestPOReviewSourceTripleOverHTTP(t *testing.T) {
 
 	// A legacy revision row with empty type/service still projects the
 	// normalized triple through the TaxCategory resolver.
-	dsn := strings.TrimSpace(os.Getenv("VERA_POSTGRES_TEST_DSN"))
-	pool, err := pgxpool.New(context.Background(), dsn)
+	pool, err := pgxpool.New(context.Background(), testDatabase(t, "vera_api_po_source_triple").DSN)
 	if err != nil {
 		t.Fatalf("connect: %v", err)
 	}
 	defer pool.Close()
 	tag, err := pool.Exec(context.Background(),
-		`UPDATE "vera_api_po_source_triple".quotation_revisions SET tax_type = '', service_category = '' WHERE quotation_id = $1`,
+		`UPDATE `+testSchemaIdent()+`.quotation_revisions SET tax_type = '', service_category = '' WHERE quotation_id = $1`,
 		quotationID)
 	if err != nil {
 		t.Fatalf("simulate legacy revision: %v", err)

@@ -343,7 +343,7 @@ func TestPurchaseOrderReportIncompleteCostSuppressesCurrentProjection(t *testing
 	// this isolates incomplete cost rather than the deleted-source path.
 	pool := apiReportPool(t, schema)
 	if _, err := pool.Exec(context.Background(), fmt.Sprintf(
-		`UPDATE %s.purchase_orders SET source_revision = 99 WHERE id = $1`, schema), saved.ID); err != nil {
+		`UPDATE %s.purchase_orders SET source_revision = 99 WHERE id = $1`, testSchemaIdent()), saved.ID); err != nil {
 		t.Fatalf("detach the source revision: %v", err)
 	}
 

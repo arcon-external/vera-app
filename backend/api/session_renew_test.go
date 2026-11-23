@@ -5,8 +5,6 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
-	"os"
-	"strings"
 	"testing"
 	"time"
 
@@ -24,11 +22,7 @@ import (
 // the clock.
 func renewTestPool(t *testing.T, schema string) *pgxpool.Pool {
 	t.Helper()
-	dsn := strings.TrimSpace(os.Getenv("VERA_POSTGRES_TEST_DSN"))
-	if dsn == "" {
-		t.Skip("set VERA_POSTGRES_TEST_DSN to run API integration tests")
-	}
-	pool, err := pgxpool.New(context.Background(), dsn)
+	pool, err := pgxpool.New(context.Background(), testDatabase(t, schema).DSN)
 	if err != nil {
 		t.Fatalf("connect to test schema: %v", err)
 	}
@@ -39,7 +33,7 @@ func renewTestPool(t *testing.T, schema string) *pgxpool.Pool {
 func setSessionDeadlines(t *testing.T, pool *pgxpool.Pool, schema, token string, idle, absolute time.Time) {
 	t.Helper()
 	command, err := pool.Exec(context.Background(),
-		`UPDATE "`+strings.ReplaceAll(schema, `"`, `""`)+`".sessions
+		`UPDATE `+testSchemaIdent()+`.sessions
 		 SET expires_at = $2, absolute_expires_at = $3
 		 WHERE token_hash = $1`,
 		auth.HashSessionToken(token), idle, absolute)
