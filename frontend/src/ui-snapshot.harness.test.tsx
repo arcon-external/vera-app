@@ -48,6 +48,7 @@ import {
   type PurchaseOrderReportMetrics,
 } from "./poReport";
 import {
+  purchaseOrderReportExtraExpenseFixture,
   purchaseOrderReportFixture,
   purchaseOrderReportMaxFixture,
   purchaseOrderReportMonthFixture,
@@ -2261,6 +2262,78 @@ const CASES: SnapshotCase[] = [
           currency: "IDR",
         }}
         report={purchaseOrderReportFixture()}
+        loading={false}
+        stale={false}
+        error=""
+        validation=""
+        catalogue={[
+          {
+            code: "IDR",
+            exponent: 0,
+            symbol: "Rp",
+            position: "before",
+            groupSep: ".",
+            decimalSep: ",",
+            symbolSpaced: false,
+          },
+          {
+            code: "USD",
+            exponent: 2,
+            symbol: "$",
+            position: "before",
+            groupSep: ",",
+            decimalSep: ".",
+            symbolSpaced: false,
+          },
+        ]}
+        exporting={false}
+        canExport={false}
+        onPresetChange={() => undefined}
+        onPeriodChange={() => undefined}
+        onFromChange={() => undefined}
+        onToChange={() => undefined}
+        onBucketChange={() => undefined}
+        onCategoryChange={() => undefined}
+        onCurrencyChange={() => undefined}
+        onRetry={() => undefined}
+        onExport={() => undefined}
+        monthBrowser={{
+          months: ["2026-11"],
+          activeMonth: "2026-11",
+          allYear: null,
+          layout: "individual",
+          notice: "",
+          readouts: [REPORT_MONTH_CURRENT_READOUT],
+          aggregate: null,
+          triggerRef: createRef<HTMLButtonElement>(),
+          onOpenPicker: () => undefined,
+          onLayoutChange: () => undefined,
+          onPrevious: () => undefined,
+          onNext: () => undefined,
+          onRetryMonth: () => undefined,
+        }}
+      />
+    ),
+  },
+  {
+    // #655: the same year snapshot with a pass-through extra expense line, so
+    // the Extra Expense bucket and the non-extra coverage sentence are visible
+    // at both widths.
+    name: "ReportsExtraExpense",
+    element: (
+      <PurchaseOrderReportsView
+        filters={{
+          // The fixture is the "this year to today" snapshot on 19 Nov 2026,
+          // so the controls name the same inclusive range the report covers.
+          preset: "this-year",
+          period: null,
+          from: "2026-01-01",
+          to: "2026-11-19",
+          bucket: "month",
+          category: "all",
+          currency: "IDR",
+        }}
+        report={purchaseOrderReportExtraExpenseFixture()}
         loading={false}
         stale={false}
         error=""
