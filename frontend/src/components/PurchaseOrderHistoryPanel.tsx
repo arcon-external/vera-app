@@ -4,6 +4,7 @@ import {
   attachmentReferenceLabel,
   correctionKindLabel,
   formatHistoryTime,
+  historyLineRows,
   type PurchaseOrderHistoryEntry,
 } from "../poCorrection";
 import { sourceRepairChoiceLabel, sourceRepairSummary } from "../poRepair";
@@ -19,6 +20,12 @@ import { Badge, Card, SectionHeading, StatusBanner } from "./ui";
 // Wave 2 renders the whole retained snapshot, grouped, rather than a handful of
 // fields: a correction that changed only the billing address, the ship-to code,
 // a contact detail or a date is still understandable months later.
+//
+// Issue #654: a snapshot that carried aggregate groups prints each group's
+// title, stored display quantity and unit, and customer-visibility setting
+// immediately above that group's child lines. The snapshot is authoritative —
+// no group total or unit price is derived here — and a snapshot without groups
+// renders exactly as it did before aggregates existed.
 
 export interface PurchaseOrderHistoryPanelProps {
   entries: PurchaseOrderHistoryEntry[];
@@ -230,33 +237,63 @@ export function PurchaseOrderHistoryPanel({
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-rule">
-                          {entry.Items.map((item) => (
-                            <tr key={item.LineNumber}>
-                              <td className="tnum py-2 pr-3 align-middle text-ink-700">
-                                {item.LineNumber}
-                              </td>
-                              <td className="py-2 pr-3 align-middle text-ink-900">
-                                {item.Description || "-"}
-                              </td>
-                              <td className="tnum py-2 pr-3 text-right align-middle text-ink-700">
-                                {formatQuantityScaled(item.QuantityScaled)}
-                              </td>
-                              <td className="py-2 pr-3 align-middle text-ink-700">
-                                {item.UoM || "-"}
-                              </td>
-                              <td className="tnum whitespace-nowrap py-2 pr-3 text-right align-middle text-ink-700">
-                                {formatMoney(currency, item.UnitPriceMinor)}
-                              </td>
-                              <td className="tnum whitespace-nowrap py-2 pr-3 text-right align-middle text-ink-700">
-                                {item.DiscountMinor === 0
-                                  ? "-"
-                                  : formatMoney(currency, -item.DiscountMinor)}
-                              </td>
-                              <td className="tnum whitespace-nowrap py-2 text-right align-middle text-ink-900">
-                                {formatMoney(currency, item.NetMinor)}
-                              </td>
-                            </tr>
-                          ))}
+                          {historyLineRows(entry).map((row) =>
+                            row.kind === "group" ? (
+                              <tr
+                                key={`group-${row.group.DisplayOrder}`}
+                                data-po-history-group
+                                className="bg-paper-subtle/60"
+                              >
+                                <td colSpan={7} className="py-2 pr-3">
+                                  <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
+                                    <span className="text-caption font-medium uppercase tracking-[0.1em] text-ink-500">
+                                      Aggregate group
+                                    </span>
+                                    <span className="break-words text-small font-medium text-ink-900">
+                                      {row.group.Title.trim() === "" ? "-" : row.group.Title}
+                                    </span>
+                                    <span className="tnum whitespace-nowrap text-caption text-ink-600">
+                                      {formatQuantityScaled(row.group.OrderedQuantityScaled)}{" "}
+                                      {row.group.OrderedUoM.trim() === ""
+                                        ? "-"
+                                        : row.group.OrderedUoM}
+                                    </span>
+                                    <span className="text-caption text-ink-500">
+                                      {row.group.ShowChildrenToCustomer
+                                        ? "Customer sees the title and child lines"
+                                        : "Customer sees the title only"}
+                                    </span>
+                                  </div>
+                                </td>
+                              </tr>
+                            ) : (
+                              <tr key={row.item.LineNumber}>
+                                <td className="tnum py-2 pr-3 align-middle text-ink-700">
+                                  {row.item.LineNumber}
+                                </td>
+                                <td className="py-2 pr-3 align-middle text-ink-900">
+                                  {row.item.Description || "-"}
+                                </td>
+                                <td className="tnum py-2 pr-3 text-right align-middle text-ink-700">
+                                  {formatQuantityScaled(row.item.QuantityScaled)}
+                                </td>
+                                <td className="py-2 pr-3 align-middle text-ink-700">
+                                  {row.item.UoM || "-"}
+                                </td>
+                                <td className="tnum whitespace-nowrap py-2 pr-3 text-right align-middle text-ink-700">
+                                  {formatMoney(currency, row.item.UnitPriceMinor)}
+                                </td>
+                                <td className="tnum whitespace-nowrap py-2 pr-3 text-right align-middle text-ink-700">
+                                  {row.item.DiscountMinor === 0
+                                    ? "-"
+                                    : formatMoney(currency, -row.item.DiscountMinor)}
+                                </td>
+                                <td className="tnum whitespace-nowrap py-2 text-right align-middle text-ink-900">
+                                  {formatMoney(currency, row.item.NetMinor)}
+                                </td>
+                              </tr>
+                            )
+                          )}
                         </tbody>
                       </table>
                     </div>

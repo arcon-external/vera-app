@@ -8,9 +8,11 @@ import {
   correctionKindLabel,
   correctionReasonError,
   formatHistoryTime,
+  historyLineRows,
   trimCorrectionReason,
   writeOutcome,
   type PurchaseOrderConflictDTO,
+  type PurchaseOrderHistoryItem,
 } from "./poCorrection";
 import type { PurchaseOrderDTO } from "./purchaseOrder";
 
@@ -167,5 +169,120 @@ describe("history labels", () => {
   it("offers correction only on a saved record", () => {
     expect(canCorrectPurchaseOrder(order())).toBe(true);
     expect(canCorrectPurchaseOrder(order({ State: "draft" }))).toBe(false);
+  });
+});
+
+function historyItem(
+  lineNumber: number,
+  description: string,
+  aggregateGroupOrder = 0
+): PurchaseOrderHistoryItem {
+  return {
+    LineNumber: lineNumber,
+    Description: description,
+    QuantityScaled: 10000,
+    UoM: "Pc",
+    UnitPriceMinor: 10000,
+    DiscountMinor: 0,
+    NetMinor: 10000,
+    AggregateGroupOrder: aggregateGroupOrder,
+  };
+}
+
+function rowLabels(rows: ReturnType<typeof historyLineRows>): string[] {
+  return rows.map((row) =>
+    row.kind === "group"
+      ? `group ${row.group.DisplayOrder}:${row.group.Title}`
+      : `line ${row.item.LineNumber}:${row.item.Description}`
+  );
+}
+
+describe("history line rows (issue #654)", () => {
+  it("leaves an ungrouped snapshot as plain rows in the order the snapshot stored", () => {
+    const items = [
+      historyItem(3, "Third"),
+      historyItem(1, "First"),
+      historyItem(2, "Second"),
+    ];
+    expect(rowLabels(historyLineRows({ Items: items }))).toEqual([
+      "line 3:Third",
+      "line 1:First",
+      "line 2:Second",
+    ]);
+    // The binding sends an empty array, not undefined, for a snapshot with no
+    // aggregate groups.
+    expect(rowLabels(historyLineRows({ Items: items, Groups: [] }))).toEqual([
+      "line 3:Third",
+      "line 1:First",
+      "line 2:Second",
+    ]);
+  });
+
+  it("puts each group title immediately above its children, matched by display order", () => {
+    // The group array is deliberately out of order: the snapshot stores the
+    // order on the header and on each child, so the array's order is not
+    // meaningful. The leading ungrouped line must stay where the snapshot put
+    // it, not move below the groups.
+    const rows = historyLineRows({
+      Groups: [
+        {
+          DisplayOrder: 2,
+          Title: "Second package",
+          OrderedQuantityScaled: 30000,
+          OrderedUoM: "Set",
+          ShowChildrenToCustomer: true,
+        },
+        {
+          DisplayOrder: 1,
+          Title: "First package",
+          OrderedQuantityScaled: 20000,
+          OrderedUoM: "Pallet",
+          ShowChildrenToCustomer: false,
+        },
+      ],
+      Items: [
+        historyItem(1, "Free line"),
+        historyItem(2, "Child alpha", 1),
+        historyItem(3, "Child beta", 1),
+        historyItem(4, "Child gamma", 2),
+      ],
+    });
+    expect(rowLabels(rows)).toEqual([
+      "line 1:Free line",
+      "group 1:First package",
+      "line 2:Child alpha",
+      "line 3:Child beta",
+      "group 2:Second package",
+      "line 4:Child gamma",
+    ]);
+  });
+
+  it("never invents a group title the snapshot did not store", () => {
+    const rows = historyLineRows({
+      Groups: [
+        {
+          DisplayOrder: 1,
+          Title: "Known package",
+          OrderedQuantityScaled: 20000,
+          OrderedUoM: "Pallet",
+          ShowChildrenToCustomer: false,
+        },
+        {
+          DisplayOrder: 2,
+          Title: "Empty package",
+          OrderedQuantityScaled: 10000,
+          OrderedUoM: "Set",
+          ShowChildrenToCustomer: true,
+        },
+      ],
+      Items: [historyItem(1, "Orphan", 7), historyItem(2, "Known child", 1)],
+    });
+    // The orphan names a group the snapshot does not carry; the group with no
+    // child lines has no heading to sit above. Neither invents a title.
+    expect(rowLabels(rows)).toEqual([
+      "line 1:Orphan",
+      "group 1:Known package",
+      "line 2:Known child",
+    ]);
   });
 });

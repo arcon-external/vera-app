@@ -108,6 +108,72 @@ const DRAFT_OVERWRITE: PurchaseOrderHistoryEntry = {
   Attachment: null,
 };
 
+// Issue #654: one snapshot that grouped two runs of lines, with a leading
+// ungrouped line. The groups array is deliberately not in display order.
+const GROUPED: PurchaseOrderHistoryEntry = {
+  ...CORRECTION,
+  ID: 4,
+  UUID: "corr-grouped",
+  Reason: "The customer reorganized the order into packages",
+  Items: [
+    {
+      LineNumber: 1,
+      Description: "Loose widget",
+      QuantityScaled: 10000,
+      UoM: "Pc",
+      UnitPriceMinor: 10000,
+      DiscountMinor: 0,
+      NetMinor: 10000,
+    },
+    {
+      LineNumber: 2,
+      Description: "Child alpha",
+      QuantityScaled: 20000,
+      UoM: "Pc",
+      UnitPriceMinor: 9000,
+      DiscountMinor: 0,
+      NetMinor: 18000,
+      AggregateGroupOrder: 1,
+    },
+    {
+      LineNumber: 3,
+      Description: "Child beta",
+      QuantityScaled: 10000,
+      UoM: "Pc",
+      UnitPriceMinor: 8000,
+      DiscountMinor: 0,
+      NetMinor: 8000,
+      AggregateGroupOrder: 1,
+    },
+    {
+      LineNumber: 4,
+      Description: "Child gamma",
+      QuantityScaled: 30000,
+      UoM: "Set",
+      UnitPriceMinor: 7000,
+      DiscountMinor: 0,
+      NetMinor: 21000,
+      AggregateGroupOrder: 2,
+    },
+  ],
+  Groups: [
+    {
+      DisplayOrder: 2,
+      Title: "Second package",
+      OrderedQuantityScaled: 30000,
+      OrderedUoM: "Set",
+      ShowChildrenToCustomer: true,
+    },
+    {
+      DisplayOrder: 1,
+      Title: "First package",
+      OrderedQuantityScaled: 20000,
+      OrderedUoM: "Pallet",
+      ShowChildrenToCustomer: false,
+    },
+  ],
+};
+
 function markup(entries: PurchaseOrderHistoryEntry[]) {
   return renderToStaticMarkup(
     <PurchaseOrderHistoryPanel entries={entries} currency={USD} />
@@ -258,4 +324,72 @@ describe("PurchaseOrderHistoryPanel source-less snapshots (issue #496)", () => {
   });
 });
 
+});
+
+/** The visible text of one markup fragment, tags removed. */
+function textOf(fragment: string): string {
+  return fragment
+    .replace(/<[^>]*>/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function groupRowFragments(html: string): string[] {
+  return [...html.matchAll(/<tr data-po-history-group[^>]*>[\s\S]*?<\/tr>/g)].map(
+    (match) => match[0]
+  );
+}
+
+describe("PurchaseOrderHistoryPanel aggregate groups (issue #654)", () => {
+  it("renders each group title above its child rows in display order", () => {
+    const html = markup([GROUPED]);
+    const expected = [
+      "Loose widget",
+      "First package",
+      "Child alpha",
+      "Child beta",
+      "Second package",
+      "Child gamma",
+    ];
+    const positions = expected.map((text) => html.indexOf(text));
+    expect(
+      positions,
+      `missing from the panel: ${expected.filter((_, index) => positions[index] < 0).join(", ")}`
+    ).not.toContain(-1);
+    expect(positions).toEqual([...positions].sort((left, right) => left - right));
+  });
+
+  it("shows the stored header values and invents no group total or price", () => {
+    const rows = groupRowFragments(markup([GROUPED]));
+    expect(rows).toHaveLength(2);
+    expect(textOf(rows[0])).toContain("First package");
+    expect(textOf(rows[0])).toContain("2 Pallet");
+    expect(textOf(rows[0])).toContain("Customer sees the title only");
+    expect(textOf(rows[1])).toContain("Second package");
+    expect(textOf(rows[1])).toContain("3 Set");
+    expect(textOf(rows[1])).toContain("Customer sees the title and child lines");
+    for (const row of rows) {
+      expect(textOf(row), "a group header invented a money figure").not.toContain("$");
+      expect(textOf(row)).not.toContain("Total");
+      expect(textOf(row)).not.toContain("Unit price");
+    }
+  });
+
+  it("keeps supplier economics out of the display", () => {
+    const text = textOf(markup([GROUPED])).toLowerCase();
+    for (const forbidden of ["margin", "profit", "variance", "supplier cost"]) {
+      expect(text, `the history display leaked ${forbidden}`).not.toContain(forbidden);
+    }
+  });
+
+  it("leaves an ungrouped snapshot as one plain row per line", () => {
+    for (const entry of [CORRECTION, { ...CORRECTION, Groups: [] }]) {
+      const html = markup([entry]);
+      expect(html).not.toContain("data-po-history-group");
+      const tbody = /<tbody[^>]*>([\s\S]*?)<\/tbody>/.exec(html)?.[1] ?? "";
+      expect(tbody.match(/<tr/g) ?? []).toHaveLength(entry.Items.length);
+      expect(textOf(html)).not.toContain("Aggregate group");
+      expect(textOf(html)).not.toContain("Customer sees the title");
+    }
+  });
 });
