@@ -2585,6 +2585,33 @@ const CASES: SnapshotCase[] = [
     ),
   },
   {
+    // #648: the admin variant, so the Close/Reopen actions are visible at
+    // both widths beside the open and closed quotations.
+    name: "ReportsFulfillmentAdmin",
+    element: (
+      <PurchaseOrderFulfillmentCardView
+        page={FULFILLMENT_SNAPSHOT_PAGE}
+        currency="IDR"
+        catalogue={REPORT_CATALOGUE}
+        status="all"
+        searchDraft=""
+        pageNumber={1}
+        loading={false}
+        error=""
+        onStatusChange={() => undefined}
+        onSearchDraftChange={() => undefined}
+        onSearchSubmit={() => undefined}
+        onClearFilters={() => undefined}
+        onPreviousPage={() => undefined}
+        onNextPage={() => undefined}
+        onRetry={() => undefined}
+        isAdmin
+        onCloseQuotation={() => undefined}
+        onReopenQuotation={() => undefined}
+      />
+    ),
+  },
+  {
     // Issue #641: a loaded past month with no orders is genuine zero evidence,
     // not a hidden section. The year KPI strip stays its own actual figures.
     name: "ReportsMonthPastZero",
