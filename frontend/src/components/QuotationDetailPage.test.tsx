@@ -237,6 +237,53 @@ async function flush(): Promise<void> {
   });
 }
 
+describe("Quotation detail legacy discount (issue #652)", () => {
+  it("shows a stored whole-order discount read-only on the revision", async () => {
+    mocks.getCatalogue.mockResolvedValue([IDR_ENTRY]);
+    mocks.getOccupancy.mockResolvedValue({ ActivePO: null });
+    mocks.getRevision.mockResolvedValue(
+      makeQuotation({
+        DiscountPercent: 10,
+        MarginalizedDiscount: 4100000,
+        RevisionNumber: 0,
+        AvailableRevisions: [0],
+      })
+    );
+
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    act(() => {
+      root.render(
+        <ToastProvider>
+          <QuotationDetailPage
+            quotationID={1}
+            revision={0}
+            onBack={noop}
+            onEdit={noop}
+            onCreatePurchaseOrder={async () => {}}
+            onOpenPurchaseOrder={noop}
+            currency={IDR_ENTRY}
+          />
+        </ToastProvider>
+      );
+    });
+    await flush();
+    await flush();
+
+    // The archived revision keeps its stored 10% visible; there is no input
+    // in the reader to change it.
+    expect(container.textContent).toContain("Discount 10% (on the price)");
+    expect(
+      container.querySelector(
+        'input[aria-label*="quotation discount" i], input[aria-label*="whole-order" i]'
+      )
+    ).toBeNull();
+
+    act(() => root.unmount());
+  });
+});
+
 describe("Quotation detail note card (#535)", () => {
   it("renders the formatted note as customer-facing elements", () => {
     const html = renderToString(

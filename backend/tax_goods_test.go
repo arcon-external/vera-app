@@ -99,7 +99,10 @@ func TestPrepareGoodsPPNAfterDiscount(t *testing.T) {
 	q.SetAuthService(auth.StaffTestService())
 	err := q.Prepare(QuotationInput{
 		Items: []QuotationItemInput{
-			{Description: "Item", Qty: 1, UoM: "Lot", UnitPrice: 100000},
+			{
+				Description: "Item", Qty: 1, UoM: "Lot", UnitPrice: 100000,
+				DiscountEnabled: true, DiscountPercent: 10,
+			},
 		},
 		Subject:         "Test",
 		RecipientName:   "Test",
@@ -108,7 +111,7 @@ func TestPrepareGoodsPPNAfterDiscount(t *testing.T) {
 		LeadTimeDays:    30,
 		CustomerID:      2,
 		Incoterm:        "EXW",
-		DiscountPercent: 10,
+		DiscountPercent: 0,
 		TaxZone:         TaxZoneNonFTZ,
 		TaxType:         TaxTypeGoods,
 	})
@@ -182,7 +185,10 @@ func TestProfitFollowsConfirmedTaxFlow(t *testing.T) {
 			q := newTestQuotation()
 			q.SetAuthService(auth.StaffTestService())
 			if err := q.Prepare(QuotationInput{
-				Items:           []QuotationItemInput{{Description: "Item", Qty: 1, UoM: "Lot", UnitPrice: 10000}},
+				Items: []QuotationItemInput{{
+					Description: "Item", Qty: 1, UoM: "Lot", UnitPrice: 10000,
+					DiscountEnabled: true, DiscountPercent: 10,
+				}},
 				Subject:         "Test",
 				RecipientName:   "Test",
 				Validity:        30,
@@ -190,7 +196,7 @@ func TestProfitFollowsConfirmedTaxFlow(t *testing.T) {
 				LeadTimeDays:    30,
 				CustomerID:      2,
 				Incoterm:        "EXW",
-				DiscountPercent: 10,
+				DiscountPercent: 0,
 				TaxZone:         tc.taxZone,
 				TaxType:         tc.taxType,
 				ServiceCategory: tc.serviceCategory,

@@ -138,7 +138,9 @@ export function buildQuotationCopy(quotation: ArchivedQuotation): string {
       leadTimeMonths: quotation.LeadTimeMonths,
       leadTimeWeeks: quotation.LeadTimeWeeks,
       leadTimeDays: quotation.LeadTimeDays,
-      discountPercent: quotation.DiscountPercent,
+      // #652: a new revision is row-only. A stored legacy header discount
+      // stays visible on the archived revision, never carried into new work.
+      discountPercent: 0,
       taxZone: quotation.TaxZone,
       taxType: quotation.TaxType,
       serviceCategory: quotation.ServiceCategory,
@@ -372,7 +374,9 @@ export function archivedToEditorDraft(quotation: ArchivedQuotation): ArchivedEdi
       leadTimeMonths: quotation.LeadTimeMonths,
       leadTimeWeeks: quotation.LeadTimeWeeks,
       leadTimeDays: quotation.LeadTimeDays,
-      discountPercent: quotation.DiscountPercent,
+      // #652: a new revision is row-only. A stored legacy header discount
+      // stays visible on the archived revision, never carried into new work.
+      discountPercent: 0,
       incoterm: quotation.Incoterm,
       taxZone: quotation.TaxZone,
       taxType: quotation.TaxType || legacyTaxType(quotation.TaxCategory),

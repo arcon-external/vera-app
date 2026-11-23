@@ -15,6 +15,11 @@ import (
 	"vera-app/backend/currency"
 )
 
+// ErrQuotationHeaderDiscountRetired refuses a new revision that carries a
+// whole-order discount. Row discounts are the pricing model for new revisions;
+// a stored legacy revision remains readable and is never rewritten.
+var ErrQuotationHeaderDiscountRetired = errors.New("whole-order quotation discounts are retired; use row discounts")
+
 type RevisionItem struct {
 	Description           string
 	UoM                   string
@@ -808,6 +813,9 @@ func validateRevisionDraft(draft RevisionDraft) error {
 	}
 	if len(draft.Items) == 0 {
 		return fmt.Errorf("at least one quotation item is required")
+	}
+	if draft.DiscountPercent != 0 {
+		return ErrQuotationHeaderDiscountRetired
 	}
 	if draft.HTMLSnapshot == "" {
 		return fmt.Errorf("quotation HTML snapshot is required")

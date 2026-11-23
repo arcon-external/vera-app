@@ -1399,7 +1399,7 @@ function App() {
           0
         ) + 1;
       setItems(restored.items);
-      setDetails(restored.details);
+      setDetails({ ...restored.details, discountPercent: 0 });
       setPristineSubject(null);
       setCustomerId(
         restored.customerId || pickCustomerId(customerOptions, customerId)
@@ -1760,7 +1760,9 @@ function App() {
             0
           ) + 1;
         setItems(restored.items);
-        setDetails(restored.details);
+        // #652: retired whole-order discounts on old local drafts are dropped;
+        // the issued revision keeps its stored value in the archive.
+        setDetails({ ...restored.details, discountPercent: 0 });
         // A loaded draft keeps its own semantics: its header is work, not a
         // freshly applied default.
         setPristineSubject(null);
@@ -1811,7 +1813,7 @@ function App() {
       nextKey.current = applied.items.length;
       nextSubId.current = applied.nextSubId;
       setItems(applied.items);
-      setDetails(applied.details);
+      setDetails({ ...applied.details, discountPercent: 0 });
       // A pasted copy is entered work, never a pristine default.
       setPristineSubject(null);
       setCustomerId(applied.customerCode);

@@ -175,6 +175,9 @@ func (s *Store) PreviewPurchaseOrderDraftLink(
 	if err != nil {
 		return PurchaseOrderDraftLinkReview{}, err
 	}
+	if source.DiscountPercent > 0 {
+		return PurchaseOrderDraftLinkReview{}, ErrPurchaseOrderLegacyHeaderDiscount
+	}
 	documentState, err := purchaseOrderDocumentState(ctx, pool, schema, order.ID)
 	if err != nil {
 		return PurchaseOrderDraftLinkReview{}, err
@@ -262,6 +265,9 @@ func (s *Store) LinkPurchaseOrderDraftSource(ctx context.Context, input Purchase
 		input.QuotationID, input.RevisionNumber)
 	if err != nil {
 		return PurchaseOrder{}, err
+	}
+	if source.DiscountPercent > 0 {
+		return PurchaseOrder{}, ErrPurchaseOrderLegacyHeaderDiscount
 	}
 	// Currency is structural: the two sides are only one money when they are
 	// the same currency. No conversion exists anywhere in this path.

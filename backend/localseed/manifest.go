@@ -201,7 +201,7 @@ func MockManifest() Manifest {
 				CustomerCode:     91,
 				Revisions: []QuotationRevisionSpec{
 					{
-						DiscountPercent: 5,
+						DiscountPercent: 0,
 						Items: []ItemSpec{
 							{
 								Description:   "Modular clean-room panel system (MOCK)",
@@ -586,7 +586,6 @@ type Coverage struct {
 	NonFTZGoodsWithPPN      bool
 	ServicesNonConstruction bool
 	ServicesConstruction    bool
-	WholeDiscount           bool
 	RowDiscount             bool
 	SubItems                bool
 	MultipleRevisions       bool
@@ -612,9 +611,6 @@ func (m Manifest) Coverage() Coverage {
 			coverage.MultipleRevisions = true
 		}
 		for _, revision := range quotation.Revisions {
-			if revision.DiscountPercent > 0 {
-				coverage.WholeDiscount = true
-			}
 			for _, item := range revision.Items {
 				if len(item.SubItems) > 0 {
 					coverage.SubItems = true
@@ -729,7 +725,7 @@ func (m Manifest) Validate() error {
 	coverage := m.Coverage()
 	if !coverage.FTZGoods || !coverage.NonFTZGoodsWithPPN ||
 		!coverage.ServicesNonConstruction || !coverage.ServicesConstruction ||
-		!coverage.WholeDiscount || !coverage.RowDiscount ||
+		!coverage.RowDiscount ||
 		!coverage.SubItems || !coverage.MultipleRevisions {
 		return fmt.Errorf("manifest coverage is incomplete: %+v", coverage)
 	}

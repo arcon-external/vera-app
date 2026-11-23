@@ -50,8 +50,9 @@ type InputDoc struct {
 	ServiceCategory string `json:"serviceCategory,omitempty"`
 
 	// DiscountPercent is the whole-quotation discount. It is retired from the
-	// editor in favour of per-row discounts and only still here so an older
-	// payload loads; new quotations should discount rows.
+	// editor in favour of per-row discounts. It stays in the payload so an
+	// older file parses into a named refusal rather than an unknown field;
+	// a nonzero value is rejected when the revision is prepared or exported.
 	DiscountPercent int `json:"discountPercent,omitempty"`
 
 	Items []InputItem `json:"items"`

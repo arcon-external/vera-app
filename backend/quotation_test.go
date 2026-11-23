@@ -603,8 +603,13 @@ func TestMarginPercentCeiling(t *testing.T) {
 	if err := prepare(0, 200); err == nil {
 		t.Error("a 200% discount was accepted; only the margin ceiling was meant to move")
 	}
-	if err := prepare(0, 100); err != nil {
-		t.Errorf("a 100%% discount was rejected: %v", err)
+	// #652 retired the whole-order discount entirely: any nonzero value is a
+	// new-revision refusal, not a ceiling case.
+	if err := prepare(0, 100); err == nil {
+		t.Error("a 100% whole-order discount was accepted; new revisions are row-only")
+	}
+	if err := prepare(0, 1); err == nil {
+		t.Error("a 1% whole-order discount was accepted; new revisions are row-only")
 	}
 }
 

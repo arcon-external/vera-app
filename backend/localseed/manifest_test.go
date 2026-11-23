@@ -69,7 +69,7 @@ func TestManifestMatchesTheApprovedMatrix(t *testing.T) {
 	coverage := manifest.Coverage()
 	if !coverage.FTZGoods || !coverage.NonFTZGoodsWithPPN ||
 		!coverage.ServicesNonConstruction || !coverage.ServicesConstruction ||
-		!coverage.WholeDiscount || !coverage.RowDiscount ||
+		!coverage.RowDiscount ||
 		!coverage.SubItems || !coverage.MultipleRevisions {
 		t.Fatalf("coverage is incomplete: %+v", coverage)
 	}
