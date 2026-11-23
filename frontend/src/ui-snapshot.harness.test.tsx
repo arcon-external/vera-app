@@ -2554,14 +2554,15 @@ const CASES: SnapshotCase[] = [
   {
     // #657: the Fulfillment drill-down with a settled page, rendered through
     // the presentational View because renderToString runs no effects. The 360
-    // read is the informative one for the wide table: the card is one column,
-    // the table scrolls inside its own overflow box, and the control row wraps.
-    // The 1280 read is the full table with both quotations, the group heading
-    // above its two children, the standalone extra and the closed loss.
+    // read shows the stacked per-item layout: every quantity and value is in
+    // the card, no horizontal table. The 1280 read shows the fixed-column
+    // table with both quotations, the group heading above its two children,
+    // the standalone extra and the closed loss.
     //
     // What this case cannot show: loading, error and empty states, status and
     // search interactions, paging, and the epoch-driven refresh (all covered by
-    // the card and page DOM suites).
+    // the card and page DOM suites). The closed quotation sits below the 900px
+    // fold at 360; the 1280 read is the evidence for it.
     name: "ReportsFulfillment",
     element: (
       <PurchaseOrderFulfillmentCardView
