@@ -438,6 +438,16 @@ func purchaseOrderError(context echo.Context, err error) error {
 	switch {
 	case errors.Is(err, store.ErrPurchaseOrderNotFound):
 		return context.JSON(http.StatusNotFound, map[string]string{"error": "purchase order not found"})
+	case errors.Is(err, store.ErrPurchaseOrderAggregateInvalid):
+		return context.JSON(http.StatusUnprocessableEntity, map[string]string{
+			"error": err.Error(),
+			"code":  "po_aggregate_invalid",
+		})
+	case errors.Is(err, store.ErrPurchaseOrderClientOutdated):
+		return context.JSON(http.StatusConflict, map[string]string{
+			"error": "This purchase order uses aggregate lines saved by a newer Vera. Update Vera to edit it.",
+			"code":  "po_client_outdated",
+		})
 	case errors.Is(err, store.ErrPurchaseOrderVersionRequired):
 		return context.JSON(http.StatusUnprocessableEntity, map[string]string{
 			"error": "reload the purchase order before saving; the version it was loaded at is required",
@@ -653,6 +663,21 @@ func mapPurchaseOrder(order store.PurchaseOrder) apicontract.PurchaseOrderRow {
 		formatted := order.ConfirmationAssignedAt.Format(time.RFC3339)
 		row.ConfirmationAssignedAt = &formatted
 	}
+	if len(order.AggregateGroups) > 0 {
+		row.AggregateGroups = make([]apicontract.PurchaseOrderAggregateGroupRow, 0, len(order.AggregateGroups))
+		for _, group := range order.AggregateGroups {
+			row.AggregateGroups = append(row.AggregateGroups, apicontract.PurchaseOrderAggregateGroupRow{
+				ID:                     group.ID,
+				DisplayOrder:           group.DisplayOrder,
+				Title:                  group.Title,
+				OrderedQuantityScaled:  group.OrderedQuantityScaled,
+				OrderedUoM:             group.OrderedUoM,
+				ShowChildrenToCustomer: group.ShowChildrenToCustomer,
+				TotalMinor:             group.TotalMinor,
+				DisplayUnitPriceMinor:  group.DisplayUnitPriceMinor,
+			})
+		}
+	}
 	row.Items = make([]apicontract.PurchaseOrderItemRow, 0, len(order.Items))
 	for _, item := range order.Items {
 		row.Items = append(row.Items, apicontract.PurchaseOrderItemRow{
@@ -676,9 +701,19 @@ func mapPurchaseOrder(order store.PurchaseOrder) apicontract.PurchaseOrderRow {
 
 			QuotedUnitPriceMinor:    item.QuotedUnitPriceMinor,
 			RemainingQuantityScaled: item.RemainingQuantityScaled,
+
+			AggregateGroupID: nilIfZero(item.AggregateGroupID),
 		})
 	}
 	return row
+}
+
+// nilIfZero keeps the wire contract's "null means ungrouped" on a zero id.
+func nilIfZero(value int64) *int64 {
+	if value == 0 {
+		return nil
+	}
+	return &value
 }
 
 func parsePurchaseOrderDate(raw, field string) (*time.Time, error) {
@@ -735,7 +770,24 @@ func purchaseOrderUpdateFromRequest(request apicontract.PurchaseOrderEditableReq
 			GroupKey:          item.GroupKey,
 			ParentDescription: item.ParentDescription,
 			DescriptionLines:  item.DescriptionLines,
+
+			AggregateGroupIndex: item.AggregateGroupIndex,
 		})
+	}
+	// nil and empty are different contracts: nil is a client that predates
+	// #654 (the store refuses it on a grouped record), while an empty array is
+	// the deliberate ungroup. The mapping must not erase the difference.
+	var groups []store.PurchaseOrderAggregateGroupInput
+	if request.AggregateGroups != nil {
+		groups = make([]store.PurchaseOrderAggregateGroupInput, 0, len(request.AggregateGroups))
+		for _, group := range request.AggregateGroups {
+			groups = append(groups, store.PurchaseOrderAggregateGroupInput{
+				Title:                  group.Title,
+				OrderedQuantityScaled:  group.OrderedQuantityScaled,
+				OrderedUoM:             group.OrderedUoM,
+				ShowChildrenToCustomer: group.ShowChildrenToCustomer,
+			})
+		}
 	}
 	return store.PurchaseOrderUpdate{
 		BillingAddress:        request.BillingAddress,
@@ -762,6 +814,7 @@ func purchaseOrderUpdateFromRequest(request apicontract.PurchaseOrderEditableReq
 		AdjustmentReason:      request.AdjustmentReason,
 		ExpectedVersion:       request.ExpectedVersion,
 		Overwrite:             request.Overwrite,
+		AggregateGroups:       groups,
 	}, nil
 }
 
@@ -877,7 +930,21 @@ func mapPurchaseOrderCorrection(entry store.PurchaseOrderCorrection) apicontract
 			GroupKey:          item.GroupKey,
 			ParentDescription: item.ParentDescription,
 			DescriptionLines:  item.DescriptionLines,
+
+			AggregateGroupOrder: item.AggregateGroupOrder,
 		})
+	}
+	if len(entry.Groups) > 0 {
+		row.Groups = make([]apicontract.PurchaseOrderCorrectionGroupRow, 0, len(entry.Groups))
+		for _, group := range entry.Groups {
+			row.Groups = append(row.Groups, apicontract.PurchaseOrderCorrectionGroupRow{
+				DisplayOrder:           group.DisplayOrder,
+				Title:                  group.Title,
+				OrderedQuantityScaled:  group.OrderedQuantityScaled,
+				OrderedUoM:             group.OrderedUoM,
+				ShowChildrenToCustomer: group.ShowChildrenToCustomer,
+			})
+		}
 	}
 	return row
 }

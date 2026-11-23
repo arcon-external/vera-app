@@ -1916,6 +1916,50 @@ export namespace backend {
 	        this.Valid = source["Valid"];
 	    }
 	}
+	export class PurchaseOrderAggregateGroupDTO {
+	    ID: number;
+	    DisplayOrder: number;
+	    Title: string;
+	    OrderedQuantityScaled: number;
+	    OrderedUoM: string;
+	    ShowChildrenToCustomer: boolean;
+	    TotalMinor: number;
+	    DisplayUnitPriceMinor?: number;
+
+	    static createFrom(source: any = {}) {
+	        return new PurchaseOrderAggregateGroupDTO(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.ID = source["ID"];
+	        this.DisplayOrder = source["DisplayOrder"];
+	        this.Title = source["Title"];
+	        this.OrderedQuantityScaled = source["OrderedQuantityScaled"];
+	        this.OrderedUoM = source["OrderedUoM"];
+	        this.ShowChildrenToCustomer = source["ShowChildrenToCustomer"];
+	        this.TotalMinor = source["TotalMinor"];
+	        this.DisplayUnitPriceMinor = source["DisplayUnitPriceMinor"];
+	    }
+	}
+	export class PurchaseOrderAggregateGroupInput {
+	    Title: string;
+	    OrderedQuantityScaled: number;
+	    OrderedUoM: string;
+	    ShowChildrenToCustomer: boolean;
+
+	    static createFrom(source: any = {}) {
+	        return new PurchaseOrderAggregateGroupInput(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.Title = source["Title"];
+	        this.OrderedQuantityScaled = source["OrderedQuantityScaled"];
+	        this.OrderedUoM = source["OrderedUoM"];
+	        this.ShowChildrenToCustomer = source["ShowChildrenToCustomer"];
+	    }
+	}
 	export class PurchaseOrderBlankCreateInput {
 	    ReceivedDate: string;
 	    TaxZone: string;
@@ -1972,6 +2016,26 @@ export namespace backend {
 	        this.Version = source["Version"];
 	    }
 	}
+	export class PurchaseOrderCorrectionGroupDTO {
+	    DisplayOrder: number;
+	    Title: string;
+	    OrderedQuantityScaled: number;
+	    OrderedUoM: string;
+	    ShowChildrenToCustomer: boolean;
+
+	    static createFrom(source: any = {}) {
+	        return new PurchaseOrderCorrectionGroupDTO(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.DisplayOrder = source["DisplayOrder"];
+	        this.Title = source["Title"];
+	        this.OrderedQuantityScaled = source["OrderedQuantityScaled"];
+	        this.OrderedUoM = source["OrderedUoM"];
+	        this.ShowChildrenToCustomer = source["ShowChildrenToCustomer"];
+	    }
+	}
 	export class PurchaseOrderCorrectionItemDTO {
 	    QuotationItemNo?: number;
 	    QuotationSubNo?: number;
@@ -1988,6 +2052,7 @@ export namespace backend {
 	    GroupKey: string;
 	    ParentDescription: string;
 	    DescriptionLines: string[];
+	    AggregateGroupOrder: number;
 
 	    static createFrom(source: any = {}) {
 	        return new PurchaseOrderCorrectionItemDTO(source);
@@ -2010,6 +2075,7 @@ export namespace backend {
 	        this.GroupKey = source["GroupKey"];
 	        this.ParentDescription = source["ParentDescription"];
 	        this.DescriptionLines = source["DescriptionLines"];
+	        this.AggregateGroupOrder = source["AggregateGroupOrder"];
 	    }
 	}
 	export class PurchaseOrderSourceRepairDecisionDTO {
@@ -2104,6 +2170,7 @@ export namespace backend {
 	    ReceivedDate: string;
 	    CreatedAt: string;
 	    Items: PurchaseOrderCorrectionItemDTO[];
+	    Groups: PurchaseOrderCorrectionGroupDTO[];
 	    ID: number;
 	    QuotationID: number;
 	    SourceRevision: number;
@@ -2153,6 +2220,7 @@ export namespace backend {
 	        this.ReceivedDate = source["ReceivedDate"];
 	        this.CreatedAt = source["CreatedAt"];
 	        this.Items = this.convertValues(source["Items"], PurchaseOrderCorrectionItemDTO);
+	        this.Groups = this.convertValues(source["Groups"], PurchaseOrderCorrectionGroupDTO);
 	        this.ID = source["ID"];
 	        this.QuotationID = source["QuotationID"];
 	        this.SourceRevision = source["SourceRevision"];
@@ -2188,6 +2256,7 @@ export namespace backend {
 		    return a;
 		}
 	}
+
 	export class PurchaseOrderItemInput {
 	    QuotationItemNo?: number;
 	    QuotationSubNo?: number;
@@ -2202,6 +2271,7 @@ export namespace backend {
 	    GroupKey: string;
 	    ParentDescription: string;
 	    DescriptionLines: string[];
+	    AggregateGroupIndex: number;
 
 	    static createFrom(source: any = {}) {
 	        return new PurchaseOrderItemInput(source);
@@ -2222,6 +2292,7 @@ export namespace backend {
 	        this.GroupKey = source["GroupKey"];
 	        this.ParentDescription = source["ParentDescription"];
 	        this.DescriptionLines = source["DescriptionLines"];
+	        this.AggregateGroupIndex = source["AggregateGroupIndex"];
 	    }
 	}
 	export class PurchaseOrderCorrectionInput {
@@ -2241,6 +2312,7 @@ export namespace backend {
 	    AdjustmentReason: string;
 	    Reason: string;
 	    Items: PurchaseOrderItemInput[];
+	    AggregateGroups: PurchaseOrderAggregateGroupInput[];
 	    DiscountPercent: number;
 	    AdjustmentMinor: number;
 	    ExpectedVersion: number;
@@ -2268,6 +2340,7 @@ export namespace backend {
 	        this.AdjustmentReason = source["AdjustmentReason"];
 	        this.Reason = source["Reason"];
 	        this.Items = this.convertValues(source["Items"], PurchaseOrderItemInput);
+	        this.AggregateGroups = this.convertValues(source["AggregateGroups"], PurchaseOrderAggregateGroupInput);
 	        this.DiscountPercent = source["DiscountPercent"];
 	        this.AdjustmentMinor = source["AdjustmentMinor"];
 	        this.ExpectedVersion = source["ExpectedVersion"];
@@ -2366,6 +2439,7 @@ export namespace backend {
 	    DescriptionLines: string[];
 	    QuotedUnitPriceMinor?: number;
 	    RemainingQuantityScaled?: number;
+	    AggregateGroupID: number;
 
 	    static createFrom(source: any = {}) {
 	        return new PurchaseOrderItemDTO(source);
@@ -2392,6 +2466,7 @@ export namespace backend {
 	        this.DescriptionLines = source["DescriptionLines"];
 	        this.QuotedUnitPriceMinor = source["QuotedUnitPriceMinor"];
 	        this.RemainingQuantityScaled = source["RemainingQuantityScaled"];
+	        this.AggregateGroupID = source["AggregateGroupID"];
 	    }
 	}
 	export class PurchaseOrderDTO {
@@ -2418,6 +2493,7 @@ export namespace backend {
 	    CreatedAt: string;
 	    UpdatedAt: string;
 	    Items: PurchaseOrderItemDTO[];
+	    AggregateGroups: PurchaseOrderAggregateGroupDTO[];
 	    ID: number;
 	    QuotationID: number;
 	    SourceRevision: number;
@@ -2476,6 +2552,7 @@ export namespace backend {
 	        this.CreatedAt = source["CreatedAt"];
 	        this.UpdatedAt = source["UpdatedAt"];
 	        this.Items = this.convertValues(source["Items"], PurchaseOrderItemDTO);
+	        this.AggregateGroups = this.convertValues(source["AggregateGroups"], PurchaseOrderAggregateGroupDTO);
 	        this.ID = source["ID"];
 	        this.QuotationID = source["QuotationID"];
 	        this.SourceRevision = source["SourceRevision"];
@@ -2861,6 +2938,7 @@ export namespace backend {
 	    BusinessCategory: string;
 	    AdjustmentReason: string;
 	    Items: PurchaseOrderItemInput[];
+	    AggregateGroups: PurchaseOrderAggregateGroupInput[];
 	    Decisions: PurchaseOrderDecisionInput[];
 	    AcknowledgedMissing: string[];
 	    AcknowledgedExtra: number[];
@@ -2892,6 +2970,7 @@ export namespace backend {
 	        this.BusinessCategory = source["BusinessCategory"];
 	        this.AdjustmentReason = source["AdjustmentReason"];
 	        this.Items = this.convertValues(source["Items"], PurchaseOrderItemInput);
+	        this.AggregateGroups = this.convertValues(source["AggregateGroups"], PurchaseOrderAggregateGroupInput);
 	        this.Decisions = this.convertValues(source["Decisions"], PurchaseOrderDecisionInput);
 	        this.AcknowledgedMissing = source["AcknowledgedMissing"];
 	        this.AcknowledgedExtra = source["AcknowledgedExtra"];
@@ -3099,6 +3178,7 @@ export namespace backend {
 	    AdjustmentReason: string;
 	    Reason: string;
 	    Items: PurchaseOrderItemInput[];
+	    AggregateGroups: PurchaseOrderAggregateGroupInput[];
 	    Decisions: PurchaseOrderDecisionInput[];
 	    AcknowledgedMissing: string[];
 	    AcknowledgedExtra: number[];
@@ -3130,6 +3210,7 @@ export namespace backend {
 	        this.AdjustmentReason = source["AdjustmentReason"];
 	        this.Reason = source["Reason"];
 	        this.Items = this.convertValues(source["Items"], PurchaseOrderItemInput);
+	        this.AggregateGroups = this.convertValues(source["AggregateGroups"], PurchaseOrderAggregateGroupInput);
 	        this.Decisions = this.convertValues(source["Decisions"], PurchaseOrderDecisionInput);
 	        this.AcknowledgedMissing = source["AcknowledgedMissing"];
 	        this.AcknowledgedExtra = source["AcknowledgedExtra"];
@@ -3188,6 +3269,7 @@ export namespace backend {
 	    AdjustmentReason: string;
 	    ConfirmationRequested: boolean;
 	    Items: PurchaseOrderItemInput[];
+	    AggregateGroups: PurchaseOrderAggregateGroupInput[];
 	    DiscountPercent: number;
 	    AdjustmentMinor: number;
 	    Currency: string;
@@ -3219,6 +3301,7 @@ export namespace backend {
 	        this.AdjustmentReason = source["AdjustmentReason"];
 	        this.ConfirmationRequested = source["ConfirmationRequested"];
 	        this.Items = this.convertValues(source["Items"], PurchaseOrderItemInput);
+	        this.AggregateGroups = this.convertValues(source["AggregateGroups"], PurchaseOrderAggregateGroupInput);
 	        this.DiscountPercent = source["DiscountPercent"];
 	        this.AdjustmentMinor = source["AdjustmentMinor"];
 	        this.Currency = source["Currency"];
@@ -3951,6 +4034,20 @@ export namespace poreport {
 	        this.coverageBps = source["coverageBps"];
 	    }
 	}
+	export class PipelineSummary {
+	    unsoldAmountMinor: number;
+	    unsoldMarginMinor: number;
+
+	    static createFrom(source: any = {}) {
+	        return new PipelineSummary(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.unsoldAmountMinor = source["unsoldAmountMinor"];
+	        this.unsoldMarginMinor = source["unsoldMarginMinor"];
+	    }
+	}
 	export class Population {
 	    availableCurrencies: string[];
 	    hasUnassigned: boolean;
@@ -4078,20 +4175,6 @@ export namespace poreport {
 	        this.bucket = source["bucket"];
 	        this.category = source["category"];
 	        this.currency = source["currency"];
-	    }
-	}
-	export class PipelineSummary {
-	    unsoldAmountMinor: number;
-	    unsoldMarginMinor: number;
-
-	    static createFrom(source: any = {}) {
-	        return new PipelineSummary(source);
-	    }
-
-	    constructor(source: any = {}) {
-	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.unsoldAmountMinor = source["unsoldAmountMinor"];
-	        this.unsoldMarginMinor = source["unsoldMarginMinor"];
 	    }
 	}
 	export class VarianceSummary {
