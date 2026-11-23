@@ -97,6 +97,7 @@ import {
   PurchaseOrderSourceChange,
 } from "./components/PurchaseOrderRepair";
 import { QuotationDetailHeader } from "./components/QuotationDetailPage";
+import { QuotationCloseDialog } from "./components/QuotationCloseDialog";
 import {
   deletionReducer,
   initialDeletionState,
@@ -3176,6 +3177,37 @@ const CASES: SnapshotCase[] = [
     ),
   },
   {
+    // #656: a closed quotation and an expired-unclosed one. Closed is disabled
+    // with its own badge; expired-unclosed keeps its remaining quantity and is
+    // selectable, so the two states must read differently at 360 and 1280.
+    name: "POSelectorClosedAndExpired",
+    element: (
+      <POQuotationSelectorView
+        state={{
+          ...PO_SELECTOR_STEP_ONE,
+          rows: [
+            {
+              ...PO_SELECTOR_ROWS[0],
+              closed: true,
+              closedAt: "2026-11-20T10:00:00+07:00",
+              closedReason: "Customer confirmed the remaining quantity will not be ordered.",
+            },
+            {
+              ...PO_SELECTOR_ROWS[1],
+              activePO: null,
+              expiredUnclosed: true,
+              validUntil: "2026-10-01",
+            },
+            PO_SELECTOR_ROWS[2],
+          ],
+        }}
+        dispatch={() => undefined}
+        onClose={() => undefined}
+        onConfirm={() => undefined}
+      />
+    ),
+  },
+  {
     // The manual PO draft editor (issue #468/#470, header from #580): the hero
     // names the customer's PO number with the quotation identity in the Source
     // quotation block; the Purchase order details card sits under it. Lines are
@@ -4044,6 +4076,60 @@ const CASES: SnapshotCase[] = [
         onCreatePurchaseOrder={() => undefined}
         onOpenPurchaseOrder={() => undefined}
         onCopy={() => undefined}
+      />
+    ),
+  },
+  {
+    // #656: the closed header. Create PO is gone, the Closure block names who
+    // closed it and why, and an admin sees the Reopen action beside Copy/Edit.
+    // This case is the layout proof for the long reason sentence at 360.
+    name: "QuotationDetailHeaderClosed",
+    element: (
+      <QuotationDetailHeader
+        quotation={DETAIL_QUOTATION}
+        activeRevision={2}
+        revisionOptions={[
+          { value: 2, label: "Revision 02 (latest)" },
+          { value: 1, label: "Revision 01" },
+          { value: 0, label: "Revision 00" },
+        ]}
+        onRevisionChange={() => undefined}
+        onBack={() => undefined}
+        onEdit={() => undefined}
+        purchaseOrder={null}
+        purchaseOrderPending={false}
+        purchaseOrderAllBought={false}
+        onCreatePurchaseOrder={() => undefined}
+        onOpenPurchaseOrder={() => undefined}
+        onCopy={() => undefined}
+        closure={{
+          closed: true,
+          closedAt: "2026-11-20T10:00:00+07:00",
+          closedByName: "Sari Admin",
+          closedReason:
+            "Customer confirmed the remaining 6 Pc will not be ordered on this quotation.",
+          expiredUnclosed: false,
+        }}
+        isAdmin
+        onCloseQuotation={() => undefined}
+        onReopenQuotation={() => undefined}
+      />
+    ),
+  },
+  {
+    // #656: the ask-for-a-reason dialog, empty and ready. The submit is the
+    // disabled button until a reason is typed; the width and the 500-character
+    // counter are what this case proves.
+    name: "QuotationCloseDialogOpen",
+    element: (
+      <QuotationCloseDialog
+        open
+        isAdmin
+        quotationNumber="1502260012"
+        pending={false}
+        error={null}
+        onCancel={() => undefined}
+        onConfirm={() => undefined}
       />
     ),
   },
