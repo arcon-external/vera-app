@@ -551,6 +551,176 @@ func TestPurchaseOrderReportFailsClosedOnAggregateOverflow(t *testing.T) {
 	}
 }
 
+// reportQuantityScale is one whole unit in the API's scaled quantity, matching
+// store.QuantityScale: four decimal places stored as an exact integer.
+const reportQuantityScale int64 = 10_000
+
+// coverageReportQuotation is one plain five-unit line, so the quotation has a
+// single leaf and fulfillment coverage is exactly bought/5.
+func coverageReportQuotation() map[string]any {
+	return map[string]any{
+		"Items": []map[string]any{{
+			"Description": "Fulfillment line", "Qty": 5, "UoM": "Pc", "UnitPrice": 100_000,
+		}},
+		"Subject":       "HTTP coverage source",
+		"RecipientName": "Test Recipient",
+		"TaxZone":       "FTZ",
+		"Validity":      30,
+		"PaymentTerm":   30,
+		"LeadTimeDays":  10,
+		"CustomerID":    2,
+		"Incoterm":      "EXW",
+	}
+}
+
+// finalizeReportDraft saves one draft at an explicit scaled quantity. decide
+// acknowledges the resulting difference with the PO's own quantity, which is
+// what an over-buy needs; a save inside the remaining quantity does not.
+func finalizeReportDraft(
+	t *testing.T, server *Server, token string, draft purchaseOrderRow,
+	number string, quantityScaled int64, decide bool,
+) purchaseOrderRow {
+	t.Helper()
+	payload := finalizeBody(draft, number)
+	items := payload["items"].([]map[string]any)
+	items[0]["quantityScaled"] = quantityScaled
+	if decide {
+		payload["decisions"] = []map[string]any{
+			{"key": "line:1:quantity", "choice": "po"},
+		}
+	}
+	path := "/v1/purchase-orders/" + strconv.FormatInt(draft.ID, 10)
+	code, body := doJSON(t, server, http.MethodPost, path+"/finalize", token, payload)
+	if code != http.StatusOK {
+		t.Fatalf("finalize %s = %d (%v); want 200", number, code, body)
+	}
+	return decodePurchaseOrder(t, body)
+}
+
+// TestPurchaseOrderReportCarriesPopulationCountersAndFulfillmentOverHTTP is the
+// wire proof for #648: the store's population counters and the fulfillment
+// ratio must reach the HTTP body, not stop at the snapshot. The fixture is the
+// pre-correction production shape -- three saved records with no reference and
+// no allocation -- plus one five-unit quotation that lapsed unclosed and was
+// bought three units of, so the body must carry 3 unallocated, 3 legacy
+// fallbacks, 1 expired-unclosed offer and 6000 bps of fulfillment.
+func TestPurchaseOrderReportCarriesPopulationCountersAndFulfillmentOverHTTP(t *testing.T) {
+	const identity = "vera_api_po_report_coverage"
+	server, token := testQuotationServer(t, identity)
+	quotationID, _ := exportForSelector(t, server, token, coverageReportQuotation())
+
+	// All four drafts are created before the saves below, so one loop can
+	// drive the fixture in a fixed order: a draft reserves no quantity, and
+	// creating a draft against an all-bought quotation is refused.
+	drafts := make([]purchaseOrderRow, 0, 4)
+	for index := 0; index < 4; index++ {
+		code, body := createPODraft(t, server, token, quotationID, 0, map[string]any{
+			"receivedDate":     "2026-03-10",
+			"businessCategory": "FM",
+		})
+		if code != http.StatusCreated {
+			t.Fatalf("create draft %d = %d (%v); want 201", index+1, code, body)
+		}
+		drafts = append(drafts, decodePurchaseOrder(t, body))
+	}
+
+	// The first three are the production shapes. Each takes one unit and
+	// records the quantity choice, so the leaf still has remaining quantity:
+	// the final save refuses a line whose leaf is already exhausted, which is
+	// the one limit an over-buy from a partly remaining leaf does not hit.
+	legacyIDs := make([]int64, 0, 3)
+	for index := 0; index < 3; index++ {
+		saved := finalizeReportDraft(t, server, token, drafts[index],
+			fmt.Sprintf("PO-API-COVERAGE-LEGACY-%d", index+1),
+			1*reportQuantityScale, true)
+		legacyIDs = append(legacyIDs, saved.ID)
+	}
+	// Three bought of five quoted: one more than the two units the three
+	// production saves left, recorded as an accepted over-buy.
+	buyer := finalizeReportDraft(t, server, token, drafts[3], "PO-API-COVERAGE-BUYER",
+		3*reportQuantityScale, true)
+	if buyer.ID == 0 {
+		t.Fatal("the buying record has no id")
+	}
+
+	// Rewrite the three saves into the pre-#650 shape through the database,
+	// which no public route can produce: no line names a quotation leaf and no
+	// allocation row exists to resolve cost. The fourth save keeps its
+	// allocation and is the three bought units.
+	pool := apiReportPool(t, identity)
+	ctx := context.Background()
+	if _, err := pool.Exec(ctx, fmt.Sprintf(`
+		UPDATE %s.purchase_order_items
+		SET quotation_item_no = NULL, quotation_sub_no = NULL
+		WHERE purchase_order_id = ANY($1)`, testSchemaIdent()), legacyIDs); err != nil {
+		t.Fatalf("strip the legacy line references: %v", err)
+	}
+	if _, err := pool.Exec(ctx, fmt.Sprintf(
+		`DELETE FROM %s.purchase_order_allocations WHERE purchase_order_id = ANY($1)`,
+		testSchemaIdent()), legacyIDs); err != nil {
+		t.Fatalf("remove the legacy allocations: %v", err)
+	}
+	// The offer lapsed 30 days ago and was never closed; the report's as-of is
+	// today, so the quotation is an expired-unclosed offer.
+	if _, err := pool.Exec(ctx, fmt.Sprintf(`
+		UPDATE %s.quotation_revisions
+		SET created_at = NOW() - INTERVAL '60 days', validity_days = 30
+		WHERE quotation_id = $1`, testSchemaIdent()), quotationID); err != nil {
+		t.Fatalf("lapse the quotation: %v", err)
+	}
+
+	values := reportQueryParams("2026-01-01", "2027-01-01", "month", "all", "IDR")
+	code, body := doJSON(t, server, http.MethodGet, reportURL(values), token, nil)
+	if code != http.StatusOK {
+		t.Fatalf("coverage report = %d (%v); want 200", code, body)
+	}
+
+	// The raw body is the contract the screen reads. A missing key or a
+	// snapshot field the handler forgot to copy is a zero here.
+	population, ok := body["population"].(map[string]any)
+	if !ok {
+		t.Fatalf("report body has no population object: %v", body)
+	}
+	for name, want := range map[string]float64{
+		"unallocatedPoCount":            3,
+		"legacyFallbackPoCount":         3,
+		"expiredUnclosedQuotationCount": 1,
+	} {
+		if got := population[name]; got != want {
+			t.Errorf("population.%s = %v; want %v", name, got, want)
+		}
+	}
+	pipeline, ok := body["pipeline"].(map[string]any)
+	if !ok {
+		t.Fatalf("report body has no pipeline object: %v", body)
+	}
+	if got := pipeline["fulfillmentBps"]; got != float64(6000) {
+		t.Errorf("pipeline.fulfillmentBps = %v; want 6000 (3 of 5 bought)", got)
+	}
+	t.Logf("HTTP population = %v, fulfillmentBps = %v", population, pipeline["fulfillmentBps"])
+
+	// The typed snapshot proves the same values survive decoding, so the field
+	// is not merely present as a stray key.
+	report := decodeReport(t, body)
+	if report.Population.UnallocatedPoCount != 3 ||
+		report.Population.LegacyFallbackPoCount != 3 ||
+		report.Population.ExpiredUnclosedQuotationCount != 1 {
+		t.Errorf("typed population = %d/%d/%d; want 3/3/1",
+			report.Population.UnallocatedPoCount,
+			report.Population.LegacyFallbackPoCount,
+			report.Population.ExpiredUnclosedQuotationCount)
+	}
+	if report.Pipeline.FulfillmentBps != 6000 {
+		t.Errorf("typed fulfillment = %d bps; want 6000", report.Pipeline.FulfillmentBps)
+	}
+	// The ratio is separate from the open remainder: two units of the five are
+	// still orderable, at the quotation's 100.000 baseline.
+	if report.Pipeline.UnsoldAmountMinor != 2*100_000 {
+		t.Errorf("pipeline unsold = %d; want the two unbought units at 100.000",
+			report.Pipeline.UnsoldAmountMinor)
+	}
+}
+
 // TestPurchaseOrderReportExposesPipelineAndVarianceSeparately pins the #653
 // HTTP contract: Actual, Pipeline (Unsold) and Realized Variance are three
 // separate objects. A 5 -> 3 buy at 9.000 reports the sold three as Actual, the
