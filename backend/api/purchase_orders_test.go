@@ -57,7 +57,21 @@ type purchaseOrderRow struct {
 		// still orderable. Workspace-only; never supplier cost.
 		QuotedUnitPriceMinor    *int64 `json:"quotedUnitPriceMinor"`
 		RemainingQuantityScaled *int64 `json:"remainingQuantityScaled"`
+		// #654: the aggregate group this line belongs to; null when ungrouped.
+		AggregateGroupID *int64 `json:"aggregateGroupId"`
 	} `json:"items"`
+	// #654: the PO-only presentation headers. A group has no price, cost,
+	// margin or variance of its own: TotalMinor is derived from its children.
+	AggregateGroups []struct {
+		ID                     int64  `json:"id"`
+		DisplayOrder           int    `json:"displayOrder"`
+		Title                  string `json:"title"`
+		OrderedQuantityScaled  int64  `json:"orderedQuantityScaled"`
+		OrderedUoM             string `json:"orderedUom"`
+		ShowChildrenToCustomer bool   `json:"showChildrenToCustomer"`
+		TotalMinor             int64  `json:"totalMinor"`
+		DisplayUnitPriceMinor  *int64 `json:"displayUnitPriceMinor"`
+	} `json:"aggregateGroups"`
 	DiscountPercent        int16   `json:"discountPercent"`
 	PpnBps                 int16   `json:"ppnBps"`
 	AdjustmentReason       string  `json:"adjustmentReason"`
@@ -1476,4 +1490,439 @@ func mustCreatePODraft(t *testing.T, server *Server, token string, quotationID i
 		t.Fatalf("create draft = %d (%v)", code, body)
 	}
 	return body
+}
+
+// #654: the aggregate line is PO-only presentation. These tests drive the real
+// server and disposable Postgres through the HTTP contract the API and the
+// desktop share: the submitted groups, the derived total, the named refusals
+// and the legacy-client compatibility rule.
+
+// aggregateGroupPayload is one submitted group in the wire shape.
+func aggregateGroupPayload(title string, quantityScaled int64, uom string, show bool) map[string]any {
+	return map[string]any{
+		"title":                  title,
+		"orderedQuantityScaled":  quantityScaled,
+		"orderedUom":             uom,
+		"showChildrenToCustomer": show,
+	}
+}
+
+// draftUpdateBody builds a draft save from a stored row: the editable values as
+// they stand, the loaded version and every line. Tests then change only the
+// field they exercise. It deliberately never names aggregateGroups, so it is
+// exactly what a client that predates #654 sends.
+func draftUpdateBody(row purchaseOrderRow) map[string]any {
+	items := make([]map[string]any, 0, len(row.Items))
+	for _, item := range row.Items {
+		items = append(items, map[string]any{
+			"quotationItemNo": item.QuotationItemNo,
+			"quotationSubNo":  item.QuotationSubNo,
+			"description":     item.Description,
+			"quantityScaled":  item.QuantityScaled,
+			"uom":             item.UoM,
+			"unitPriceMinor":  item.UnitPriceMinor,
+			"discountEnabled": item.DiscountEnabled,
+			"discountPercent": item.DiscountPercent,
+		})
+	}
+	return map[string]any{
+		"billingAddress":   row.BillingAddress,
+		"deliveryAddress":  row.DeliveryAddress,
+		"shipToCode":       row.ShipToCode,
+		"contactEmail":     row.ContactEmail,
+		"contactPhone":     row.ContactPhone,
+		"poNumber":         row.PONumber,
+		"receivedDate":     row.ReceivedDate,
+		"paymentTerms":     row.PaymentTerms,
+		"incoterms":        row.Incoterms,
+		"businessCategory": businessCategoryOrDefault(row.BusinessCategory),
+		"items":            items,
+		"discountPercent":  row.DiscountPercent,
+		"adjustmentMinor":  row.AdjustmentMinor,
+		"adjustmentReason": row.AdjustmentReason,
+		"expectedVersion":  row.Version,
+	}
+}
+
+// itemGroupIndexes sets the aggregate group index of each submitted line.
+// Missing positions stay as they are, so a test can exercise a mixed payload.
+func itemGroupIndexes(body map[string]any, indexes ...int) map[string]any {
+	items, _ := body["items"].([]map[string]any)
+	for index, item := range items {
+		if index < len(indexes) {
+			item["aggregateGroupIndex"] = indexes[index]
+		}
+	}
+	return body
+}
+
+// appendGroupedSplitLine appends two rows of one display group (the same
+// group_key) plus one plain row, so a test can prove a package is never split
+// across aggregates.
+func appendGroupedSplitLine(body map[string]any) map[string]any {
+	items, _ := body["items"].([]map[string]any)
+	items = append(items,
+		map[string]any{
+			"description": "Package half A", "quantityScaled": 10000,
+			"uom": "Lot", "unitPriceMinor": 1000, "groupKey": "q:9",
+		},
+		map[string]any{
+			"description": "Package half B", "quantityScaled": 10000,
+			"uom": "Lot", "unitPriceMinor": 1000, "groupKey": "q:9",
+		},
+		map[string]any{
+			"description": "Loose line", "quantityScaled": 10000,
+			"uom": "Lot", "unitPriceMinor": 1000,
+		})
+	body["items"] = items
+	return body
+}
+
+func TestPurchaseOrderAggregateGroupsRoundTripOverTheAPI(t *testing.T) {
+	server, token := testQuotationServer(t, "vera_api_po_aggregates")
+	quotationID, _ := exportForSelector(t, server, token, quotationInput())
+	draft := decodePurchaseOrder(t, mustCreatePODraft(t, server, token, quotationID))
+	path := "/v1/purchase-orders/" + strconv.FormatInt(draft.ID, 10)
+
+	body := itemGroupIndexes(draftUpdateBody(draft), 1, 1)
+	body["aggregateGroups"] = []map[string]any{
+		aggregateGroupPayload("Combined items", 10000, "Lot", false),
+	}
+	code, response := doJSON(t, server, http.MethodPut, path, token, body)
+	if code != http.StatusOK {
+		t.Fatalf("group save = %d (%v)", code, response)
+	}
+	grouped := decodePurchaseOrder(t, response)
+	// 2 x 108000 + 1 x 45000: the group total is exactly the sum of its
+	// children, and the group itself writes no money.
+	if len(grouped.AggregateGroups) != 1 {
+		t.Fatalf("groups = %d; want 1 (%+v)", len(grouped.AggregateGroups), grouped.AggregateGroups)
+	}
+	group := grouped.AggregateGroups[0]
+	if group.ID < 1 || group.DisplayOrder != 1 || group.Title != "Combined items" ||
+		group.OrderedQuantityScaled != 10000 || group.OrderedUoM != "Lot" ||
+		group.ShowChildrenToCustomer {
+		t.Errorf("group = %+v; want the submitted header at display order 1", group)
+	}
+	if group.TotalMinor != 261000 {
+		t.Errorf("group total = %d; want the children's exact 261000", group.TotalMinor)
+	}
+	if group.DisplayUnitPriceMinor == nil || *group.DisplayUnitPriceMinor != 261000 {
+		t.Errorf("display unit price = %v; want 261000 for one Lot", group.DisplayUnitPriceMinor)
+	}
+	for _, item := range grouped.Items {
+		if item.AggregateGroupID == nil || *item.AggregateGroupID != group.ID {
+			t.Errorf("line %d membership = %v; want group %d",
+				item.LineNumber, item.AggregateGroupID, group.ID)
+		}
+	}
+	if grouped.SubtotalMinor != draft.SubtotalMinor || grouped.GrandTotalMinor != draft.GrandTotalMinor {
+		t.Errorf("grouping moved money: subtotal %d->%d grand %d->%d",
+			draft.SubtotalMinor, grouped.SubtotalMinor, draft.GrandTotalMinor, grouped.GrandTotalMinor)
+	}
+
+	// Reopen: the server derives the same header and total from its children.
+	code, response = doJSON(t, server, http.MethodGet, path, token, nil)
+	if code != http.StatusOK {
+		t.Fatalf("reopen = %d (%v)", code, response)
+	}
+	reopened := decodePurchaseOrder(t, response)
+	if len(reopened.AggregateGroups) != 1 ||
+		reopened.AggregateGroups[0].TotalMinor != 261000 ||
+		reopened.AggregateGroups[0].ID != group.ID {
+		t.Errorf("reopened groups = %+v; want the stored one", reopened.AggregateGroups)
+	}
+	if len(reopened.Items) != 2 || reopened.Items[1].AggregateGroupID == nil ||
+		*reopened.Items[1].AggregateGroupID != group.ID {
+		t.Errorf("reopened membership = %+v", reopened.Items)
+	}
+
+	// The display quantity is presentation only: it changes the derived unit
+	// price and nothing else, and the toggle round-trips.
+	body = itemGroupIndexes(draftUpdateBody(reopened), 1, 1)
+	body["aggregateGroups"] = []map[string]any{
+		aggregateGroupPayload("Combined items", 30000, "Lot", true),
+	}
+	code, response = doJSON(t, server, http.MethodPut, path, token, body)
+	if code != http.StatusOK {
+		t.Fatalf("toggle save = %d (%v)", code, response)
+	}
+	toggled := decodePurchaseOrder(t, response)
+	if len(toggled.AggregateGroups) != 1 || !toggled.AggregateGroups[0].ShowChildrenToCustomer ||
+		toggled.AggregateGroups[0].TotalMinor != 261000 ||
+		toggled.AggregateGroups[0].DisplayUnitPriceMinor == nil ||
+		*toggled.AggregateGroups[0].DisplayUnitPriceMinor != 87000 {
+		t.Errorf("toggled group = %+v; want the same total at 87000 per three Lots",
+			toggled.AggregateGroups)
+	}
+	if toggled.GrandTotalMinor != draft.GrandTotalMinor {
+		t.Errorf("display quantity moved the grand total: %d; want %d",
+			toggled.GrandTotalMinor, draft.GrandTotalMinor)
+	}
+
+	// The deliberate ungroup is an empty array, and it keeps every line.
+	body = itemGroupIndexes(draftUpdateBody(toggled), 0, 0)
+	body["aggregateGroups"] = []map[string]any{}
+	code, response = doJSON(t, server, http.MethodPut, path, token, body)
+	if code != http.StatusOK {
+		t.Fatalf("ungroup save = %d (%v)", code, response)
+	}
+	ungrouped := decodePurchaseOrder(t, response)
+	if len(ungrouped.AggregateGroups) != 0 || len(ungrouped.Items) != 2 {
+		t.Errorf("after ungroup = %d groups / %d lines; want 0 / 2",
+			len(ungrouped.AggregateGroups), len(ungrouped.Items))
+	}
+	for _, item := range ungrouped.Items {
+		if item.AggregateGroupID != nil {
+			t.Errorf("line %d kept membership %v after ungroup",
+				item.LineNumber, *item.AggregateGroupID)
+		}
+	}
+	if ungrouped.GrandTotalMinor != draft.GrandTotalMinor {
+		t.Errorf("ungroup moved the grand total: %d; want %d",
+			ungrouped.GrandTotalMinor, draft.GrandTotalMinor)
+	}
+}
+
+func TestPurchaseOrderAggregateRefusalsAreNamed(t *testing.T) {
+	server, token := testQuotationServer(t, "vera_api_po_aggregate_refusals")
+	quotationID, _ := exportForSelector(t, server, token, quotationInput())
+	group := aggregateGroupPayload("Combined items", 10000, "Lot", false)
+	second := aggregateGroupPayload("Second package", 10000, "Set", false)
+
+	cases := []struct {
+		name string
+		// build returns the request body for one refusal.
+		build func(purchaseOrderRow) map[string]any
+	}{
+		{
+			name: "blank title",
+			build: func(row purchaseOrderRow) map[string]any {
+				body := itemGroupIndexes(draftUpdateBody(row), 1, 1)
+				body["aggregateGroups"] = []map[string]any{
+					aggregateGroupPayload("   ", 10000, "Lot", false),
+				}
+				return body
+			},
+		},
+		{
+			name: "group with no children",
+			build: func(row purchaseOrderRow) map[string]any {
+				body := itemGroupIndexes(draftUpdateBody(row), 0, 0)
+				body["aggregateGroups"] = []map[string]any{group}
+				return body
+			},
+		},
+		{
+			name: "index out of range",
+			build: func(row purchaseOrderRow) map[string]any {
+				body := itemGroupIndexes(draftUpdateBody(row), 2, 0)
+				body["aggregateGroups"] = []map[string]any{group}
+				return body
+			},
+		},
+		{
+			name: "non-contiguous children",
+			build: func(row purchaseOrderRow) map[string]any {
+				body := appendGroupedSplitLine(draftUpdateBody(row)) // five lines
+				body = itemGroupIndexes(body, 1, 2, 1, 0, 0)
+				body["aggregateGroups"] = []map[string]any{group, second}
+				return body
+			},
+		},
+		{
+			name: "lines claim an absent group",
+			build: func(row purchaseOrderRow) map[string]any {
+				// No aggregateGroups key at all is the legacy client shape.
+				return itemGroupIndexes(draftUpdateBody(row), 1, 0)
+			},
+		},
+		{
+			name: "split display group",
+			build: func(row purchaseOrderRow) map[string]any {
+				body := appendGroupedSplitLine(draftUpdateBody(row))
+				// The package's two rows disagree: one inside, one outside.
+				body = itemGroupIndexes(body, 0, 0, 1, 0, 0)
+				body["aggregateGroups"] = []map[string]any{group}
+				return body
+			},
+		},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			draft := decodePurchaseOrder(t, mustCreatePODraft(t, server, token, quotationID))
+			body := testCase.build(draft)
+			code, response := doJSON(t, server, http.MethodPut,
+				"/v1/purchase-orders/"+strconv.FormatInt(draft.ID, 10), token, body)
+			if code != http.StatusUnprocessableEntity ||
+				response["code"] != "po_aggregate_invalid" {
+				t.Fatalf("save = %d %v; want 422 po_aggregate_invalid", code, response)
+			}
+			if message, _ := response["error"].(string); !strings.Contains(message, "aggregate") {
+				t.Errorf("refusal message = %q; want the store's named aggregate reason", message)
+			}
+		})
+	}
+}
+
+func TestPurchaseOrderLegacyClientCannotUngroupOverTheAPI(t *testing.T) {
+	server, token := testQuotationServer(t, "vera_api_po_legacy_aggregate")
+	quotationID, _ := exportForSelector(t, server, token, quotationInput())
+	draft := decodePurchaseOrder(t, mustCreatePODraft(t, server, token, quotationID))
+	path := "/v1/purchase-orders/" + strconv.FormatInt(draft.ID, 10)
+
+	// On an ungrouped record a payload with no aggregateGroups is exactly the
+	// pre-#654 client and must keep working.
+	code, response := doJSON(t, server, http.MethodPut, path, token, draftUpdateBody(draft))
+	if code != http.StatusOK {
+		t.Fatalf("legacy save on an ungrouped record = %d (%v)", code, response)
+	}
+	unGrouped := decodePurchaseOrder(t, response)
+
+	groupBody := itemGroupIndexes(draftUpdateBody(unGrouped), 1, 1)
+	groupBody["aggregateGroups"] = []map[string]any{
+		aggregateGroupPayload("Combined items", 10000, "Lot", false),
+	}
+	code, response = doJSON(t, server, http.MethodPut, path, token, groupBody)
+	if code != http.StatusOK {
+		t.Fatalf("group save = %d (%v)", code, response)
+	}
+	grouped := decodePurchaseOrder(t, response)
+	if len(grouped.AggregateGroups) != 1 {
+		t.Fatalf("groups = %d; want 1", len(grouped.AggregateGroups))
+	}
+	groupID := grouped.AggregateGroups[0].ID
+
+	// A client that predates #654 sends no aggregateGroups at all. Saving would
+	// silently drop the customer-facing layout, so the server refuses by name.
+	legacyBody := itemGroupIndexes(draftUpdateBody(grouped), 0, 0)
+	code, response = doJSON(t, server, http.MethodPut, path, token, legacyBody)
+	if code != http.StatusConflict || response["code"] != "po_client_outdated" {
+		t.Fatalf("legacy save on a grouped record = %d %v; want 409 po_client_outdated",
+			code, response)
+	}
+	if message, _ := response["error"].(string); !strings.Contains(message, "Update Vera") {
+		t.Errorf("refusal message = %q; want the update-Vera copy", message)
+	}
+
+	// The refused save changed nothing: the stored header, membership and
+	// version are the grouped ones the client could not represent.
+	code, response = doJSON(t, server, http.MethodGet, path, token, nil)
+	if code != http.StatusOK {
+		t.Fatalf("reopen after refusal = %d (%v)", code, response)
+	}
+	after := decodePurchaseOrder(t, response)
+	if len(after.AggregateGroups) != 1 || after.AggregateGroups[0].ID != groupID ||
+		after.AggregateGroups[0].Title != "Combined items" {
+		t.Errorf("refused save changed the stored groups: %+v", after.AggregateGroups)
+	}
+	if after.Version != grouped.Version {
+		t.Errorf("refused save moved the version: %d; want %d", after.Version, grouped.Version)
+	}
+	for _, item := range after.Items {
+		if item.AggregateGroupID == nil || *item.AggregateGroupID != groupID {
+			t.Errorf("line %d lost its membership after the refused save", item.LineNumber)
+		}
+	}
+}
+
+// aggregateHistoryRow is the correction-history wire shape this test decodes.
+// The shared history struct in po_corrections_test.go predates #654; decoding
+// here keeps this ticket's assertions beside the ticket's contract.
+type aggregateHistoryRow struct {
+	ID     int64  `json:"id"`
+	Kind   string `json:"kind"`
+	Reason string `json:"reason"`
+	Groups []struct {
+		DisplayOrder           int    `json:"displayOrder"`
+		Title                  string `json:"title"`
+		OrderedQuantityScaled  int64  `json:"orderedQuantityScaled"`
+		OrderedUoM             string `json:"orderedUom"`
+		ShowChildrenToCustomer bool   `json:"showChildrenToCustomer"`
+	} `json:"groups"`
+	Items []struct {
+		LineNumber          int `json:"lineNumber"`
+		AggregateGroupOrder int `json:"aggregateGroupOrder"`
+	} `json:"items"`
+}
+
+func TestPurchaseOrderCorrectionHistoryCarriesAggregateGroups(t *testing.T) {
+	server, token := testQuotationServer(t, "vera_api_po_aggregate_history")
+	quotationID, _ := exportForSelector(t, server, token, quotationInput())
+	draft := decodePurchaseOrder(t, mustCreatePODraft(t, server, token, quotationID))
+	path := "/v1/purchase-orders/" + strconv.FormatInt(draft.ID, 10)
+
+	groupBody := itemGroupIndexes(draftUpdateBody(draft), 1, 1)
+	groupBody["aggregateGroups"] = []map[string]any{
+		aggregateGroupPayload("Original package", 10000, "Lot", false),
+	}
+	code, response := doJSON(t, server, http.MethodPut, path, token, groupBody)
+	if code != http.StatusOK {
+		t.Fatalf("group save = %d (%v)", code, response)
+	}
+	grouped := decodePurchaseOrder(t, response)
+
+	finalBody := itemGroupIndexes(finalizeBody(grouped, "PO-654-AGG"), 1, 1)
+	finalBody["aggregateGroups"] = []map[string]any{
+		aggregateGroupPayload("Original package", 10000, "Lot", false),
+	}
+	code, response = doJSON(t, server, http.MethodPost, path+"/finalize", token, finalBody)
+	if code != http.StatusOK {
+		t.Fatalf("finalize with groups = %d (%v)", code, response)
+	}
+	saved := decodePurchaseOrder(t, response)
+	if len(saved.AggregateGroups) != 1 || saved.AggregateGroups[0].Title != "Original package" {
+		t.Fatalf("saved groups = %+v; want the finalized layout", saved.AggregateGroups)
+	}
+
+	// A correction regroups the record under a new title and shows children.
+	correctBody := itemGroupIndexes(correctionBody(saved, "Regroup for the customer"), 1, 1)
+	correctBody["aggregateGroups"] = []map[string]any{
+		aggregateGroupPayload("Renamed package", 20000, "Set", true),
+	}
+	code, response = doJSON(t, server, http.MethodPost, path+"/correction", token, correctBody)
+	if code != http.StatusOK {
+		t.Fatalf("correction with groups = %d (%v)", code, response)
+	}
+	corrected := decodePurchaseOrder(t, response)
+	if len(corrected.AggregateGroups) != 1 ||
+		corrected.AggregateGroups[0].Title != "Renamed package" ||
+		!corrected.AggregateGroups[0].ShowChildrenToCustomer ||
+		corrected.AggregateGroups[0].OrderedUoM != "Set" {
+		t.Errorf("corrected groups = %+v; want the submitted rename and toggle",
+			corrected.AggregateGroups)
+	}
+
+	// The snapshot keeps the pre-correction layout, keyed by display order, and
+	// the corrected live record does not rewrite it.
+	code, response = doJSON(t, server, http.MethodGet, path+"/history", token, nil)
+	if code != http.StatusOK {
+		t.Fatalf("history = %d (%v)", code, response)
+	}
+	var history struct {
+		History []aggregateHistoryRow `json:"history"`
+	}
+	encodeDecode(t, response, &history)
+	if len(history.History) != 1 {
+		t.Fatalf("history = %d entries; want 1", len(history.History))
+	}
+	entry := history.History[0]
+	if len(entry.Groups) != 1 {
+		t.Fatalf("snapshot groups = %+v; want the replaced layout", entry.Groups)
+	}
+	if entry.Groups[0].DisplayOrder != 1 || entry.Groups[0].Title != "Original package" ||
+		entry.Groups[0].OrderedQuantityScaled != 10000 ||
+		entry.Groups[0].OrderedUoM != "Lot" ||
+		entry.Groups[0].ShowChildrenToCustomer {
+		t.Errorf("snapshot group = %+v; want the values before the correction", entry.Groups[0])
+	}
+	if len(entry.Items) != 2 {
+		t.Fatalf("snapshot items = %d; want 2", len(entry.Items))
+	}
+	for _, item := range entry.Items {
+		if item.AggregateGroupOrder != 1 {
+			t.Errorf("snapshot line %d group order = %d; want 1",
+				item.LineNumber, item.AggregateGroupOrder)
+		}
+	}
 }
