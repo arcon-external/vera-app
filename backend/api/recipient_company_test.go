@@ -162,7 +162,7 @@ func TestLegacyRevisionWithoutRecipientCompanySnapshotStillVerifies(t *testing.T
 	}
 	defer pool.Close()
 	if _, err := pool.Exec(ctx, `
-		UPDATE `+schema+`.quotation_revisions
+		UPDATE `+testSchemaIdent()+`.quotation_revisions
 		SET recipient_company = ''
 		WHERE quotation_id = $1`, quotationID); err != nil {
 		t.Fatalf("clear the snapshot to the pre-migration shape: %v", err)

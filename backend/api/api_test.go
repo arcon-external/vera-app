@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"strconv"
 	"strings"
 	"testing"
@@ -14,23 +13,14 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"vera-app/backend/auth"
-	"vera-app/backend/store"
 )
 
-func testServer(t *testing.T, schema string) (*Server, context.Context) {
+func testServer(t *testing.T, identity string) (*Server, context.Context) {
 	t.Helper()
-	dsn := strings.TrimSpace(os.Getenv("VERA_POSTGRES_TEST_DSN"))
-	if dsn == "" {
-		t.Skip("set VERA_POSTGRES_TEST_DSN to run API integration tests")
-	}
 	ctx := context.Background()
-	// See adminTestSetup: bootstrapping needs a schema with no users yet.
-	resetTestSchema(t, schema)
-	database, err := store.Open(ctx, store.Config{DSN: dsn, Schema: schema})
-	if err != nil {
-		t.Fatalf("open test database: %v", err)
-	}
-	t.Cleanup(database.Close)
+	// See adminTestSetup: bootstrapping needs a clone with no users yet, which
+	// is what every clone is.
+	database := openTestDatabaseStore(t, identity)
 	service := auth.NewService(database)
 	if _, err := service.Bootstrap(ctx, "api-admin@example.com", "API Admin", "test-password"); err != nil {
 		t.Fatalf("bootstrap: %v", err)
@@ -158,15 +148,14 @@ func sessionExpiryAfterLogin(t *testing.T, server *Server, schema, body string) 
 	if err := json.Unmarshal(recorder.Body.Bytes(), &result); err != nil {
 		t.Fatalf("decode login: %v", err)
 	}
-	pool, err := pgxpool.New(context.Background(),
-		strings.TrimSpace(os.Getenv("VERA_POSTGRES_TEST_DSN")))
+	pool, err := pgxpool.New(context.Background(), testDatabase(t, schema).DSN)
 	if err != nil {
 		t.Fatalf("connect to read session expiry: %v", err)
 	}
 	defer pool.Close()
 	var expiresAt time.Time
 	if err := pool.QueryRow(context.Background(),
-		`SELECT expires_at FROM "`+strings.ReplaceAll(schema, `"`, `""`)+`".sessions WHERE token_hash = $1`,
+		`SELECT expires_at FROM `+testSchemaIdent()+`.sessions WHERE token_hash = $1`,
 		auth.HashSessionToken(result.Token)).Scan(&expiresAt); err != nil {
 		t.Fatalf("read session expiry: %v", err)
 	}

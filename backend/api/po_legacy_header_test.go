@@ -4,9 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
-	"os"
 	"strconv"
-	"strings"
 	"testing"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -25,11 +23,7 @@ func setQuotationRevisionHeaderDiscountForTest(
 	t *testing.T, schema string, quotationID int64, revision, percent int16,
 ) {
 	t.Helper()
-	dsn := strings.TrimSpace(os.Getenv("VERA_POSTGRES_TEST_DSN"))
-	if dsn == "" {
-		t.Skip("set VERA_POSTGRES_TEST_DSN to run API integration tests")
-	}
-	pool, err := pgxpool.New(context.Background(), dsn)
+	pool, err := pgxpool.New(context.Background(), testDatabase(t, schema).DSN)
 	if err != nil {
 		t.Fatalf("connect for legacy header discount: %v", err)
 	}
@@ -38,7 +32,7 @@ func setQuotationRevisionHeaderDiscountForTest(
 		UPDATE %s.quotation_revisions
 		SET discount_percent = $3
 		WHERE quotation_id = $1 AND revision_number = $2`,
-		quoteIdentForTest(schema)), quotationID, revision, percent); err != nil {
+		testSchemaIdent()), quotationID, revision, percent); err != nil {
 		t.Fatalf("set revision %d/%d whole-order discount: %v", quotationID, revision, err)
 	}
 }

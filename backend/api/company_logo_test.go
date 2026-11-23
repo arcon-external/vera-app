@@ -4,12 +4,9 @@ import (
 	"context"
 	"encoding/base64"
 	"net/http"
-	"os"
 	"strconv"
 	"strings"
 	"testing"
-
-	"vera-app/backend/store"
 )
 
 func TestCompanyLogoAdminRoundTrip(t *testing.T) {
@@ -90,16 +87,8 @@ func TestCompanyLogoAdminRoundTrip(t *testing.T) {
 }
 
 func TestExportRendersUploadedLogo(t *testing.T) {
-	resetTestSchema(t, "vera_api_company_logo_render")
 	server, token := testQuotationServer(t, "vera_api_company_logo_render")
-	database, err := store.Open(context.Background(), store.Config{
-		DSN:    strings.TrimSpace(os.Getenv("VERA_POSTGRES_TEST_DSN")),
-		Schema: "vera_api_company_logo_render",
-	})
-	if err != nil {
-		t.Fatalf("open test database: %v", err)
-	}
-	defer database.Close()
+	database := openTestStore(t, "vera_api_company_logo_render")
 	seedQuotationClient(t, database, 2, "Test Customer")
 
 	artwork := base64.StdEncoding.EncodeToString([]byte("custom-logo-bytes"))

@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
-	"os"
 	"strconv"
 	"strings"
 	"testing"
@@ -50,13 +49,9 @@ func decodeReport(t *testing.T, body map[string]any) apicontract.PurchaseOrderRe
 // apiReportPool opens the disposable database directly for the two fixtures
 // that cannot be produced from the public API: a restored retired adjustment and
 // an aggregate above the exact range.
-func apiReportPool(t *testing.T, schema string) *pgxpool.Pool {
+func apiReportPool(t *testing.T, identity string) *pgxpool.Pool {
 	t.Helper()
-	dsn := strings.TrimSpace(os.Getenv("VERA_POSTGRES_TEST_DSN"))
-	if dsn == "" {
-		t.Skip("set VERA_POSTGRES_TEST_DSN to run API integration tests")
-	}
-	pool, err := pgxpool.New(context.Background(), dsn)
+	pool, err := pgxpool.New(context.Background(), testDatabase(t, identity).DSN)
 	if err != nil {
 		t.Fatalf("connect for report fixture: %v", err)
 	}
@@ -357,7 +352,7 @@ func TestPurchaseOrderReportDisclosesARestoredLegacyAdjustment(t *testing.T) {
 		SET adjustment_minor = 50,
 		    adjustment_reason = 'restored legacy adjustment',
 		    grand_total_minor = grand_total_minor + 50
-		WHERE id = $1`, "vera_api_po_report_legacy"),
+		WHERE id = $1`, testSchemaIdent()),
 		saved.ID); err != nil {
 		t.Fatalf("restore legacy adjustment: %v", err)
 	}
@@ -402,7 +397,7 @@ func TestPurchaseOrderReportKeepsAnEmptyRangeWhenHistoryAmountOverflows(t *testi
 		if _, err := pool.Exec(context.Background(), fmt.Sprintf(`
 			UPDATE %s.purchase_orders
 			SET subtotal_minor = $2, grand_total_minor = $2
-			WHERE id = $1`, schema), id, poreport.MaxExactMinor); err != nil {
+			WHERE id = $1`, testSchemaIdent()), id, poreport.MaxExactMinor); err != nil {
 			t.Fatalf("raise historical amount on %d: %v", id, err)
 		}
 	}
@@ -449,7 +444,7 @@ func TestPurchaseOrderReportKeepsActualsWhenHistoryAmountOverflows(t *testing.T)
 		if _, err := pool.Exec(context.Background(), fmt.Sprintf(`
 			UPDATE %s.purchase_orders
 			SET subtotal_minor = $2, grand_total_minor = $2
-			WHERE id = $1`, schema), id, poreport.MaxExactMinor); err != nil {
+			WHERE id = $1`, testSchemaIdent()), id, poreport.MaxExactMinor); err != nil {
 			t.Fatalf("raise historical amount on %d: %v", id, err)
 		}
 	}
@@ -489,7 +484,7 @@ func TestPurchaseOrderReportDoesNotComputeUnusedHistoryRatios(t *testing.T) {
 	if _, err := pool.Exec(context.Background(), fmt.Sprintf(`
 		UPDATE %s.purchase_orders
 		SET subtotal_minor = 1, discount_minor = 0, grand_total_minor = 1
-		WHERE id = $1`, schema), ratio.ID); err != nil {
+		WHERE id = $1`, testSchemaIdent()), ratio.ID); err != nil {
 		t.Fatalf("lower historical amount: %v", err)
 	}
 	// The seeded quotation has two lines. Make one line carry the exact bound
@@ -498,14 +493,14 @@ func TestPurchaseOrderReportDoesNotComputeUnusedHistoryRatios(t *testing.T) {
 	if _, err := pool.Exec(context.Background(), fmt.Sprintf(`
 		UPDATE %s.purchase_order_items
 		SET gross_minor = 0, discount_minor = 0, net_minor = 0
-		WHERE purchase_order_id = $1`, schema), ratio.ID); err != nil {
+		WHERE purchase_order_id = $1`, testSchemaIdent()), ratio.ID); err != nil {
 		t.Fatalf("clear historical line nets: %v", err)
 	}
 	if _, err := pool.Exec(context.Background(), fmt.Sprintf(`
 		UPDATE %s.purchase_order_items
 		SET gross_minor = $2, discount_minor = 0, net_minor = $2
 		WHERE purchase_order_id = $1 AND line_number = 1`,
-		schema), ratio.ID, poreport.MaxExactMinor); err != nil {
+		testSchemaIdent()), ratio.ID, poreport.MaxExactMinor); err != nil {
 		t.Fatalf("raise historical costed amount: %v", err)
 	}
 
@@ -541,7 +536,7 @@ func TestPurchaseOrderReportFailsClosedOnAggregateOverflow(t *testing.T) {
 		if _, err := pool.Exec(context.Background(), fmt.Sprintf(`
 			UPDATE %s.purchase_orders
 			SET subtotal_minor = $2, grand_total_minor = $2
-			WHERE id = $1`, schema),
+			WHERE id = $1`, testSchemaIdent()),
 			id, poreport.MaxExactMinor); err != nil {
 			t.Fatalf("raise subtotal on %d: %v", id, err)
 		}
