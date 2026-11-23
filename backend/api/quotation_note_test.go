@@ -107,7 +107,7 @@ func TestExportStoresSignsAndReturnsTheQuotationNote(t *testing.T) {
 	}
 	defer pool.Close()
 	if _, err := pool.Exec(ctx, `
-		UPDATE `+schema+`.quotation_revisions
+		UPDATE `+testSchemaIdent()+`.quotation_revisions
 		SET note = 'Installation is free.'
 		WHERE short_id = $1`, shortID); err != nil {
 		t.Fatalf("tamper the stored note: %v", err)

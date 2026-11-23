@@ -6,7 +6,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
-	"os"
 	"strconv"
 	"strings"
 	"testing"
@@ -27,59 +26,18 @@ var testSigningSeed = func() []byte {
 	return seed
 }()
 
-// resetTestSchema drops a test schema so reruns on a warm database behave
-// exactly like a fresh one. Without it the second run of a test hits
-// "bootstrap is disabled: users already exist".
-func resetTestSchema(t *testing.T, schema string) {
-	t.Helper()
-	dsn := strings.TrimSpace(os.Getenv("VERA_POSTGRES_TEST_DSN"))
-	if dsn == "" {
-		t.Skip("set VERA_POSTGRES_TEST_DSN to run API integration tests")
-	}
-	pool, err := pgxpool.New(context.Background(), dsn)
-	if err != nil {
-		t.Fatalf("connect for schema reset: %v", err)
-	}
-	defer pool.Close()
-	if _, err := pool.Exec(context.Background(),
-		"DROP SCHEMA IF EXISTS "+quoteIdentForTest(schema)+" CASCADE"); err != nil {
-		t.Fatalf("reset schema %s: %v", schema, err)
-	}
-}
-
-// quoteIdentForTest quotes a schema name for the reset statement. Test
-// schema names are literals from source, never user input.
+// quoteIdentForTest quotes an identifier for test SQL. Test names are literals
+// from source, never user input.
 func quoteIdentForTest(name string) string {
 	return `"` + strings.ReplaceAll(name, `"`, `""`) + `"`
-}
-
-// openTestStore opens the schema's store for direct assertions and seeding.
-func openTestStore(t *testing.T, schema string) *store.Store {
-	t.Helper()
-	database, err := store.Open(context.Background(), store.Config{
-		DSN:    strings.TrimSpace(os.Getenv("VERA_POSTGRES_TEST_DSN")),
-		Schema: schema,
-	})
-	if err != nil {
-		t.Fatalf("open test store %s: %v", schema, err)
-	}
-	t.Cleanup(database.Close)
-	return database
 }
 
 // attachedTestSigner installs a deterministic signer on a test server and
 // registers its public key, exactly as boot does — otherwise verification
 // cannot resolve the key and honestly reports "unavailable".
-func attachedTestSigner(t *testing.T, server *Server, schema string) *backend.Signer {
+func attachedTestSigner(t *testing.T, server *Server, identity string) *backend.Signer {
 	t.Helper()
-	database, err := store.Open(context.Background(), store.Config{
-		DSN:    strings.TrimSpace(os.Getenv("VERA_POSTGRES_TEST_DSN")),
-		Schema: schema,
-	})
-	if err != nil {
-		t.Fatalf("open test database for signing: %v", err)
-	}
-	t.Cleanup(database.Close)
+	database := openTestStore(t, identity)
 	signer := backend.NewSigner(ed25519.NewKeyFromSeed(testSigningSeed))
 	if err := database.RegisterSigningKey(context.Background(), signer.KeyID(), signer.PublicKeyHex()); err != nil {
 		t.Fatalf("register test signing key: %v", err)
@@ -215,10 +173,10 @@ func TestVerifyPageDetectsStoredTampering(t *testing.T) {
 	}
 	defer pool.Close()
 	if _, err := pool.Exec(context.Background(), `
-		UPDATE vera_api_verify_tamper.quotation_revision_totals
+		UPDATE `+testSchemaIdent()+`.quotation_revision_totals
 		SET customer_grand_total = 1
 		WHERE revision_id = (
-			SELECT id FROM vera_api_verify_tamper.quotation_revisions
+			SELECT id FROM `+testSchemaIdent()+`.quotation_revisions
 			WHERE quotation_id = $1)`, quotationID); err != nil {
 		t.Fatalf("tamper: %v", err)
 	}

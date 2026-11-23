@@ -275,16 +275,34 @@ in-process against a real `veraserver` and a throwaway schema: login → clients
 validate → export (a real PDF and a signed revision) → verify → archive → drafts
 → logout. It skips without `VERA_POSTGRES_TEST_DSN`, and it drops the schema it
 uses — point it only at a throwaway database. `backend/store` and `backend/api`
-skip the same way (`resetTestSchema` carries the empty-DSN guard the other
-helpers have), so a bare `go test -race ./...` passes with no database — and
+skip the same way (the store's `testDSN` and the API's `testDatabase` carry the
+empty-DSN guard), so a bare `go test -race ./...` passes with no database — and
 the DSN is what makes the integration paths actually run.
 
-The store suite does not replay the migrations per test. `openTestSchema` is a
-thin wrapper over a test-only provisioning helper (`backend/store/testsupport_test.go`)
-that, once per test process, creates and migrates a template database, then gives
-each test a `CREATE DATABASE … TEMPLATE` clone opened with `Schema: "public"` and
-drops it in `t.Cleanup`. The role in `VERA_POSTGRES_TEST_DSN` therefore needs
-`CREATEDB` (the helper names the missing privilege rather than falling back).
+The store and API suites do not replay the migrations per test. Both provision
+their databases through one test-only package, `backend/testdb`, which once per
+test process creates and migrates a template database, then gives each test a
+`CREATE DATABASE … TEMPLATE` clone and drops it in `t.Cleanup`. The template is
+named after the test binary, so `store.test` and `api.test` never share (or drop)
+each other's template when `go test ./...` runs them in parallel against one
+database. The template is migrated with the app schema `vera_test` and every
+clone keeps it: Postgres does not dump the built-in `public` schema, so the
+restore drill could neither restore a dump of its own clone after `ResetSchema`
+drops the schema, nor prove the dump names the app schema. The schema name is
+baked into the trigger functions the migration chain creates, so it is fixed
+rather than renamed per clone. The role in `VERA_POSTGRES_TEST_DSN` therefore
+needs `CREATEDB` (the helper names the missing privilege rather than falling
+back).
+
+`openTestSchema` (store) and `testServer` / `adminTestSetup` / `draftTestServer`
+/ `openTestStore` (API) keep their names and signatures and wrap the shared
+helper plus `store.Open`. Repeated helper calls in one top-level test with one
+identity reach the same clone — subtests included — which is how a server and a
+direct store share data. The API restore drill dumps its own clone, so the
+safety snapshot and the upload are scoped to that test's database, and it
+asserts the dump's table of contents names only the app schema. The production
+restore handler still restores the whole database.
+
 Tests that assert migration behaviour are the exception: they keep a genuinely
 fresh scratch schema on the base database (`resetTestSchema` + `loadMigrations`),
 because a clone is already migrated and cannot replay the chain.

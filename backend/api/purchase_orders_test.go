@@ -110,11 +110,7 @@ func businessCategoryOrDefault(category string) string {
 // reaches the column directly, exactly as a finalized record will look then.
 func setPurchaseOrderStateForTest(t *testing.T, schema string, id int64, state string) {
 	t.Helper()
-	dsn := strings.TrimSpace(os.Getenv("VERA_POSTGRES_TEST_DSN"))
-	if dsn == "" {
-		t.Skip("set VERA_POSTGRES_TEST_DSN to run API integration tests")
-	}
-	pool, err := pgxpool.New(context.Background(), dsn)
+	pool, err := pgxpool.New(context.Background(), testDatabase(t, schema).DSN)
 	if err != nil {
 		t.Fatalf("connect for state change: %v", err)
 	}
@@ -135,7 +131,7 @@ func setPurchaseOrderStateForTest(t *testing.T, schema string, id int64, state s
 			saved_by = CASE WHEN $2 = 'saved'
 				THEN (SELECT id FROM %s.users ORDER BY id LIMIT 1)
 				ELSE NULL END
-		WHERE id = $1`, quoteIdentForTest(schema), quoteIdentForTest(schema)),
+		WHERE id = $1`, testSchemaIdent(), testSchemaIdent()),
 		id, state); err != nil {
 		t.Fatalf("set purchase order %d state %s: %v", id, state, err)
 	}
@@ -158,11 +154,7 @@ func createPODraft(t *testing.T, server *Server, token string, quotationID int64
 // only way an API test can reach the legacy population arm.
 func setPurchaseOrderLegacyBasisForTest(t *testing.T, schema string, id int64, taxCategory string) {
 	t.Helper()
-	dsn := strings.TrimSpace(os.Getenv("VERA_POSTGRES_TEST_DSN"))
-	if dsn == "" {
-		t.Skip("set VERA_POSTGRES_TEST_DSN to run API integration tests")
-	}
-	pool, err := pgxpool.New(context.Background(), dsn)
+	pool, err := pgxpool.New(context.Background(), testDatabase(t, schema).DSN)
 	if err != nil {
 		t.Fatalf("connect for legacy basis: %v", err)
 	}
@@ -170,7 +162,7 @@ func setPurchaseOrderLegacyBasisForTest(t *testing.T, schema string, id int64, t
 	if _, err := pool.Exec(context.Background(), fmt.Sprintf(`
 		UPDATE %s.purchase_orders
 		SET tax_type = '', service_category = '', tax_category = $2
-		WHERE id = $1`, quoteIdentForTest(schema)), id, taxCategory); err != nil {
+		WHERE id = $1`, testSchemaIdent()), id, taxCategory); err != nil {
 		t.Fatalf("set legacy basis on purchase order %d: %v", id, err)
 	}
 }
@@ -817,11 +809,7 @@ func TestPurchaseOrderCalculationRefusesInvalidInputOverTheAPI(t *testing.T) {
 // deliberately incomplete/out-of-range source is arranged directly.
 func purchaseOrderTestExec(t *testing.T, schema, statement string, args ...any) {
 	t.Helper()
-	dsn := strings.TrimSpace(os.Getenv("VERA_POSTGRES_TEST_DSN"))
-	if dsn == "" {
-		t.Skip("set VERA_POSTGRES_TEST_DSN to run API integration tests")
-	}
-	pool, err := pgxpool.New(context.Background(), dsn)
+	pool, err := pgxpool.New(context.Background(), testDatabase(t, schema).DSN)
 	if err != nil {
 		t.Fatalf("connect for fixture change: %v", err)
 	}
@@ -844,7 +832,7 @@ func TestPurchaseOrderCreationRefusesAnIncompleteSource(t *testing.T) {
 		WHERE revision_id = (
 			SELECT id FROM %s.quotation_revisions
 			WHERE quotation_id = $1 AND revision_number = 0
-		)`, quoteIdentForTest(schema), quoteIdentForTest(schema)), quotationID)
+		)`, testSchemaIdent(), testSchemaIdent()), quotationID)
 
 	code, body := createPODraft(t, server, token, quotationID, 0, nil)
 	if code != http.StatusUnprocessableEntity {
@@ -858,15 +846,14 @@ func TestPurchaseOrderCreationRefusesAnIncompleteSource(t *testing.T) {
 	}
 
 	var count int
-	dsn := strings.TrimSpace(os.Getenv("VERA_POSTGRES_TEST_DSN"))
-	pool, err := pgxpool.New(context.Background(), dsn)
+	pool, err := pgxpool.New(context.Background(), testDatabase(t, schema).DSN)
 	if err != nil {
 		t.Fatalf("connect to count drafts: %v", err)
 	}
 	defer pool.Close()
 	if err := pool.QueryRow(context.Background(), fmt.Sprintf(
 		`SELECT COUNT(*) FROM %s.purchase_orders WHERE quotation_id = $1`,
-		quoteIdentForTest(schema)), quotationID).Scan(&count); err != nil {
+		testSchemaIdent()), quotationID).Scan(&count); err != nil {
 		t.Fatalf("count purchase orders: %v", err)
 	}
 	if count != 0 {
@@ -888,7 +875,7 @@ func TestPurchaseOrderCreationRefusesAnOutOfRangeSource(t *testing.T) {
 		WHERE revision_id = (
 			SELECT id FROM %s.quotation_revisions
 			WHERE quotation_id = $2 AND revision_number = 0
-		)`, quoteIdentForTest(schema), quoteIdentForTest(schema)),
+		)`, testSchemaIdent(), testSchemaIdent()),
 		9007199254740992, quotationID)
 
 	code, body := createPODraft(t, server, token, quotationID, 0, nil)
@@ -1425,7 +1412,7 @@ func TestPurchaseOrderConfirmationNumbersOverTheAPI(t *testing.T) {
 		INSERT INTO %s.sequence_counters (name, next_value)
 		VALUES ($1, 8000)
 		ON CONFLICT (name) DO UPDATE SET next_value = 8000`,
-		quoteIdentForTest("vera_api_po_confirmation")),
+		testSchemaIdent()),
 		"po-confirmation:default:02:"+fmt.Sprintf("%02d",
 			time.Now().In(time.FixedZone("WIB", 7*60*60)).Year()%100))
 	fifthInput := quotationInput()
@@ -1443,7 +1430,7 @@ func TestPurchaseOrderConfirmationNumbersOverTheAPI(t *testing.T) {
 		INSERT INTO %s.sequence_counters (name, next_value)
 		VALUES ($1, 100000)
 		ON CONFLICT (name) DO UPDATE SET next_value = 100000`,
-		quoteIdentForTest("vera_api_po_confirmation")),
+		testSchemaIdent()),
 		"po-confirmation:default:03:"+fmt.Sprintf("%02d",
 			time.Now().In(time.FixedZone("WIB", 7*60*60)).Year()%100))
 	exhaustedInput := quotationInput()

@@ -12,11 +12,76 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 
+	"github.com/jackc/pgx/v5"
+
 	"vera-app/backend/auth"
+	"vera-app/backend/testdb"
 )
+
+// dumpSchemaLine matches the one table-of-contents line per schema that
+// pg_restore --list prints: "<id>; <catalog> <oid> SCHEMA - <name> <owner>".
+// Parsing the TOC is deliberate: it is the tool's own statement of what the
+// restore would create, so the scope check sees exactly what pg_restore saw.
+var dumpSchemaLine = regexp.MustCompile(`^\d+; \d+ \d+ SCHEMA - (\S+) `)
+
+// dumpSchemas returns every schema a custom-format dump names in its table of
+// contents.
+func dumpSchemas(t *testing.T, dumpPath string) []string {
+	t.Helper()
+	out, err := exec.Command(pgRestoreBin, "--list", dumpPath).CombinedOutput()
+	if err != nil {
+		t.Fatalf("pg_restore --list %s: %v (%s)", filepath.Base(dumpPath), err, firstLine(out))
+	}
+	return parseDumpSchemas(string(out))
+}
+
+// parseDumpSchemas is the pure half of dumpSchemas, exercised on synthetic
+// tables of contents by TestTheDumpScopeGuardSeesAForeignSchema.
+func parseDumpSchemas(toc string) []string {
+	var schemas []string
+	for _, line := range strings.Split(toc, "\n") {
+		if match := dumpSchemaLine.FindStringSubmatch(line); match != nil {
+			schemas = append(schemas, match[1])
+		}
+	}
+	return schemas
+}
+
+// schemasOutside returns the dump's schemas other than allowed. The restore
+// drill uses it to prove its dump is scoped to the test's own database; a
+// whole-database dump names every schema earlier tests left behind.
+func schemasOutside(t *testing.T, dumpPath, allowed string) []string {
+	t.Helper()
+	var outside []string
+	for _, name := range dumpSchemas(t, dumpPath) {
+		if name != allowed {
+			outside = append(outside, name)
+		}
+	}
+	return outside
+}
+
+// requireScopedDump asserts the dump names the app schema and nothing else.
+// A whole-database dump would pass a marker-row assertion and still cost more
+// with every earlier test, which is what #670 measured.
+func requireScopedDump(t *testing.T, dumpPath string) {
+	t.Helper()
+	want := testdb.Schema
+	schemas := dumpSchemas(t, dumpPath)
+	if len(schemas) == 0 {
+		t.Fatalf("dump names no schema at all; the scope check cannot see what it guards")
+	}
+	for _, name := range schemas {
+		if name != want {
+			t.Fatalf("dump names schema %q; want only the app schema %q (a whole-database dump grows with every earlier test)",
+				name, want)
+		}
+	}
+}
 
 func multipartDump(t *testing.T, fieldName, filename string, content []byte) (*bytes.Buffer, string) {
 	t.Helper()
@@ -189,6 +254,7 @@ func TestRestoreHappyPathRollsBackMarkerRow(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read source dump: %v", err)
 	}
+	requireScopedDump(t, dumpPath)
 
 	// Marker row created AFTER the dump: a successful restore must remove it.
 	hash, err := auth.HashPassword("marker-password")
@@ -210,6 +276,13 @@ func TestRestoreHappyPathRollsBackMarkerRow(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(backupDir, snapshot)); err != nil {
 		t.Errorf("safety snapshot %q missing from backup dir: %v", snapshot, err)
+	}
+
+	// The dump's data really came back: the bootstrap admin existed when the
+	// dump was taken. Without this, a restore that merely wiped the schema and
+	// migrated an empty one would still pass the marker check below.
+	if _, err := database.GetUserByEmail(ctx, "api-admin@example.com"); err != nil {
+		t.Fatalf("bootstrap admin missing after restore: %v", err)
 	}
 
 	if _, err := database.GetUserByEmail(ctx, "restore-marker@example.com"); err == nil {
@@ -252,6 +325,7 @@ func TestRestoreRevokesTheSessionsTheDumpBroughtBack(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read source dump: %v", err)
 	}
+	requireScopedDump(t, dumpPath)
 
 	body, contentType := multipartDump(t, "dump", "restore.dump", dumpBytes)
 	code, response := postRestore(t, server, token, body, contentType)
@@ -348,6 +422,7 @@ func TestRestoreBenignWarningStillSucceeds(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read source dump: %v", err)
 	}
+	requireScopedDump(t, dumpPath)
 
 	// Marker row created AFTER the dump: a successful restore must remove it.
 	hash, err := auth.HashPassword("marker-password")
@@ -469,5 +544,62 @@ func TestRestoreSnapshotUploadFailureLeavesDBUntouched(t *testing.T) {
 	}
 	if afterQ != beforeQ || afterR != beforeR {
 		t.Errorf("row counts changed on upload failure: (%d,%d) -> (%d,%d)", beforeQ, beforeR, afterQ, afterR)
+	}
+}
+
+// TestTheDumpScopeGuardSeesAForeignSchema is the red-capable proof for the
+// restore drill's scope check: a dump that carries another schema must make the
+// check name it. A clone that carries only the test's schema passes; the same
+// clone with one extra schema does not.
+func TestTheDumpScopeGuardSeesAForeignSchema(t *testing.T) {
+	requireBinaries(t)
+	const identity = "vera_api_dump_scope_proof"
+	clone := testDatabase(t, identity)
+	ctx := context.Background()
+
+	dumpTo := func(name string) string {
+		t.Helper()
+		path := filepath.Join(t.TempDir(), name)
+		if out, err := exec.Command(pgDumpBin, "-Fc", "-f", path, "-d", clone.DSN).CombinedOutput(); err != nil {
+			t.Fatalf("pg_dump: %v (%s)", err, firstLine(out))
+		}
+		return path
+	}
+
+	// The clone alone names only the test's schema, so the drill's assertion
+	// passes on a scoped dump.
+	requireScopedDump(t, dumpTo("scoped.dump"))
+
+	// One extra schema is exactly what a whole-database dump adds; the check
+	// has to see it and name it.
+	conn, err := pgx.Connect(ctx, clone.DSN)
+	if err != nil {
+		t.Fatalf("connect to add a foreign schema: %v", err)
+	}
+	if _, err := conn.Exec(ctx, "CREATE SCHEMA vera_api_dump_scope_foreign"); err != nil {
+		_ = conn.Close(ctx)
+		t.Fatalf("create the foreign schema: %v", err)
+	}
+	if err := conn.Close(ctx); err != nil {
+		t.Fatalf("close the fixture connection: %v", err)
+	}
+
+	found := false
+	for _, name := range schemasOutside(t, dumpTo("whole.dump"), testdb.Schema) {
+		if name == "vera_api_dump_scope_foreign" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("the scope check did not name %q in a dump that carries it; a whole-database dump would pass the drill",
+			"vera_api_dump_scope_foreign")
+	}
+
+	// The parser is also pinned on a synthetic TOC, so the guard stays
+	// testable on a host without a Postgres client.
+	synthetic := "1; 2615 1 SCHEMA - public vera\n" +
+		"2; 2615 2 SCHEMA - vera_api_dump_scope_foreign vera\n"
+	if got := parseDumpSchemas(synthetic); len(got) != 2 || got[1] != "vera_api_dump_scope_foreign" {
+		t.Errorf("parseDumpSchemas = %v; want both schema entries", got)
 	}
 }

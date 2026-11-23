@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"strconv"
 	"strings"
 	"testing"
@@ -17,20 +16,11 @@ import (
 	"vera-app/backend/store"
 )
 
-func testQuotationServer(t *testing.T, schema string) (*Server, string) {
+func testQuotationServer(t *testing.T, identity string) (*Server, string) {
 	t.Helper()
-	dsn := strings.TrimSpace(os.Getenv("VERA_POSTGRES_TEST_DSN"))
-	if dsn == "" {
-		t.Skip("set VERA_POSTGRES_TEST_DSN to run API integration tests")
-	}
 	ctx := context.Background()
-	// See adminTestSetup: bootstrapping needs a schema with no users yet.
-	resetTestSchema(t, schema)
-	database, err := store.Open(ctx, store.Config{DSN: dsn, Schema: schema})
-	if err != nil {
-		t.Fatalf("open test database: %v", err)
-	}
-	t.Cleanup(database.Close)
+	// See adminTestSetup: bootstrapping needs a clone with no users yet.
+	database := openTestDatabaseStore(t, identity)
 
 	templates := &backend.Quotation{}
 	if err := backend.Startup(templates, ctx); err != nil {
@@ -235,14 +225,7 @@ func TestRevisionReusesQuotationVerificationIdentity(t *testing.T) {
 
 func TestExportHeaderTracksCompanyProfile(t *testing.T) {
 	server, token := testQuotationServer(t, "vera_api_quote_company")
-	database, err := store.Open(context.Background(), store.Config{
-		DSN:    strings.TrimSpace(os.Getenv("VERA_POSTGRES_TEST_DSN")),
-		Schema: "vera_api_quote_company",
-	})
-	if err != nil {
-		t.Fatalf("open test database: %v", err)
-	}
-	defer database.Close()
+	database := openTestStore(t, "vera_api_quote_company")
 
 	if _, err := database.UpdateCompanyProfile(context.Background(), store.CompanyProfile{
 		LegalName: "PT Live Header",
@@ -407,15 +390,10 @@ func TestDeleteRequiresAdmin(t *testing.T) {
 
 // staffLogin creates a staff user directly in the test schema and returns a
 // bearer token for it.
-func staffLogin(t *testing.T, server *Server, schema string) string {
+func staffLogin(t *testing.T, server *Server, identity string) string {
 	t.Helper()
-	dsn := strings.TrimSpace(os.Getenv("VERA_POSTGRES_TEST_DSN"))
 	ctx := context.Background()
-	database, err := store.Open(ctx, store.Config{DSN: dsn, Schema: schema})
-	if err != nil {
-		t.Fatalf("open test database: %v", err)
-	}
-	defer database.Close()
+	database := openTestStore(t, identity)
 
 	hash, err := auth.HashPassword("staff-password")
 	if err != nil {

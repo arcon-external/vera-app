@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"net/http"
-	"os"
 	"strconv"
 	"strings"
 	"testing"
@@ -486,15 +485,14 @@ func TestPurchaseOrderCorrectionOfADeletedRecordIsNotFound(t *testing.T) {
 
 	// #480 owns deletion. This simulates its outcome so the correction path is
 	// proven not to recreate a removed record.
-	dsn := strings.TrimSpace(os.Getenv("VERA_POSTGRES_TEST_DSN"))
-	pool, err := pgxpool.New(context.Background(), dsn)
+	pool, err := pgxpool.New(context.Background(), testDatabase(t, "vera_api_po_473_deleted").DSN)
 	if err != nil {
 		t.Fatalf("connect: %v", err)
 	}
 	defer pool.Close()
 	if _, err := pool.Exec(context.Background(), fmt.Sprintf(
 		"DELETE FROM %s.purchase_orders WHERE id = $1",
-		quoteIdentForTest("vera_api_po_473_deleted")), saved.ID); err != nil {
+		testSchemaIdent()), saved.ID); err != nil {
 		t.Fatalf("delete purchase order: %v", err)
 	}
 
@@ -510,7 +508,7 @@ func TestPurchaseOrderCorrectionOfADeletedRecordIsNotFound(t *testing.T) {
 	var count int
 	if err := pool.QueryRow(context.Background(), fmt.Sprintf(
 		"SELECT COUNT(*) FROM %s.purchase_orders",
-		quoteIdentForTest("vera_api_po_473_deleted"))).Scan(&count); err != nil {
+		testSchemaIdent())).Scan(&count); err != nil {
 		t.Fatalf("count purchase orders: %v", err)
 	}
 	if count != 0 {

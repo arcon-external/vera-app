@@ -130,7 +130,7 @@ func TestClientsAdminCRUD(t *testing.T) {
 	}
 	defer pool.Close()
 	if _, err := pool.Exec(context.Background(),
-		`INSERT INTO vera_api_clients_crud.quotations (quote_number, customer_id) VALUES ('1580260001', $1)`,
+		`INSERT INTO `+testSchemaIdent()+`.quotations (quote_number, customer_id) VALUES ('1580260001', $1)`,
 		customerID); err != nil {
 		t.Fatalf("seed quotation: %v", err)
 	}
