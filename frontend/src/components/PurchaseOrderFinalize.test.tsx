@@ -390,6 +390,21 @@ describe("PurchaseOrderFinalConfirmationView (issue #471)", () => {
     );
     expect(requested).toContain("Assigned when saved");
   });
+
+  // #654: the pre-save check shows the customer's reading of the applied
+  // values, so staff never save a title-only group they meant to expand (or
+  // the reverse). The card is a presentation, not the customer's document.
+  it("mounts the customer view of the applied values", () => {
+    const html = markup(confirmationElement(true));
+    expect(html).toContain("Customer view");
+    expect(html).toContain('aria-label="Print customer view"');
+    expect(html).toContain("A presentation of the order as entered");
+    expect(html).toContain("remains the evidence for this record");
+    const card = html.toLowerCase();
+    for (const word of ["cost", "margin", "variance", "quoted", "remaining"]) {
+      expect(card).not.toContain(word);
+    }
+  });
 });
 
 describe("PurchaseOrderSavedView (issue #471)", () => {
@@ -464,6 +479,27 @@ describe("PurchaseOrderSavedView (issue #471)", () => {
     expect(html).not.toContain('aria-label="Assign confirmation number"');
     expect(html).not.toContain("Not assigned");
     expect(html).toContain("cannot be edited, cleared or regenerated");
+  });
+
+  // #654: the saved record offers the same customer view, from the same
+  // projection and the same stored figures, so the preview and the saved view
+  // cannot disagree about the order.
+  it("mounts the customer view of the saved record", () => {
+    const html = markup(
+      <PurchaseOrderSavedView
+        order={order({ State: "saved", PdfAbsentConfirmed: true })}
+        currency={USD}
+        onBack={() => undefined}
+        documentInitialState={{ Document: null, Versions: [] }}
+      />
+    );
+    expect(html).toContain("Customer view");
+    expect(html).toContain('aria-label="Print customer view"');
+    expect(html).toContain("A presentation of the order as entered");
+    const card = html.toLowerCase();
+    for (const word of ["cost", "margin", "variance", "quoted", "remaining"]) {
+      expect(card).not.toContain(word);
+    }
   });
 });
 
