@@ -187,6 +187,13 @@ type PurchaseOrderItem struct {
 	// hasAllocation reports that this row owns a persisted allocation, so a
 	// saved record can add its own quantity back to the remaining answer.
 	hasAllocation bool
+	// AggregateGroupID is the persisted group id; 0 means ungrouped. It is a
+	// read value only.
+	AggregateGroupID int64
+	// AggregateGroupIndex is the 1-based position of the group in the submitted
+	// PurchaseOrderUpdate.AggregateGroups; 0 means ungrouped. It is an input
+	// value only and is never persisted.
+	AggregateGroupIndex int
 	// quotedUnitPriceMinor is the allocation's frozen baseline, read with the
 	// line so the join never fans out.
 	quotedUnitPriceMinor int64
@@ -280,6 +287,11 @@ type PurchaseOrder struct {
 	// existed. It is required by the final save and never inferred from the
 	// subject or the customer.
 	BusinessCategory string
+
+	// AggregateGroups are the record's aggregate presentation headers, ordered
+	// by display position. Their totals are derived from the child lines on
+	// read; no header carries a price, a cost or a variance.
+	AggregateGroups []PurchaseOrderAggregateGroup
 }
 
 // PurchaseOrderReview is one draft or saved record beside the exact source
@@ -402,6 +414,11 @@ type PurchaseOrderUpdate struct {
 	// warned about, so the replaced values are kept as history. It never
 	// weakens the version check: the stated version must still match.
 	Overwrite bool
+	// AggregateGroups is the submitted aggregate presentation. A nil slice
+	// means the client does not know about groups at all (a legacy client); an
+	// empty non-nil slice means "this record has no groups". That distinction is
+	// the compatibility contract.
+	AggregateGroups []PurchaseOrderAggregateGroupInput
 }
 
 type purchaseOrderQuerier interface {
