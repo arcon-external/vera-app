@@ -697,11 +697,10 @@ func TestFinalizePurchaseOrderRefusesACorruptedSourceLink(t *testing.T) {
 	}
 }
 
-// TestPurchaseOrderDraftCopiesTheSourceRowDiscountButNotTheWholeDiscount pins
-// the #573 split: the row discount is copied because it is printed per line,
-// while the source's whole-PO discount is retired and must not be carried into
-// the draft. The printed source totals remain evidence of what was issued.
-func TestPurchaseOrderDraftCopiesTheSourceRowDiscount(t *testing.T) {
+// TestPurchaseOrderDraftCopiesTheRowDiscountedBaseline pins #653: a new PO
+// line starts at the row-discounted quotation price and copies no discount.
+// The source's printed totals remain evidence of what was issued.
+func TestPurchaseOrderDraftCopiesTheRowDiscountedBaseline(t *testing.T) {
 	database := openTestSchema(t, "vera_po_finalize_seed")
 	record, err := database.SaveRevision(context.Background(), RevisionDraft{
 		CustomerCode:     2,
@@ -725,11 +724,9 @@ func TestPurchaseOrderDraftCopiesTheSourceRowDiscount(t *testing.T) {
 			Qty:                   2,
 			UoM:                   "Pc",
 			UnitPrice:             100,
-			MarginPercent:         0,
-			MarginAmount:          0,
 			OriginalTotal:         200,
-			MarginalizedUnitPrice: 100,
-			MarginalizedTotal:     200,
+			MarginalizedUnitPrice: 114,
+			MarginalizedTotal:     228,
 			ListUnitPrice:         120,
 			DiscountEnabled:       true,
 			DiscountPercent:       5,
@@ -738,10 +735,10 @@ func TestPurchaseOrderDraftCopiesTheSourceRowDiscount(t *testing.T) {
 			OriginalSubtotal:          200,
 			OriginalGrand:             200,
 			MarginalizedSubtotal:      240,
-			MarginalizedDiscount:      24,
-			MarginalizedGrand:         216,
-			MarginalizedGrandAfterTax: 216,
-			CustomerGrandTotal:        216,
+			MarginalizedDiscount:      12,
+			MarginalizedGrand:         228,
+			MarginalizedGrandAfterTax: 228,
+			CustomerGrandTotal:        228,
 		},
 	})
 	if err != nil {
@@ -752,31 +749,35 @@ func TestPurchaseOrderDraftCopiesTheSourceRowDiscount(t *testing.T) {
 	draft := createFinalizeDraft(t, database, ctx, user, record)
 
 	if draft.DiscountPercent != 0 || draft.DiscountMinor != 0 {
-		t.Errorf("whole-PO discount = %d (%d minor); want the retired 10%% not copied",
+		t.Errorf("whole-PO discount = %d (%d minor); want the retired zero",
 			draft.DiscountPercent, draft.DiscountMinor)
 	}
-	// 2 x 120 = 240, less the copied 5% row discount of 12 = 228. FTZ goods
-	// carry no PPN.
+	// 2 x 114 = 228: the row-discounted baseline is the negotiated price, and
+	// the 5% row discount is not copied as a second, editable discount.
 	if draft.SubtotalMinor != 228 || draft.GrandTotalMinor != 228 {
 		t.Errorf("PO totals = subtotal %d / grand %d; want 228/228",
 			draft.SubtotalMinor, draft.GrandTotalMinor)
 	}
 	// The source's printed figures still record its own row discount.
-	if draft.PrintedSubtotalMinor != 240 || draft.PrintedDiscountMinor != 24 ||
-		draft.PrintedGrandTotalMinor != 216 {
-		t.Errorf("printed snapshot = %d/%d/%d; want 240/24/216",
+	if draft.PrintedSubtotalMinor != 240 || draft.PrintedDiscountMinor != 12 ||
+		draft.PrintedGrandTotalMinor != 228 {
+		t.Errorf("printed snapshot = %d/%d/%d; want 240/12/228",
 			draft.PrintedSubtotalMinor, draft.PrintedDiscountMinor,
 			draft.PrintedGrandTotalMinor)
 	}
 	if len(draft.Items) != 1 {
 		t.Fatalf("lines = %d; want 1", len(draft.Items))
 	}
-	if !draft.Items[0].DiscountEnabled || draft.Items[0].DiscountPercent != 5 {
-		t.Errorf("row discount = %v/%d; want enabled 5%%",
+	if draft.Items[0].DiscountEnabled || draft.Items[0].DiscountPercent != 0 {
+		t.Errorf("row discount = %v/%d; want none copied",
 			draft.Items[0].DiscountEnabled, draft.Items[0].DiscountPercent)
 	}
-	if draft.Items[0].UnitPriceMinor != 120 {
-		t.Errorf("unit price = %d; want the printed list 120", draft.Items[0].UnitPriceMinor)
+	if draft.Items[0].UnitPriceMinor != 114 {
+		t.Errorf("unit price = %d; want the row-discounted baseline 114",
+			draft.Items[0].UnitPriceMinor)
+	}
+	if draft.Items[0].QuotedUnitPriceMinor == nil || *draft.Items[0].QuotedUnitPriceMinor != 114 {
+		t.Errorf("quoted baseline = %v; want 114", draft.Items[0].QuotedUnitPriceMinor)
 	}
 }
 

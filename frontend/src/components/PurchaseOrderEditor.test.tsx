@@ -64,6 +64,8 @@ const ORDER: PurchaseOrderDTO = {
       GrossMinor: 312625,
       DiscountMinor: 31262,
       NetMinor: 281363,
+      QuotedUnitPriceMinor: 125050,
+      RemainingQuantityScaled: 50000,
     },
     {
       QuotationItemNo: 2,
@@ -78,6 +80,8 @@ const ORDER: PurchaseOrderDTO = {
       GrossMinor: 42000,
       DiscountMinor: 0,
       NetMinor: 42000,
+      QuotedUnitPriceMinor: 42000,
+      RemainingQuantityScaled: 10000,
     },
   ],
   ID: 7,
@@ -213,19 +217,26 @@ describe("PurchaseOrderEditorView header (issue #468)", () => {
     expect(html).not.toContain("Confirm and save");
   });
 
-  it("shows the row discount controls and the line's own figures", () => {
+  it("offers no discount, margin or adjustment input and shows the variance badges", () => {
     const html = render();
-    expect(html).toContain('aria-label="Enable a discount for line 1"');
-    expect(html).toContain('aria-label="Discount percentage for line 1"');
-    // Line 2 is a quotation sub-item, so its discount lives on the sub-item row.
-    expect(html).toContain(
+    // #653: the PO carries only description, quantity, UoM and a negotiated
+    // unit price. Margin and discount are quotation concepts; adjustment was
+    // retired by #573.
+    expect(html).not.toContain('aria-label="Enable a discount for line 1"');
+    expect(html).not.toContain('aria-label="Discount percentage for line 1"');
+    expect(html).not.toContain(
       'aria-label="Discount percentage for sub-item 1 of line 2"'
     );
-    // The whole-PO discount and the signed adjustment are retired (#573).
     expect(html).not.toContain('aria-label="Whole-PO discount"');
     expect(html).not.toContain('aria-label="Adjustment"');
     expect(html).not.toContain('aria-label="Adjustment reason"');
-    expect(html).toContain("−10% row discount");
+    expect(html).not.toContain('aria-label="Enable profit margin for line 1"');
+    // The quotation baseline and remaining quantity become inline badges:
+    // 2.5 ordered of 5 leaves 2.5 Unsold, and the negotiated 1125.45 is below
+    // the 1250.50 baseline.
+    expect(html).toContain('data-variance-badge="unsold"');
+    expect(html).toContain("2.5 remaining (Unsold)");
+    expect(html).toContain('data-variance-badge="priceLoss"');
     // The line's own figures are visible beside its inputs.
     expect(html).toContain("Sells for");
   });

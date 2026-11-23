@@ -124,7 +124,7 @@ func replacePurchaseOrderAllocations(
 			source.QuotationID, source.RevisionNumber, source.RevisionID,
 			item.QuotationItemNo, item.QuotationSubNo,
 			item.QuantityScaled, sourceLine.UoM, item.UoM,
-			sourceLine.quotedUnitPriceMinor, item.NetMinor, sourceLine.costUnitMinor,
+			sourceLine.QuotedUnitPriceMinor, item.NetMinor, sourceLine.costUnitMinor,
 		); err != nil {
 			return fmt.Errorf("store purchase order %d line %d allocation: %w",
 				orderID, index+1, err)

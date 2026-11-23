@@ -17,8 +17,10 @@ import (
 // revision it was born from, and deciding what the final save may record.
 //
 // The comparison is deliberately narrow and customer-facing: descriptions,
-// quantities, units, list prices, row discounts, payment terms and Incoterms.
-// Supplier cost, margin, PPH23 and profit never appear here (parent story 42).
+// quantities, units, the negotiated unit price against the row-discounted
+// quotation baseline, payment terms and Incoterms. Row discounts are already
+// inside that baseline and are not a PO input (#653); supplier cost, margin,
+// PPH23 and profit never appear here (parent story 42).
 //
 // Matching is by the stored item/sub reference, never by line position. A
 // customer may reorder or flatten the printed table, so position says nothing
@@ -60,10 +62,11 @@ type PurchaseOrderSourceLine struct {
 	// DescriptionLines are the part's sub-sub lines, seeded from the frozen
 	// revision. Empty when the part has none.
 	DescriptionLines []string
-	// quotedUnitPriceMinor is the frozen row-discounted quotation baseline.
-	// It is internal to allocation persistence and never mapped to a customer
-	// or workspace DTO.
-	quotedUnitPriceMinor int64
+	// QuotedUnitPriceMinor is the frozen row-discounted quotation baseline.
+	// It is the customer's agreed unit price, exposed to the PO workspace for
+	// the negotiated-price badges and stamped into the allocation. It is never
+	// a supplier cost.
+	QuotedUnitPriceMinor int64
 	// costUnitMinor is the frozen supplier unit cost from the pinned revision.
 	// It is internal to allocation persistence and the report only.
 	costUnitMinor int64

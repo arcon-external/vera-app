@@ -673,6 +673,9 @@ func mapPurchaseOrder(order store.PurchaseOrder) apicontract.PurchaseOrderRow {
 			GroupKey:          item.GroupKey,
 			ParentDescription: item.ParentDescription,
 			DescriptionLines:  item.DescriptionLines,
+
+			QuotedUnitPriceMinor:    item.QuotedUnitPriceMinor,
+			RemainingQuantityScaled: item.RemainingQuantityScaled,
 		})
 	}
 	return row
@@ -954,6 +957,8 @@ func mapPurchaseOrderReview(review store.PurchaseOrderReview) apicontract.Purcha
 			DiscountPercent:   line.DiscountPercent,
 			ParentDescription: line.ParentDescription,
 			DescriptionLines:  line.DescriptionLines,
+
+			QuotedUnitPriceMinor: line.QuotedUnitPriceMinor,
 		})
 	}
 	return row

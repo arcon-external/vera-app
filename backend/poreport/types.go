@@ -189,15 +189,54 @@ type Note struct {
 	Text string `json:"text"`
 }
 
+// PipelineSummary is the open Unsold remaining: quantity quoted but not yet
+// bought on a still-orderable quotation. It is valued at the row-discounted
+// quotation baseline, never at a purchase order's negotiated price.
+//
+// Pipeline is never added to Actual. Unsold is not a loss and is not subtracted
+// from NetRealizedVariance; only an explicit quotation close (#656) moves it to
+// a closed loss.
+type PipelineSummary struct {
+	UnsoldAmountMinor int64 `json:"unsoldAmountMinor"`
+	UnsoldMarginMinor int64 `json:"unsoldMarginMinor"`
+}
+
+// VarianceSummary is the realized commercial comparison between what was
+// quoted and what was bought. It is a comparison, not an additive bucket: no
+// field here is added to Actual. Open Unsold is mirrored for the screen that
+// shows it beside the realized components, but it is deliberately excluded
+// from NetRealizedVariance.
+//
+// Price variance has no cost effect (it is pure margin); quantity extra income
+// carries both the quoted revenue and the frozen cost of the extra units, so
+// its amount and margin differ. Closed loss is zero until #656 implements
+// explicit quotation closure.
+type VarianceSummary struct {
+	QuantityExtraIncomeAmountMinor int64 `json:"quantityExtraIncomeAmountMinor"`
+	QuantityExtraIncomeMarginMinor int64 `json:"quantityExtraIncomeMarginMinor"`
+	UnsoldAmountMinor              int64 `json:"unsoldAmountMinor"`
+	UnsoldMarginMinor              int64 `json:"unsoldMarginMinor"`
+	ClosedLossAmountMinor          int64 `json:"closedLossAmountMinor"`
+	ClosedLossMarginMinor          int64 `json:"closedLossMarginMinor"`
+	PriceExtraIncomeMinor          int64 `json:"priceExtraIncomeMinor"`
+	PriceLossMinor                 int64 `json:"priceLossMinor"`
+	NetRealizedVarianceAmountMinor int64 `json:"netRealizedVarianceAmountMinor"`
+	NetRealizedVarianceMarginMinor int64 `json:"netRealizedVarianceMarginMinor"`
+}
+
 // Report is the complete read-only snapshot the screen and the PDF render.
 // GeneratedAt and AsOf are one timestamp pair for the whole response.
 type Report struct {
-	GeneratedAt    string           `json:"generatedAt"`
-	AsOf           string           `json:"asOf"`
-	Filter         Query            `json:"filter"`
-	Company        Company          `json:"company"`
-	Population     Population       `json:"population"`
-	Totals         Metrics          `json:"totals"`
+	GeneratedAt string     `json:"generatedAt"`
+	AsOf        string     `json:"asOf"`
+	Filter      Query      `json:"filter"`
+	Company     Company    `json:"company"`
+	Population  Population `json:"population"`
+	Totals      Metrics    `json:"totals"`
+	// Pipeline and Variance are separate from Totals by contract. Unsold and
+	// variance are comparisons, not actual revenue.
+	Pipeline       PipelineSummary  `json:"pipeline"`
+	Variance       VarianceSummary  `json:"variance"`
 	Periods        []Period         `json:"periods"`
 	Categories     []Category       `json:"categories"`
 	CategorySeries []CategorySeries `json:"categorySeries"`

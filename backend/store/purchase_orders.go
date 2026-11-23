@@ -177,6 +177,19 @@ type PurchaseOrderItem struct {
 	// DescriptionLines are the plain line's description bullets or the
 	// sub-item's sub-sub lines. Empty when the row has none.
 	DescriptionLines []string
+	// QuotedUnitPriceMinor is the frozen row-discounted quotation baseline for
+	// this line, when one is known. It is a workspace-only, customer-facing
+	// figure: the price the customer agreed to, never a supplier cost.
+	QuotedUnitPriceMinor *int64
+	// RemainingQuantityScaled is the quantity still orderable on this line's
+	// leaf after other saved purchase orders. Nil means no live source answer.
+	RemainingQuantityScaled *int64
+	// hasAllocation reports that this row owns a persisted allocation, so a
+	// saved record can add its own quantity back to the remaining answer.
+	hasAllocation bool
+	// quotedUnitPriceMinor is the allocation's frozen baseline, read with the
+	// line so the join never fans out.
+	quotedUnitPriceMinor int64
 }
 
 // PurchaseOrder is a draft or finalized header plus its lines and the explained
@@ -1360,13 +1373,11 @@ func loadPurchaseOrderSourceLines(ctx context.Context, q purchaseOrderQuerier, s
 					Description:          sub.Description,
 					QuantityScaled:       quantity,
 					UoM:                  sub.UoM,
-					UnitPriceMinor:       sub.UnitPriceMinor,
-					DiscountEnabled:      sub.DiscountEnabled,
-					DiscountPercent:      sub.DiscountPercent,
+					UnitPriceMinor:       sub.QuotedUnitPriceMinor,
+					QuotedUnitPriceMinor: sub.QuotedUnitPriceMinor,
 					ParentDescription:    parentDescription,
 					GroupKey:             fmt.Sprintf("q:%d", item.ItemNo),
 					DescriptionLines:     append([]string(nil), sub.Details...),
-					quotedUnitPriceMinor: sub.QuotedUnitPriceMinor,
 					costUnitMinor:        sub.CostUnitMinor,
 				})
 			}
@@ -1382,11 +1393,9 @@ func loadPurchaseOrderSourceLines(ctx context.Context, q purchaseOrderQuerier, s
 			Description:          description,
 			QuantityScaled:       quantity,
 			UoM:                  item.UoM,
-			UnitPriceMinor:       item.UnitPriceMinor,
-			DiscountEnabled:      item.DiscountEnabled,
-			DiscountPercent:      item.DiscountPercent,
+			UnitPriceMinor:       item.MarginalizedUnitPrice,
+			QuotedUnitPriceMinor: item.MarginalizedUnitPrice,
 			DescriptionLines:     descriptionLines,
-			quotedUnitPriceMinor: item.MarginalizedUnitPrice,
 			costUnitMinor:        item.CostUnitMinor,
 		})
 	}
@@ -2102,13 +2111,25 @@ func getPurchaseOrder(ctx context.Context, q purchaseOrderQuerier, schema, orgID
 	}
 
 	rows, err := q.Query(ctx, fmt.Sprintf(`
-		SELECT id, line_number, description, quotation_item_no, quotation_sub_no,
-		       quantity_scaled, uom, unit_price_minor, discount_enabled,
-		       discount_percent, gross_minor, discount_minor, net_minor, client_key,
-		       group_key, parent_description, description_lines
-		FROM %s.purchase_order_items
-		WHERE purchase_order_id = $1
-		ORDER BY line_number`, schema), id)
+		SELECT poi.id, poi.line_number, poi.description, poi.quotation_item_no,
+		       poi.quotation_sub_no, poi.quantity_scaled, poi.uom,
+		       poi.unit_price_minor, poi.discount_enabled, poi.discount_percent,
+		       poi.gross_minor, poi.discount_minor, poi.net_minor, poi.client_key,
+		       poi.group_key, poi.parent_description, poi.description_lines,
+		       EXISTS (
+		           SELECT 1 FROM %s.purchase_order_allocations a
+		           WHERE a.purchase_order_item_id = poi.id
+		       ) AS has_allocation,
+		       COALESCE((
+		           SELECT a.quoted_unit_price_minor
+		           FROM %s.purchase_order_allocations a
+		           WHERE a.purchase_order_item_id = poi.id
+		           ORDER BY a.id
+		           LIMIT 1
+		       ), 0) AS quoted_unit_price_minor
+		FROM %s.purchase_order_items poi
+		WHERE poi.purchase_order_id = $1
+		ORDER BY poi.line_number`, schema, schema, schema), id)
 	if err != nil {
 		return PurchaseOrder{}, fmt.Errorf("load purchase order lines: %w", err)
 	}
@@ -2123,7 +2144,8 @@ func getPurchaseOrder(ctx context.Context, q purchaseOrderQuerier, schema, orgID
 			&subNo, &item.QuantityScaled, &item.UoM, &item.UnitPriceMinor,
 			&item.DiscountEnabled, &item.DiscountPercent, &item.GrossMinor,
 			&item.DiscountMinor, &item.NetMinor, &clientKey, &item.GroupKey,
-			&item.ParentDescription, &descriptionLines); err != nil {
+			&item.ParentDescription, &descriptionLines, &item.hasAllocation,
+			&item.quotedUnitPriceMinor); err != nil {
 			return PurchaseOrder{}, fmt.Errorf("scan purchase order line: %w", err)
 		}
 		item.DescriptionLines = decodeDescriptionLines(descriptionLines)
@@ -2143,7 +2165,91 @@ func getPurchaseOrder(ctx context.Context, q purchaseOrderQuerier, schema, orgID
 	if err := rows.Err(); err != nil {
 		return PurchaseOrder{}, fmt.Errorf("iterate purchase order lines: %w", err)
 	}
+	if err := attachPurchaseOrderLineBaselines(ctx, q, schema, orgID, &order); err != nil {
+		return PurchaseOrder{}, err
+	}
 	return order, nil
+}
+
+// attachPurchaseOrderLineBaselines adds the two workspace-only variance values
+// to every source-backed line: the frozen row-discounted quotation price and
+// the quantity still available to order. Supplier cost never reaches this
+// shape (Story 42).
+//
+// Remaining is read for the PO's pinned source revision and excludes other
+// saved POs. A saved record removes its own stored quantity from the
+// other-bought sum, so reopening it shows the room that record itself occupies
+// instead of mislabelling its own quantity as over-quoted. A former or
+// never-linked source has no live remaining answer; its frozen allocation
+// baseline still travels when one exists.
+func attachPurchaseOrderLineBaselines(
+	ctx context.Context,
+	q purchaseOrderQuerier,
+	schema, orgID string,
+	order *PurchaseOrder,
+) error {
+	if order.SourceState != PurchaseOrderSourceStateLive {
+		for index := range order.Items {
+			item := &order.Items[index]
+			if !item.hasAllocation {
+				continue
+			}
+			baseline := item.quotedUnitPriceMinor
+			item.QuotedUnitPriceMinor = &baseline
+		}
+		return nil
+	}
+	availability, err := getQuotationAvailability(
+		ctx, q, schema, orgID, order.QuotationID, order.SourceRevision)
+	if err != nil {
+		// A corrupted or detached link is still a readable record: the review
+		// and final save are where that condition is refused. Fall back to the
+		// frozen allocation baselines instead of making the read fail.
+		if errors.Is(err, ErrPurchaseOrderSourceNotFound) || errors.Is(err, ErrPOSourceNotFound) {
+			for index := range order.Items {
+				item := &order.Items[index]
+				if !item.hasAllocation {
+					continue
+				}
+				baseline := item.quotedUnitPriceMinor
+				item.QuotedUnitPriceMinor = &baseline
+			}
+			return nil
+		}
+		return fmt.Errorf("load purchase order %d source availability: %w", order.ID, err)
+	}
+	for index := range order.Items {
+		item := &order.Items[index]
+		if item.QuotationItemNo == nil {
+			continue
+		}
+		leaf, ok := availabilityLeaf(availability, *item.QuotationItemNo, item.QuotationSubNo)
+		if !ok {
+			continue
+		}
+		baseline := leaf.QuotedUnitPriceMinor
+		if item.hasAllocation {
+			baseline = item.quotedUnitPriceMinor
+		}
+		item.QuotedUnitPriceMinor = &baseline
+		// The room this line sees is the quoted population minus every OTHER
+		// saved PO's allocation. Subtracting this saved record's own stored
+		// quantity is exact even when the leaf is over-bought; adding the
+		// clamped remaining back would lose that deficit.
+		otherBought := leaf.BoughtQuantityScaled
+		if order.State == PurchaseOrderStateSaved && item.hasAllocation {
+			otherBought -= item.QuantityScaled
+		}
+		if otherBought < 0 {
+			otherBought = 0
+		}
+		remaining := leaf.QuotedQuantityScaled - otherBought
+		if remaining < 0 {
+			remaining = 0
+		}
+		item.RemainingQuantityScaled = &remaining
+	}
+	return nil
 }
 
 // normalizeDate turns a caller's date into a midnight value Postgres stores as

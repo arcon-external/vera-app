@@ -36,12 +36,14 @@ export function editorItemFromSource(item: SourceItem): EditorItem {
     description: sub.description,
     qty: formatQuantityScaled(sub.quantityScaled),
     uom: sub.uom,
-    unitCost: String(sub.unitPriceMinor),
+    unitCost: String(sub.quotedUnitPriceMinor),
     marginEnabled: false,
     marginPercent: "0",
-    discountEnabled: sub.discountEnabled,
-    discountPercent: String(sub.discountPercent),
+    discountEnabled: false,
+    discountPercent: "0",
     bullets: [...sub.descriptionLines],
+    quotedUnitPriceMinor: sub.quotedUnitPriceMinor,
+    remainingQuantityScaled: sub.remainingQuantityScaled,
   }));
   return {
     key: item.itemNo,
@@ -49,13 +51,15 @@ export function editorItemFromSource(item: SourceItem): EditorItem {
     bullets: [...item.descriptionLines],
     qty: formatQuantityScaled(item.quantityScaled),
     uom: item.uom,
-    unitPrice: String(item.unitPriceMinor),
+    unitPrice: String(item.quotedUnitPriceMinor),
     marginEnabled: false,
     marginPercent: "0",
-    discountEnabled: item.discountEnabled,
-    discountPercent: String(item.discountPercent),
+    discountEnabled: false,
+    discountPercent: "0",
     subItems,
     showSubPrices: true,
+    quotedUnitPriceMinor: item.quotedUnitPriceMinor,
+    remainingQuantityScaled: item.remainingQuantityScaled,
   };
 }
 

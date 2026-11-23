@@ -11,6 +11,7 @@ import { useState } from "react";
 import type { CompanyUnitOption } from "../companyUnits";
 import type { CurrencyInfo } from "../format";
 import type { PurchaseOrderDTO } from "../purchaseOrder";
+import type { POSourceAvailability } from "../poSelector";
 import type { PurchaseOrderReviewDTO } from "../poFinalize";
 import { canRepairSource } from "../poRepair";
 import type { PurchaseOrderWorkspace } from "../poWorkspace";
@@ -41,6 +42,15 @@ export interface PurchaseOrderWorkspacePageProps {
   currencyOptions?: CurrencyInfo[];
   /** #497: opens the shared selector for this draft's source link. */
   onLinkQuotation?: () => void;
+  /**
+   * #653: reads the current bought state for the open draft's source, so a
+   * ghost line is inserted at the remaining quantity and its inline badges
+   * compare against the current remaining answer.
+   */
+  loadAvailability?: (
+    quotationId: number,
+    revision: number
+  ) => Promise<POSourceAvailability>;
   /** #497: the selector's confirmed pair, consumed by the editor. */
   pendingLinkTarget?: { quotationId: number; revisionNumber: number } | null;
   onLinkTargetHandled?: () => void;
@@ -149,6 +159,7 @@ export function PurchaseOrderWorkspacePage({
   blankDraft = null,
   currencyOptions = [],
   onLinkQuotation,
+  loadAvailability,
   pendingLinkTarget = null,
   onLinkTargetHandled,
   onLinked,
@@ -198,6 +209,7 @@ export function PurchaseOrderWorkspacePage({
         uomOptions={uomOptions}
         incotermOptions={incotermOptions}
         onLinkQuotation={onLinkQuotation}
+        loadAvailability={loadAvailability}
         onSaved={() => undefined}
         onCancel={onCancel}
         onDirtyChange={() => undefined}
@@ -245,6 +257,7 @@ export function PurchaseOrderWorkspacePage({
           uomOptions={uomOptions}
           incotermOptions={incotermOptions}
           onLinkQuotation={onLinkQuotation}
+          loadAvailability={loadAvailability}
           pendingLinkTarget={pendingLinkTarget}
           onLinkTargetHandled={onLinkTargetHandled}
           onLinked={onLinked}
@@ -369,6 +382,7 @@ export function PurchaseOrderWorkspacePage({
       uomOptions={uomOptions}
       incotermOptions={incotermOptions}
       onLinkQuotation={onLinkQuotation}
+      loadAvailability={loadAvailability}
       pendingLinkTarget={pendingLinkTarget}
       onLinkTargetHandled={onLinkTargetHandled}
       onLinked={onLinked}

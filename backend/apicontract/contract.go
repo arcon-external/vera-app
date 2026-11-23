@@ -256,6 +256,13 @@ type PurchaseOrderItemRow struct {
 	GroupKey          string   `json:"groupKey"`
 	ParentDescription string   `json:"parentDescription"`
 	DescriptionLines  []string `json:"descriptionLines"`
+	// QuotedUnitPriceMinor is the frozen row-discounted quotation baseline.
+	// The editor compares the negotiated unit price against it for the price
+	// loss / extra-income badge. It is customer-facing and never supplier cost.
+	QuotedUnitPriceMinor *int64 `json:"quotedUnitPriceMinor,omitempty"`
+	// RemainingQuantityScaled is what is still orderable on this leaf after
+	// other saved purchase orders. Absent when there is no live source answer.
+	RemainingQuantityScaled *int64 `json:"remainingQuantityScaled,omitempty"`
 }
 
 // PurchaseOrderRow is one PO draft or saved record. Dates are plain
@@ -359,6 +366,11 @@ type PurchaseOrderSourceLineRow struct {
 	DiscountPercent   int16    `json:"discountPercent"`
 	ParentDescription string   `json:"parentDescription"`
 	DescriptionLines  []string `json:"descriptionLines"`
+	// QuotedUnitPriceMinor is the frozen row-discounted quotation baseline.
+	// UnitPriceMinor above is the same customer-facing price for a new PO; the
+	// explicit field lets the workspace state the baseline without re-deriving
+	// it from the printed list price.
+	QuotedUnitPriceMinor int64 `json:"quotedUnitPriceMinor"`
 }
 
 // PurchaseOrderSourceRow is the exact source revision the review compares

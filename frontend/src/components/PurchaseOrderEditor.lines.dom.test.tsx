@@ -550,26 +550,44 @@ describe("committed select and checkbox values (F3)", () => {
     expect(shellActions.unresolvedCount).toBe(0);
   });
 
-  it("toggling a row discount commits the new enabled state, not the stale one", async () => {
+  it("offers no row discount control (#653)", async () => {
     reviewMock.mockResolvedValue({ Source: reviewSource([sourceLine()]), DocumentState: "none" });
     const transport = fakeTransport(null);
     await renderEditor(transport);
 
-    const toggle = button("Enable a discount for line 1");
-    await act(async () => {
-      toggle.click();
-    });
-    await flush();
-    await flush();
-
-    // Enabled 0% differs from the source disabled 0%, and the inline editor
-    // records the keep without leaving a pane item.
-    expect(button("Enable a discount for line 1").getAttribute("aria-checked")).toBe("true");
+    // The negotiated unit price is the only price input on a PO line; there is
+    // no discount, margin or adjustment control to commit.
     expect(
-      document.querySelector('button[aria-label="Keep PO entry for Line 1 discount"]')
+      document.querySelector('button[aria-label="Enable a discount for line 1"]')
+    ).toBeNull();
+    expect(
+      document.querySelector('input[aria-label="Discount percentage for line 1"]')
     ).toBeNull();
     if (shellActions === null) throw new Error("no shell actions reported");
     expect(shellActions.unresolvedCount).toBe(0);
+  });
+
+  it("renders the inline Unsold and price-loss badges from the workspace baseline (#653)", async () => {
+    reviewMock.mockResolvedValue({ Source: reviewSource([sourceLine()]), DocumentState: "none" });
+    const transport = fakeTransport(null);
+    await renderEditor(
+      transport,
+      linkedOrder({
+        Items: [
+          dtoItem({
+            QuantityScaled: 30000,
+            UnitPriceMinor: 9000,
+            QuotedUnitPriceMinor: 10000,
+            RemainingQuantityScaled: 50000,
+          }),
+        ],
+      })
+    );
+
+    const unsold = document.querySelector('[data-variance-badge="unsold"]');
+    expect(unsold?.textContent).toContain("2 remaining (Unsold)");
+    const loss = document.querySelector('[data-variance-badge="priceLoss"]');
+    expect(loss?.textContent).toContain("1.000/unit vs quoted (Price loss)");
   });
 
   it("changing Incoterms commits the selected value, not the stale one", async () => {

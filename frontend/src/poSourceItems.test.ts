@@ -29,6 +29,7 @@ function line(
     UoM: "Pc",
     QuantityScaled: 20000,
     UnitPriceMinor: 10000,
+    QuotedUnitPriceMinor: 10000,
     DiscountEnabled: false,
     DiscountPercent: 0,
     ...overrides,
@@ -103,8 +104,8 @@ describe("groupSourceItems", () => {
 describe("sourceItemApplied", () => {
   it("accepts the whole split item only when every part matches", () => {
     const item = groupSourceItems([
-      line({ QuotationItemNo: 2, QuotationSubNo: 1, LineLabel: "2.1", Description: "A", UnitPriceMinor: 100 }),
-      line({ QuotationItemNo: 2, QuotationSubNo: 2, LineLabel: "2.2", Description: "B", UnitPriceMinor: 200 }),
+      line({ QuotationItemNo: 2, QuotationSubNo: 1, LineLabel: "2.1", Description: "A", UnitPriceMinor: 100, QuotedUnitPriceMinor: 100 }),
+      line({ QuotationItemNo: 2, QuotationSubNo: 2, LineLabel: "2.2", Description: "B", UnitPriceMinor: 200, QuotedUnitPriceMinor: 200 }),
     ])[0];
     const lines = [
       poLine({ key: 2, clientKey: "client:2", quotationItemNo: 2, quotationSubNo: 1, description: "A", unitPrice: "Rp100", groupKey: "q:2" }),
@@ -114,6 +115,7 @@ describe("sourceItemApplied", () => {
 
     const changed = [lines[0], { ...lines[1], unitPrice: "Rp201" }];
     expect(sourceItemApplied(item, changed, IDR)).toBe(false);
+    expect(sourceItemApplied(item, [lines[0]], IDR)).toBe(false);
   });
 
   it("compares a plain item's values and description lines", () => {
@@ -131,6 +133,9 @@ describe("linesFromSourceItem", () => {
     ])[0];
     const rows = linesFromSourceItem(item, IDR, 10);
     expect(rows).toHaveLength(2);
+    expect(rows[0].quotedUnitPriceMinor).toBe(10000);
+    expect(rows[0].remainingQuantityScaled).toBe(20000);
+    expect(rows[0].discountEnabled).toBe(false);
     expect(rows[0]).toMatchObject({
       key: 10,
       quotationItemNo: 2,

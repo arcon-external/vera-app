@@ -1,6 +1,6 @@
 name: Gates
 
-# Runs on pull requests AND on main.
+# Runs on pull requests, on main, and by hand.
 #
 # The main trigger is not just post-merge validation: it is what makes the PR
 # runs fast. GitHub scopes caches per ref, and a pull request can only read its
@@ -8,11 +8,17 @@ name: Gates
 # there was no default-branch Go cache to inherit, so every PR compiled the
 # entire race-instrumented dependency graph from scratch -- about 4.5 of the
 # 6 minutes the job took.
+#
+# workflow_dispatch is the third way in. It runs everything a main push runs,
+# including the #495 tag matrix that a workflow-only PR skips, against any
+# branch; after a workflow change has merged it also re-runs Gates without
+# pushing an empty commit.
 on:
   pull_request:
     branches: [main]
   push:
     branches: [main]
+  workflow_dispatch:
 
 # Interleaved pushes to one PR otherwise run the full race suite in parallel
 # with the run the previous push started. Only the latest commit can merge, so
@@ -29,13 +35,24 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
-  go:
-    name: Go gates
+  # Two Go jobs, not one.
+  #
+  # `backend/api` (415 database tests, and the only package that shells out to
+  # pg_dump/pg_restore) and `backend/store` (343 database tests) used to run in
+  # one `go test -p 1`, so the wall clock was their sum and a single service
+  # Postgres carried both. Each now has its own job, its own Postgres service
+  # and its own DSN: the suites overlap, and a lock-table problem in one cannot
+  # fail the other. The steps that need no database -- gofmt, vet, the chromedp
+  # build, the PDF tools and proof, the #495 tag matrix, the remaining-packages
+  # race run and the cache save -- all live in the store job, so they still run
+  # exactly once rather than once per job.
+  go-api:
+    name: Go gates (API)
     # A hung job otherwise runs the 360-minute default before anyone is told.
-    # The Postgres-backed suites (backend/api, backend/store, plus the PO
-    # schema-per-test cases) now take ~20 minutes cold on a hosted runner, so a
-    # 20-minute cap kills a healthy run mid-suite. Keep the job cap above the
-    # `go test -timeout 30m` budget; this is a hang tripwire, not a stopwatch.
+    # This job owns the single slowest suite in the repo; the `go test
+    # -timeout 30m` inside the step is the stopwatch, so this cap sits above it
+    # as a hang tripwire. It is deliberately not a target: the 45166770885
+    # baseline spent 1059s in `backend/api` alone.
     timeout-minutes: 45
     # Pinned, not ubuntu-latest. The runner image is part of the setup-go cache
     # key, so the migration to Ubuntu 26 (beginning 2026-10-19) would cold-start
@@ -50,7 +67,18 @@ jobs:
           POSTGRES_DB: quotes
         ports:
           - 55432:5432
+        # PGDATA on tmpfs. The Postgres 18 image moved its data directory to
+        # /var/lib/postgresql/18/docker (`SHOW data_directory` on
+        # postgres:18-alpine), so the tmpfs is mounted on the parent: whatever
+        # major the image puts underneath lands on it. Without this the test
+        # database was fsync'd through the runner disk and the service spent
+        # 49-208s per checkpoint -- ten of them in the 45166770885 baseline,
+        # ~1050s of write time total -- which is why the same suite swung from
+        # 684s to 1620s. `size` is a cap, not an allocation: tmpfs consumes RAM
+        # as it is written, and 4g is roughly 2.5x the largest test database
+        # measured after a full local run (1.5 GB).
         options: >-
+          --tmpfs /var/lib/postgresql:rw,size=4g
           --health-cmd "pg_isready -U vera -d quotes"
           --health-interval 5s
           --health-timeout 5s
@@ -72,6 +100,16 @@ jobs:
         # full suite. The heavy steps run unless this step explicitly writes
         # needs_go=false, so a crashed or confused filter fails OPEN: the
         # worst case is an unnecessary full run, never a false green.
+        #
+        # It also decides the #495 tag matrix (needs_tags). The `dev` and
+        # `production` constraints exist only in the root package and
+        # `backend/auth`, and a Wails version bump is what the dev+production
+        # root-package collision depends on, so those two paths plus
+        # `wails.json` and the Go module files are the whole surface that can
+        # change the matrix's outcome. Written the same way round -- true
+        # unless the diff proves otherwise -- so a broken filter runs the
+        # matrix rather than silently skipping it, and an empty diff (nothing
+        # to compare) fails open too.
         id: scope
         continue-on-error: true
         run: |
@@ -82,8 +120,11 @@ jobs:
           # fail, and continue-on-error hid it -- which is not a behaviour worth
           # depending on.
           if [ "${{ github.event_name }}" != "pull_request" ]; then
-            echo "not a pull request: running the full suite"
-            echo "needs_go=true" >> "$GITHUB_OUTPUT"
+            echo "not a pull request: running the full suite and the tag matrix"
+            {
+              echo "needs_go=true"
+              echo "needs_tags=true"
+            } >> "$GITHUB_OUTPUT"
             exit 0
           fi
           base="${{ github.event.pull_request.base.sha }}"
@@ -100,6 +141,188 @@ jobs:
           fi
           echo "Go suite runs: $needs_go"
           echo "needs_go=$needs_go" >> "$GITHUB_OUTPUT"
+          needs_tags=true
+          if [ -n "$files" ]; then
+            needs_tags=false
+            # Root package: any *.go directly at the repo root, including the
+            # tagged variants (apibase_dev.go, apibase_packaged.go) and their
+            # tests. Auth package: everything under backend/auth/. Wails
+            # configuration: wails.json, plus go.mod/go.sum because the tag
+            # collision this matrix guards is a Wails dependency property.
+            if printf '%s\n' "$files" | grep -qE '^[^/]+\.go$|^backend/auth/|^wails\.json$|^go\.(mod|sum)$'; then
+              needs_tags=true
+            fi
+          fi
+          echo "Tag matrix runs: $needs_tags"
+          echo "needs_tags=$needs_tags" >> "$GITHUB_OUTPUT"
+
+      - name: Restore the Go caches
+        # Explicit, rather than setup-go's built-in cache, for two reasons.
+        #
+        # It has restore-keys. setup-go v6 calls
+        # cache.restoreCache(cachePaths, primaryKey) with no third argument, so
+        # its key -- which hashes go.sum -- is an exact match only. Any
+        # dependency bump therefore compiled the world from scratch, which made
+        # Dependabot's PRs the slowest ones in the repo. Go's build cache is
+        # content-addressed, so a nearest-match restore is exactly right:
+        # unchanged packages are reused and only genuinely-changed ones rebuild.
+        #
+        # And it is saved from one place. See the save step at the bottom.
+        id: go-cache
+        if: steps.scope.outputs.needs_go != 'false'
+        uses: actions/cache/restore@v6
+        with:
+          path: |
+            ~/.cache/go-build
+            ~/go/pkg/mod
+          key: go-${{ runner.os }}-${{ hashFiles('go.sum') }}
+          restore-keys: |
+            go-${{ runner.os }}-
+
+      # No Node, npm or frontend build in this job, deliberately: `frontend/dist`
+      # is embedded by the root package only (`main.go`), and `backend/api`
+      # neither imports it nor reads it. The store job builds the frontend
+      # because `go vet ./...` and the #495 tag matrix compile that root
+      # package. If `backend/api` ever starts importing the root package, the
+      # race build fails on the missing embed and this is the place to add the
+      # steps back.
+
+      - name: Set up Go
+        if: steps.scope.outputs.needs_go != 'false'
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          # The cache steps above own this now. Leaving it on would save a
+          # second copy on every ref, which is how the repo reached 11.3 GB
+          # against a 10 GB budget and started evicting the entries PRs need.
+          cache: false
+
+      - name: Install PostgreSQL client (matches service version)
+        # The restore drill test shells out to pg_dump/pg_restore, which
+        # refuse to talk to a newer server — the client major must be 18.
+        # Noble has no PG18 package, so take it from PGDG like the image.
+        if: steps.scope.outputs.needs_go != 'false'
+        run: |
+          sudo apt-get install -y -qq curl gnupg
+          curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc | sudo gpg --dearmor -o /usr/share/keyrings/pgdg.gpg
+          echo "deb [signed-by=/usr/share/keyrings/pgdg.gpg] https://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" | sudo tee /etc/apt/sources.list.d/pgdg.list
+          sudo apt-get update -qq && sudo apt-get install -y -qq postgresql-client-18
+
+      - name: go test with race detector (backend/api)
+        # This is the package that made `-p 1` necessary: its restore tests
+        # dump the whole database while every earlier test's schema is still
+        # in it, so pg_dump locks thousands of tables and the default lock
+        # table runs out (`out of shared memory`, SQLSTATE 53200). The full
+        # history is on the store job's race step below. What changed here is
+        # that this suite is now alone with its own Postgres, so nothing else
+        # shares that lock table and no other package waits behind it -- the
+        # store, seed and CLI suites run in the other job at the same time.
+        # The dump scope and the per-test migration replay are #670 phase 2's
+        # work, not something this workflow change can fix.
+        if: steps.scope.outputs.needs_go != 'false'
+        run: go test -race -timeout 30m ./backend/api/...
+
+  # The store job. It owns the store suite and every step that needs to run
+  # once rather than once per Go job.
+  go-store:
+    name: Go gates (store)
+    # Same reasoning as the API job: 45 minutes is a hang tripwire above the
+    # `go test -timeout 30m` budget, not a target. This job also carries
+    # gofmt/vet, so it is the one that reports a formatting or static-analysis
+    # failure.
+    timeout-minutes: 45
+    runs-on: ubuntu-24.04
+    services:
+      postgres:
+        image: postgres:18-alpine
+        env:
+          POSTGRES_USER: vera
+          POSTGRES_PASSWORD: secret
+          POSTGRES_DB: quotes
+        ports:
+          - 55432:5432
+        # Its own service, so its own tmpfs PGDATA -- same path and size
+        # reasoning as the API job. Nothing in this job dumps the whole
+        # database, so the data here stays smaller than the API job's until
+        # #670 phase 2 bounds the schemas.
+        options: >-
+          --tmpfs /var/lib/postgresql:rw,size=4g
+          --health-cmd "pg_isready -U vera -d quotes"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      VERA_POSTGRES_TEST_DSN: postgres://vera:secret@localhost:55432/quotes?sslmode=disable
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          # Full history: the scope step below diffs the PR against its merge
+          # base, which needs the base commit to be present locally.
+          fetch-depth: 0
+
+      - name: Decide whether the Go suite needs to run
+        # Skips the heavy steps ONLY for a diff that is entirely frontend UI
+        # source; every other path -- root *.md (the changelog-copy test),
+        # backend/** (embeds frontend/dist), configs, workflows -- keeps the
+        # full suite. The heavy steps run unless this step explicitly writes
+        # needs_go=false, so a crashed or confused filter fails OPEN: the
+        # worst case is an unnecessary full run, never a false green.
+        #
+        # It also decides the #495 tag matrix (needs_tags). The `dev` and
+        # `production` constraints exist only in the root package and
+        # `backend/auth`, and a Wails version bump is what the dev+production
+        # root-package collision depends on, so those two paths plus
+        # `wails.json` and the Go module files are the whole surface that can
+        # change the matrix's outcome. Written the same way round -- true
+        # unless the diff proves otherwise -- so a broken filter runs the
+        # matrix rather than silently skipping it, and an empty diff (nothing
+        # to compare) fails open too.
+        id: scope
+        continue-on-error: true
+        run: |
+          # A push to main always runs the full suite. There is no merge base to
+          # diff against, and main is the branch every PR inherits its cache
+          # from, so it has to be seeded with the whole thing rather than a
+          # subset. This used to happen by accident -- the empty base made git
+          # fail, and continue-on-error hid it -- which is not a behaviour worth
+          # depending on.
+          if [ "${{ github.event_name }}" != "pull_request" ]; then
+            echo "not a pull request: running the full suite and the tag matrix"
+            {
+              echo "needs_go=true"
+              echo "needs_tags=true"
+            } >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          base="${{ github.event.pull_request.base.sha }}"
+          files="$(git diff --no-renames --name-only "$base"...HEAD)"
+          echo "changed files:"; printf '%s\n' "$files"
+          needs_go=true
+          if [ -n "$files" ]; then
+            # skip only when EVERY changed path is frontend UI source;
+            # --no-renames makes a rename two paths, so a move out of
+            # frontend/src cannot sneak through as one matching path.
+            if ! printf '%s\n' "$files" | grep -qvE '^frontend/(src|public)/'; then
+              needs_go=false
+            fi
+          fi
+          echo "Go suite runs: $needs_go"
+          echo "needs_go=$needs_go" >> "$GITHUB_OUTPUT"
+          needs_tags=true
+          if [ -n "$files" ]; then
+            needs_tags=false
+            # Root package: any *.go directly at the repo root, including the
+            # tagged variants (apibase_dev.go, apibase_packaged.go) and their
+            # tests. Auth package: everything under backend/auth/. Wails
+            # configuration: wails.json, plus go.mod/go.sum because the tag
+            # collision this matrix guards is a Wails dependency property.
+            if printf '%s\n' "$files" | grep -qE '^[^/]+\.go$|^backend/auth/|^wails\.json$|^go\.(mod|sum)$'; then
+              needs_tags=true
+            fi
+          fi
+          echo "Tag matrix runs: $needs_tags"
+          echo "needs_tags=$needs_tags" >> "$GITHUB_OUTPUT"
 
       - name: Restore the Go caches
         # Explicit, rather than setup-go's built-in cache, for two reasons.
@@ -176,7 +399,21 @@ jobs:
         # Wails v2.16 itself declares App twice when both tags are set, so the
         # dev+production root package cannot link; auth is where that
         # combination is executable.
-        if: steps.scope.outputs.needs_go != 'false'
+        #
+        # Gated on the diff, because the apt install is the most expensive
+        # thing in this workflow that has nothing to do with the code under
+        # test: 622s in run 45171434818, of which `apt-get update` alone was
+        # 9.5 minutes, on the critical path of a PR that did not touch a build
+        # tag. The scope step runs it on main, on workflow_dispatch, and on any
+        # PR whose merge-base diff touches the root package, backend/auth,
+        # wails.json or the Go module files -- the whole surface that can
+        # change this matrix's outcome. A PR that touches only docs, frontend
+        # source or unrelated backend packages skips it: the accepted
+        # trade-off is that the tag matrix is not re-proven on a PR that
+        # cannot affect it.
+        if: >-
+          steps.scope.outputs.needs_go != 'false' &&
+          steps.scope.outputs.needs_tags != 'false'
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y -qq libgtk-3-dev libwebkit2gtk-4.1-dev libsoup-3.0-dev pkg-config
@@ -199,17 +436,6 @@ jobs:
           go build -tags chromedp ./...
           go vet -tags chromedp ./...
 
-      - name: Install PostgreSQL client (matches service version)
-        # The restore drill test shells out to pg_dump/pg_restore, which
-        # refuse to talk to a newer server — the client major must be 18.
-        # Noble has no PG18 package, so take it from PGDG like the image.
-        if: steps.scope.outputs.needs_go != 'false'
-        run: |
-          sudo apt-get install -y -qq curl gnupg
-          curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc | sudo gpg --dearmor -o /usr/share/keyrings/pgdg.gpg
-          echo "deb [signed-by=/usr/share/keyrings/pgdg.gpg] https://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" | sudo tee /etc/apt/sources.list.d/pgdg.list
-          sudo apt-get update -qq && sudo apt-get install -y -qq postgresql-client-18
-
       - name: Install the PDF text reader
         # The report renderer's text assertions run through pdftotext. Without
         # this step they silently skip and a green tick would claim a text
@@ -221,26 +447,41 @@ jobs:
           command -v pdftotext
           pdftotext -v 2>&1 | head -1
 
-      - name: go test with race detector (DB-backed packages, serialized)
-        # The Postgres-backed suites each apply the full migration chain per
-        # test schema. Run together in one `go test ./...`, their concurrent
-        # DDL exhausts the service Postgres lock table -- `out of shared
-        # memory (SQLSTATE 53200)` in pg_dump, migration apply and session
-        # setup (PR #484 run 42498252482). `-p 1` keeps these suites off each
-        # other; the packages that never open a test database still run in
-        # parallel in the next step. Raising the table
-        # (`max_locks_per_transaction`) is not an option here: it is a
-        # postmaster-context GUC, and the service container exposes no
-        # command/config override or restart path, so a bigger table cannot
-        # be applied without fragile entrypoint hacks.
+      - name: go test with race detector (Postgres-backed store, CLI and seed packages)
+        # No `-p 1` here any more. That flag serialized five packages because
+        # they shared one service Postgres with `backend/api`, and the old
+        # comment blamed concurrent DDL alone. The real cause was accumulation.
+        # Nothing drops a test schema when its test ends, so by the time the
+        # API restore tests ran the database held hundreds of migrated schemas
+        # -- 18,362 tables measured locally after one run. pg_dump takes a lock
+        # on every table in the database, so its lock demand grew with every
+        # earlier test in the run, and the default lock table ran out (`out of
+        # shared memory`, SQLSTATE 53200) in pg_dump, migration apply and
+        # session setup. Serializing the packages hid the concurrency
+        # component of that contention; it never touched the accumulation.
+        #
+        # The suites are split now. `backend/api` -- the only package that
+        # shells out to pg_dump/pg_restore -- has its own job and its own
+        # Postgres, so this lock table is never exposed to a whole-database
+        # dump, and the packages below run in parallel again, which is what
+        # `-p` already defaults to. The accumulation is still real here: every
+        # test below drops its schema and replays 53 migrations, and #670
+        # phase 2 replaces that with one migrated template database per test
+        # process, cloned per test and dropped at cleanup. If a dump test ever
+        # moves into this job, or the number of database packages grows, read
+        # that history before reaching for `-p 1` again. Raising
+        # `max_locks_per_transaction` remains unavailable: it is a
+        # postmaster-context GUC and the service container exposes no
+        # command/config override or restart path.
         if: steps.scope.outputs.needs_go != 'false'
-        run: go test -race -timeout 30m -p 1 ./backend/api/... ./backend/auth/... ./backend/localseed/... ./backend/store/... ./cmd/vera/...
+        run: go test -race -timeout 30m ./backend/auth/... ./backend/localseed/... ./backend/store/... ./cmd/vera/...
 
       - name: go test with race detector (remaining packages)
         # Everything that never opens a test database; still fully parallel.
         # Computed rather than listed so a new package cannot silently skip
         # both steps: `go list` enumerates the module and only the DB set
-        # above is excluded.
+        # above is excluded. The DB set must stay in this job's step above, or
+        # the two lists stop being complements and a package runs twice.
         if: steps.scope.outputs.needs_go != 'false'
         run: go test -race -timeout 30m $(go list ./... | grep -vE '/backend/(api|auth|store)$|/backend/localseed$|/cmd/vera($|/)')
 
@@ -261,7 +502,9 @@ jobs:
         #
         # main only: a cache saved under a pull request's ref is readable by that
         # PR and nothing else, so saving there spends the budget on entries no
-        # other run can use. Every PR reads main's instead.
+        # other run can use. Every PR reads main's instead. One job saves it --
+        # this one -- because two saves of the same key race and the loser
+        # fails with a duplicate-key error.
         #
         # The cache-hit guard: actions/cache/restore reports a hit only on an
         # exact primary-key match, so a restore-key match still saves here while
