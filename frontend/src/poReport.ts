@@ -37,6 +37,13 @@ export interface PurchaseOrderReportMetrics {
   amountMinor: number;
   costedMinor: number;
   uncostedMinor: number;
+  /**
+   * Pass-through expense (#655). It is real amount on the purchase order but
+   * carries no supplier cost and no margin, so it is its own bucket:
+   * `amount = costed + uncosted + extra`, and coverage is
+   * `costed / (amount - extra)`.
+   */
+  extraExpenseMinor: number;
   capitalMinor: number;
   marginMinor: number;
   /** Null when capital is zero; 0 is a real measured percentage. */
@@ -259,12 +266,24 @@ function nullableRatio(value: number | null | undefined): number | null {
   return typeof value === "number" ? value : null;
 }
 
+/**
+ * The pass-through bucket (#655). It is read structurally because the
+ * generated Wails model predates the field until the bindings are regenerated;
+ * a payload from a server older than #655 has no extra line kind at all, so an
+ * absent value is a real zero rather than an unknown.
+ */
+function readExtraExpenseMinor(metrics: poreport.Metrics): number {
+  const value = (metrics as { extraExpenseMinor?: unknown }).extraExpenseMinor;
+  return typeof value === "number" && Number.isFinite(value) ? value : 0;
+}
+
 function normalizeMetrics(metrics: poreport.Metrics): PurchaseOrderReportMetrics {
   return {
     poCount: metrics.poCount,
     amountMinor: metrics.amountMinor,
     costedMinor: metrics.costedMinor,
     uncostedMinor: metrics.uncostedMinor,
+    extraExpenseMinor: readExtraExpenseMinor(metrics),
     capitalMinor: metrics.capitalMinor,
     marginMinor: metrics.marginMinor,
     marginBps: nullableRatio(metrics.marginBps),

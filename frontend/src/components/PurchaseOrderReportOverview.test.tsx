@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { CurrencyInfo } from "../format";
 import type { PurchaseOrderReportData } from "../poReport";
 import {
+  purchaseOrderReportExtraExpenseFixture,
   purchaseOrderReportFixture,
   purchaseOrderReportMaxFixture,
   purchaseOrderReportMonthFixture,
@@ -241,6 +242,7 @@ function emptyReport(): PurchaseOrderReportData {
     amountMinor: 0,
     costedMinor: 0,
     uncostedMinor: 0,
+    extraExpenseMinor: 0,
     capitalMinor: 0,
     marginMinor: 0,
     marginBps: null,
@@ -262,6 +264,32 @@ function historicalReport(): PurchaseOrderReportData {
     category: "all",
     currency: "IDR",
   };
+  return report;
+}
+
+/** April is a saved purchase order whose only line is a passed-through extra. */
+function extraOnlyReport(): PurchaseOrderReportData {
+  const report = purchaseOrderReportExtraExpenseFixture();
+  const april = report.periods[1];
+  report.periods = [april];
+  report.totals = {
+    poCount: april.poCount,
+    amountMinor: april.amountMinor,
+    costedMinor: april.costedMinor,
+    uncostedMinor: april.uncostedMinor,
+    extraExpenseMinor: april.extraExpenseMinor,
+    capitalMinor: april.capitalMinor,
+    marginMinor: april.marginMinor,
+    marginBps: april.marginBps,
+    coverageBps: april.coverageBps,
+  };
+  report.categories = [
+    {
+      businessCategory: "FM",
+      label: "Facility Management",
+      ...report.totals,
+    },
+  ];
   return report;
 }
 
@@ -420,6 +448,7 @@ describe("PurchaseOrderReportOverview (issue #644)", () => {
     expect(view.querySelector("[data-report-chart]")).toBeNull();
     expect(view.querySelector("[data-report-forecast-status]")).toBeNull();
     expect(view.querySelector("[data-report-coverage]")).toBeNull();
+    expect(view.querySelector("[data-report-extra-expense]")).toBeNull();
     expect(view.querySelector("details")).toBeNull();
     expect(visibleText(view)).not.toContain("PO amount");
     expect(view.querySelector("[data-report-overview-updating]")).toBeNull();
@@ -689,5 +718,74 @@ describe("PurchaseOrderReportOverview closed loss (issue #656)", () => {
       "[data-report-overview-actual]"
     );
     expect(actual?.textContent).not.toContain("Rp20.000.000");
+  });
+});
+
+// Issue #655: an extra line is a pass-through expense. It keeps its own bucket
+// under the coverage disclosure, is never a sixth KPI, and never enters cost,
+// margin or the coverage denominator.
+describe("PurchaseOrderReportOverview extra expense (issue #655)", () => {
+  it("shows Extra Expense as its own line and never as a sixth KPI", async () => {
+    await render({
+      filters: BASE_FILTERS,
+      report: purchaseOrderReportExtraExpenseFixture(),
+    });
+    const view = overview();
+
+    const kpi = view.querySelector('[aria-label="Report KPIs"]');
+    expect(kpi?.querySelectorAll("div")).toHaveLength(5);
+    expect(kpi?.textContent).not.toContain("Extra expense");
+    expect(kpiValue("PO amount")).toBe("Rp2.050.000");
+    // The extra adds no margin: 50.000 costed - 30.000 capital.
+    expect(kpiValue("PO margin")).toBe("Rp20.000");
+    expect(kpiValue("PO margin %")).toBe("66.67%");
+
+    const extra = view.querySelector<HTMLElement>(
+      "[data-report-extra-expense]"
+    );
+    expect(extra).not.toBeNull();
+    expect(extra?.textContent).toContain("Extra expense");
+    expect(extra?.textContent).toContain("Rp2.000.000");
+    expect(extra?.textContent).toContain("pass-through");
+
+    const coverage = view.querySelector<HTMLElement>("[data-report-coverage]");
+    expect(coverage).not.toBeNull();
+    expect(coverage?.textContent).toContain("of the non-extra amount");
+    // 50.000 costed / (2.050.000 - 2.000.000), not 50.000 / 2.050.000.
+    expect(coverage?.textContent).toContain("100.00%");
+    expect(coverage?.textContent).toContain("Rp50.000");
+    expect(coverage?.closest("details")).toBeNull();
+  });
+
+  it("reads an extra-only range as unknown coverage, not 0% or 100% profit", async () => {
+    await render({ filters: BASE_FILTERS, report: extraOnlyReport() });
+    const view = overview();
+
+    const coverage = view.querySelector<HTMLElement>("[data-report-coverage]");
+    expect(coverage).not.toBeNull();
+    expect(coverage?.textContent).toContain("Coverage: -");
+    expect(coverage?.textContent).toContain("only extra expense");
+    expect(coverage?.textContent).not.toContain("0.00%");
+    expect(coverage?.textContent).not.toContain("100.00%");
+
+    // Zero capital and zero costed amount: no margin and no margin percentage.
+    expect(kpiValue("PO margin")).toBe("Rp0");
+    expect(kpiValue("PO margin %")).toBe("-");
+    expect(
+      view.querySelector<HTMLElement>("[data-report-extra-expense]")?.textContent
+    ).toContain("Rp1.000.000");
+  });
+
+  it("leaves an all-quotation range reading exactly as before", async () => {
+    await render({ filters: BASE_FILTERS, report: purchaseOrderReportFixture() });
+    const view = overview();
+
+    expect(view.querySelector("[data-report-extra-expense]")).toBeNull();
+    const coverage = view.querySelector<HTMLElement>("[data-report-coverage]");
+    expect(coverage?.textContent).toContain(
+      "Coverage: 90.00% of the amount is costed"
+    );
+    expect(coverage?.textContent).not.toContain("non-extra");
+    expect(coverage?.textContent).not.toContain("Extra expense");
   });
 });
