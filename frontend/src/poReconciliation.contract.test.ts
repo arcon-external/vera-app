@@ -161,6 +161,7 @@ describe("PO reconciliation shared contract (ticket 01)", () => {
         discountPercent: String(line.DiscountPercent),
         quotationItemNo: line.QuotationItemNo,
         quotationSubNo: line.QuotationSubNo,
+        lineKind: "quotation",
         groupKey: "",
         parentDescription: "",
         descriptionLines: [],
@@ -211,7 +212,7 @@ describe("PO reconciliation shared contract (ticket 01)", () => {
       state.ppnBps = tc.Input.PpnBps;
       state.lines = tc.Input.Lines.map((line, index) => ({
         key: index, clientKey: `client:candidate-${index}`, description: "Widget", uom: "Pc",
-        quotationItemNo: 1, quotationSubNo: null,
+        quotationItemNo: 1, quotationSubNo: null, lineKind: "quotation",
         quantity: formatQuantityScaled(line.QuantityScaled),
         unitPrice: formatUnitPriceMinor(USD, line.UnitPriceMinor),
         discountEnabled: line.DiscountEnabled, discountPercent: String(line.DiscountPercent),

@@ -22,8 +22,12 @@ import (
 // money fields are the row's stored calculation, returned rather than
 // recomputed.
 type PurchaseOrderItemDTO struct {
-	QuotationItemNo   *int
-	QuotationSubNo    *int
+	QuotationItemNo *int
+	QuotationSubNo  *int
+	// LineKind is quotation or extra (#655). An extra was never on the
+	// quotation and carries no reference; absent on an older server's payload,
+	// which the frontend reads as quotation.
+	LineKind          string
 	ID                int64
 	ClientKey         *string
 	LineNumber        int
@@ -361,8 +365,11 @@ type PurchaseOrderBlankCreateInput struct {
 // array order; a row discount is a flag plus a 0-100 percentage, mirroring the
 // quotation.
 type PurchaseOrderItemInput struct {
-	QuotationItemNo   *int
-	QuotationSubNo    *int
+	QuotationItemNo *int
+	QuotationSubNo  *int
+	// LineKind is quotation or extra (#655). Empty means quotation and is
+	// omitted on the wire, exactly as an older client's payload is.
+	LineKind          string
 	ID                *int64
 	ClientKey         *string
 	Description       string
@@ -562,8 +569,11 @@ type PurchaseOrderCorrectionAttachmentDTO struct {
 
 // PurchaseOrderCorrectionItemDTO is one line of a retained snapshot.
 type PurchaseOrderCorrectionItemDTO struct {
-	QuotationItemNo   *int
-	QuotationSubNo    *int
+	QuotationItemNo *int
+	QuotationSubNo  *int
+	// LineKind is the kind the snapshot line carried (#655); a snapshot taken
+	// before the column existed reads quotation.
+	LineKind          string
 	LineNumber        int
 	Description       string
 	QuantityScaled    int64
@@ -738,6 +748,7 @@ func (q *Quotation) UpdatePurchaseOrderDraft(input PurchaseOrderUpdateInput) (Pu
 		items = append(items, apicontract.PurchaseOrderItemInput{
 			QuotationItemNo:   item.QuotationItemNo,
 			QuotationSubNo:    item.QuotationSubNo,
+			LineKind:          item.LineKind,
 			ID:                item.ID,
 			ClientKey:         item.ClientKey,
 			Description:       item.Description,
@@ -837,6 +848,7 @@ func (q *Quotation) CorrectPurchaseOrder(input PurchaseOrderCorrectionInput) (Pu
 		items = append(items, apicontract.PurchaseOrderItemInput{
 			QuotationItemNo:   item.QuotationItemNo,
 			QuotationSubNo:    item.QuotationSubNo,
+			LineKind:          item.LineKind,
 			ID:                item.ID,
 			ClientKey:         item.ClientKey,
 			Description:       item.Description,
@@ -924,6 +936,7 @@ func (q *Quotation) RepairPurchaseOrderSource(input PurchaseOrderSourceRepairInp
 		items = append(items, apicontract.PurchaseOrderItemInput{
 			QuotationItemNo:   item.QuotationItemNo,
 			QuotationSubNo:    item.QuotationSubNo,
+			LineKind:          item.LineKind,
 			ID:                item.ID,
 			ClientKey:         item.ClientKey,
 			Description:       item.Description,
@@ -1172,6 +1185,7 @@ func mapPurchaseOrderCorrectionDTO(row apicontract.PurchaseOrderCorrectionRow) P
 		entry.Items = append(entry.Items, PurchaseOrderCorrectionItemDTO{
 			QuotationItemNo:   item.QuotationItemNo,
 			QuotationSubNo:    item.QuotationSubNo,
+			LineKind:          item.LineKind,
 			LineNumber:        item.LineNumber,
 			Description:       item.Description,
 			QuantityScaled:    item.QuantityScaled,
@@ -1297,6 +1311,7 @@ func mapPurchaseOrderDTO(row apicontract.PurchaseOrderRow) PurchaseOrderDTO {
 			Description:       item.Description,
 			QuotationItemNo:   item.QuotationItemNo,
 			QuotationSubNo:    item.QuotationSubNo,
+			LineKind:          item.LineKind,
 			ID:                item.ID,
 			ClientKey:         item.ClientKey,
 			QuantityScaled:    item.QuantityScaled,
@@ -1352,6 +1367,7 @@ func (q *Quotation) FinalizePurchaseOrder(input PurchaseOrderFinalizeInput) (Pur
 		items = append(items, apicontract.PurchaseOrderItemInput{
 			QuotationItemNo:   item.QuotationItemNo,
 			QuotationSubNo:    item.QuotationSubNo,
+			LineKind:          item.LineKind,
 			ID:                item.ID,
 			ClientKey:         item.ClientKey,
 			Description:       item.Description,

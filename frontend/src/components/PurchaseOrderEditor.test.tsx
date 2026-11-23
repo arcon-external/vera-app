@@ -207,7 +207,7 @@ describe("PurchaseOrderEditorView header (issue #468)", () => {
     const html = render();
     expect(buttonTagFor(html, "Save draft")).not.toContain(" disabled=");
     expect(buttonTagFor(html, "Cancel draft")).not.toContain(" disabled=");
-    expect(buttonTagFor(html, "Add line")).not.toContain(" disabled=");
+    expect(buttonTagFor(html, "Add extra line")).not.toContain(" disabled=");
     // #470 owns the explained calculation; later slices own the rest, and a
     // draft must not pretend they exist.
     expect(html).toContain("Grand total");

@@ -48,6 +48,7 @@ function poLine(overrides: Partial<PurchaseOrderLine> = {}): PurchaseOrderLine {
     discountPercent: "0",
     quotationItemNo: 1,
     quotationSubNo: null,
+    lineKind: "quotation",
     groupKey: "",
     parentDescription: "",
     descriptionLines: [],
@@ -147,6 +148,26 @@ describe("linesFromSourceItem", () => {
     });
     expect(rows[1]).toMatchObject({ key: 11, quotationSubNo: 2 });
     expect(rows[1].clientKey).not.toBe(rows[0].clientKey);
+  });
+});
+
+// Issue #655: a ghost is only ever a quotation-backed line. The extra line is
+// the opposite kind, created by its own explicit action, and a ghost must
+// never materialize as one.
+describe("line kind for fresh source lines (#655)", () => {
+  it("materializes a plain ghost as a quotation line", () => {
+    const item = groupSourceItems([line({ QuotationItemNo: 1 })])[0];
+    const rows = linesFromSourceItem(item, IDR, 10);
+    expect(rows.map((row) => row.lineKind)).toEqual(["quotation"]);
+  });
+
+  it("materializes every part of a split ghost as quotation lines", () => {
+    const item = groupSourceItems([
+      line({ QuotationItemNo: 2, QuotationSubNo: 1, LineLabel: "2.1", ParentDescription: "Mounting package", Description: "A" }),
+      line({ QuotationItemNo: 2, QuotationSubNo: 2, LineLabel: "2.2", ParentDescription: "Mounting package", Description: "B" }),
+    ])[0];
+    const rows = linesFromSourceItem(item, IDR, 10);
+    expect(rows.map((row) => row.lineKind)).toEqual(["quotation", "quotation"]);
   });
 });
 

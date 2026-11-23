@@ -269,6 +269,7 @@ describe("renderCustomerPrintHTML: composition with the projection", () => {
           discountPercent: "0",
           quotationItemNo: 1,
           quotationSubNo: null,
+          lineKind: "quotation",
           groupKey: "",
           parentDescription: "",
           descriptionLines: [],

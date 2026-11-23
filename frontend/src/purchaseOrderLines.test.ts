@@ -37,6 +37,7 @@ function line(overrides: Partial<PurchaseOrderLine> = {}): PurchaseOrderLine {
     discountPercent: "0",
     quotationItemNo: null,
     quotationSubNo: null,
+    lineKind: "quotation",
     groupKey: "",
     parentDescription: "",
     descriptionLines: [],

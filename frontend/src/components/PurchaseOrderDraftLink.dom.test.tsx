@@ -370,13 +370,14 @@ function chooseFile(name = "Customer PO.pdf"): void {
   });
 }
 
-function Harness({ draft, opened }: { draft?: PurchaseOrderDTO; opened?: PurchaseOrderDTO }) {
+function Harness({ opened }: { opened: PurchaseOrderDTO }) {
   const workspace = usePurchaseOrderWorkspace();
-  // A saved draft opens through the workspace controller, exactly as a row
-  // from the archive does. The blank fixture path mounts the transient editor,
-  // which remounts on its first save and so cannot reproduce #584.
+  // #655: a never-linked draft is a stored record opened through the workspace
+  // controller, exactly as a row from the Drafts list is. The transient
+  // source-less editor no longer exists; linking is reachable only from a row
+  // that already exists.
   useEffect(() => {
-    if (opened !== undefined) workspace.open(opened);
+    workspace.open(opened);
   }, [opened, workspace.open]);
   const [target, setTarget] = useState<{
     quotationId: number;
@@ -392,7 +393,6 @@ function Harness({ draft, opened }: { draft?: PurchaseOrderDTO; opened?: Purchas
         uomOptions={UOMS}
         incotermOptions={INCOTERMS}
         tab="editor"
-        blankDraft={draft ?? blank()}
         onLinkQuotation={() =>
           setTarget({
             quotationId: reviewForTest.Source.QuotationID,
@@ -428,9 +428,13 @@ function Harness({ draft, opened }: { draft?: PurchaseOrderDTO; opened?: Purchas
 }
 
 async function render(draft?: PurchaseOrderDTO, opened?: PurchaseOrderDTO): Promise<void> {
-  latestOrder = opened ?? draft ?? createdRow();
+  // Both parameters now name the stored never-linked draft to open: the first
+  // is kept so existing cases read the same, and the second stays for a case
+  // that needs a specific stored version.
+  const stored = opened ?? draft ?? createdRow();
+  latestOrder = stored;
   await act(async () => {
-    root.render(<Harness draft={draft} opened={opened} />);
+    root.render(<Harness opened={stored} />);
   });
   await flush();
   await flush();
@@ -451,7 +455,7 @@ describe("draft source link (issue #497)", () => {
     await flush();
 
     await openReview();
-    expect(createMock).toHaveBeenCalledTimes(1);
+    expect(createMock).not.toHaveBeenCalled();
     expect(updateMock).toHaveBeenCalledTimes(1);
     const preSave = updateMock.mock.calls[0][0] as PurchaseOrderUpdateInput;
     expect(preSave.ID).toBe(41);
@@ -502,9 +506,17 @@ describe("draft source link (issue #497)", () => {
     // offered in blue, not adopted behind their back.
     expect(input("Customer PO number").value).toBe("KEEP-BEFORE-LINK");
     expect(input("Payment terms").value).toBe("45 days");
-    expect(input("Payment terms").getAttribute("style")).toMatch(
-      /59, 130, 246|3b82f6/i
-    );
+    expect(linkMock).toHaveBeenCalledTimes(1);
+    // The typed value stays; focusing the field offers the quotation's own
+    // value instead of adopting it. A stored draft keeps the editor mounted
+    // across the link, so the field is already the user's own value (the
+    // retired transient draft used to remount and repaint it as "available").
+    act(() => input("Payment terms").focus());
+    await flush();
+    expect(document.body.textContent).toContain("Value from quotation");
+    expect(document.body.textContent).toContain("30 days");
+    expect(document.body.textContent).toContain("Using your value");
+    expect(input("Payment terms").value).toBe("45 days");
     expect(button("Incoterms").textContent).toContain("EXW");
     // The old link review is gone: linking never opens a difference page.
     expect(document.body.textContent).not.toContain(
@@ -521,7 +533,7 @@ describe("draft source link (issue #497)", () => {
     expect(input("Customer PO number").value).not.toBe("");
   });
 
-  it("links after an upload at the version the upload saved", async () => {
+  it("attaches to the stored draft, then links at the stored version", async () => {
     reviewForTest = review();
     attachMock.mockResolvedValue({
       ID: 4,
@@ -536,20 +548,19 @@ describe("draft source link (issue #497)", () => {
     chooseFile();
     await flush();
 
-    expect(createMock).toHaveBeenCalledTimes(1);
-    expect(updateMock).toHaveBeenCalledTimes(1);
-    const uploadSave = updateMock.mock.calls[0][0] as PurchaseOrderUpdateInput;
-    expect(uploadSave.ExpectedVersion).toBe(1);
-    expect(uploadSave.PONumber).toBe("UPLOAD-THEN-LINK");
+    // The row exists, so the upload attaches straight to it; there is no
+    // transient create and no pre-save to produce an id.
+    expect(createMock).not.toHaveBeenCalled();
     expect(attachMock).toHaveBeenCalledTimes(1);
+    expect(updateMock).not.toHaveBeenCalled();
 
-    // The link preview persists the working copy against the version the upload
-    // advanced to, not the transient version.
+    // The link preview persists the working copy at the stored version so the
+    // typed PO number is what the link compares.
     await openReview();
-    expect(updateMock).toHaveBeenCalledTimes(2);
-    const linkSave = updateMock.mock.calls[1][0] as PurchaseOrderUpdateInput;
+    expect(updateMock).toHaveBeenCalledTimes(1);
+    const linkSave = updateMock.mock.calls[0][0] as PurchaseOrderUpdateInput;
     expect(linkSave.ID).toBe(41);
-    expect(linkSave.ExpectedVersion).toBe(2);
+    expect(linkSave.ExpectedVersion).toBe(1);
     expect(linkSave.PONumber).toBe("UPLOAD-THEN-LINK");
     expect(previewMock).toHaveBeenCalledWith(41, 12, 0);
   });

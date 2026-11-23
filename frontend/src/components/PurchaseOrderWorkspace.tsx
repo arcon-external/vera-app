@@ -10,7 +10,10 @@
 import { useState } from "react";
 import type { CompanyUnitOption } from "../companyUnits";
 import type { CurrencyInfo } from "../format";
-import type { PurchaseOrderDTO } from "../purchaseOrder";
+import {
+  PURCHASE_ORDER_SOURCE_REQUIRED_COPY,
+  type PurchaseOrderDTO,
+} from "../purchaseOrder";
 import type { POSourceAvailability } from "../poSelector";
 import type { PurchaseOrderReviewDTO } from "../poFinalize";
 import { canRepairSource } from "../poRepair";
@@ -33,11 +36,6 @@ export interface PurchaseOrderWorkspacePageProps {
   incotermOptions: { value: string; label: string }[];
   /** Issue #491: the active workspace tab when no record is open. */
   tab: PurchaseOrderTab;
-  /**
-   * #496: the transient source-less draft the Editor tab shows before any row
-   * exists. Null keeps the old entry page (used by tests and as a fallback).
-   */
-  blankDraft?: PurchaseOrderDTO | null;
   /** The loaded currency catalogue, for editing the basis before linking. */
   currencyOptions?: CurrencyInfo[];
   /** #497: opens the shared selector for this draft's source link. */
@@ -123,9 +121,7 @@ export function PurchaseOrderEntryPage({ onAdd }: { onAdd: () => void }) {
           New purchase order
         </h1>
         <p className="mt-1 max-w-2xl text-body text-ink-500">
-          Start a purchase order from an issued quotation revision. The
-          quotation supplies the customer, currency and line items; the
-          customer PO number and dates are entered here.
+          {PURCHASE_ORDER_SOURCE_REQUIRED_COPY}
         </p>
       </div>
       <Card className="p-6">
@@ -156,7 +152,6 @@ export function PurchaseOrderWorkspacePage({
   incotermOptions,
   tab,
   pageSize,
-  blankDraft = null,
   currencyOptions = [],
   onLinkQuotation,
   loadAvailability,
@@ -233,48 +228,10 @@ export function PurchaseOrderWorkspacePage({
   const [repairReturn, setRepairReturn] = useState<RepairReturn | null>(null);
 
   if (phase === "list" || draft === null) {
-    if (tab === "editor" && blankDraft !== null) {
-      const blankCurrency =
-        currencyOptions.find((option) => option.code === blankDraft.Currency) ??
-        currency;
-      if (blankCurrency === null) {
-        return (
-          <StatusBanner tone="danger">
-            The purchase order's currency ({blankDraft.Currency}) is not in the
-            loaded currency catalogue, so money cannot be edited safely yet.
-          </StatusBanner>
-        );
-      }
-      // #496: the editor opens on the full blank manual-entry form. It is
-      // transient until Save draft or an upload asks for a row; merely opening
-      // it creates nothing.
-      return (
-        <PurchaseOrderEditorPage
-          key={0}
-          order={blankDraft}
-          currency={blankCurrency}
-          currencyOptions={currencyOptions}
-          uomOptions={uomOptions}
-          incotermOptions={incotermOptions}
-          onLinkQuotation={onLinkQuotation}
-          loadAvailability={loadAvailability}
-          pendingLinkTarget={pendingLinkTarget}
-          onLinkTargetHandled={onLinkTargetHandled}
-          onLinked={onLinked}
-          onDirtyChange={onDirtyChange}
-          onSaved={(updated, corrected) => {
-            workspace.saved(updated);
-            onSaved?.(updated, corrected);
-          }}
-          onCancel={onCancel}
-          actionsInShell={actionsInShell}
-          onShellActions={onShellActions}
-          reconciliationTransport={reconciliationTransport}
-          actorId={actorId}
-          actorName={actorName}
-        />
-      );
-    }
+    // #655: no source-less manual-entry draft is offered. The Editor tab opens
+    // on the entry page, and the shared quotation selector is the one creation
+    // path; a never-linked legacy row still opens through the lists and can be
+    // linked from the editor.
     if (tab === "drafts") {
       return (
         <div data-tutorial="po-drafts">

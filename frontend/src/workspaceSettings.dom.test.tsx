@@ -3,10 +3,7 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import App from "./App";
-import {
-  blankPurchaseOrderDraft,
-  type PurchaseOrderDTO,
-} from "./purchaseOrder";
+import type { PurchaseOrderDTO } from "./purchaseOrder";
 import {
   DEFAULT_PURCHASE_ORDER_SETTINGS,
   DEFAULT_QUOTATION_SETTINGS,
@@ -277,22 +274,6 @@ beforeEach(() => {
     ],
   });
   mocks.createPurchaseOrderDraft.mockResolvedValue(purchaseOrder());
-  mocks.createBlankPurchaseOrderDraft.mockResolvedValue(
-    purchaseOrder({
-      ID: 41,
-      UUID: "po-first-496",
-      QuotationID: 0,
-      CustomerID: 0,
-      SourceRevision: 0,
-      SourceState: "never",
-      SourceMissing: true,
-      PrintedTotalsKnown: false,
-      QuoteNumber: "",
-      CustomerName: "",
-      Items: [],
-      Version: 1,
-    })
-  );
   mocks.updatePurchaseOrderDraft.mockImplementation(async (input: unknown) => {
     const fields = input as Record<string, unknown>;
     return {
@@ -855,134 +836,86 @@ describe("new drafts take the defaults (issue #492)", () => {
   });
 });
 
-// Issue #496: PO-first entry through the real top-level App, not just the PO
-// workspace composition. The only replacements are the desktop bindings; the
-// shell, the workspace controller, the editor, the leave guard and the toast
-// provider are production code.
-describe("PO-first draft (issue #496)", () => {
-  it("creates no record on an untouched visit, then saves and reopens the same row", async () => {
-    const blank = blankPurchaseOrderDraft({
-      currency: "IDR",
-      taxZone: "FTZ",
-      taxType: "Goods",
-      serviceCategory: "",
-      receivedDate: "2026-10-22",
-      incoterms: "EXW",
-    });
-    mocks.createBlankPurchaseOrderDraft.mockResolvedValue({
-      ...blank,
-      ID: 41,
-      UUID: "po-first-496",
-      Version: 1,
-    });
-    mocks.updatePurchaseOrderDraft.mockImplementation(
-      async (input: unknown) => {
-        const fields = input as Record<string, unknown>;
-        return {
-          Order: {
-            ...blank,
-            ID: 41,
-            UUID: "po-first-496",
-            Version: 2,
-            PONumber: String(fields.PONumber ?? ""),
-            Currency: String(fields.Currency ?? "IDR"),
-            TaxZone: String(fields.TaxZone ?? "FTZ"),
-            TaxType: String(fields.TaxType ?? "Goods"),
-            ServiceCategory: String(fields.ServiceCategory ?? ""),
-          },
-        };
-      }
-    );
-    mocks.getPurchaseOrder.mockResolvedValue({
-      ...blank,
-      ID: 41,
-      UUID: "po-first-496",
-      Version: 2,
-      PONumber: "CUSTOMER-APP-496",
-    });
-    mocks.listPurchaseOrders.mockResolvedValue({
-      PurchaseOrders: [
-        {
-          UUID: "po-first-496",
-          State: "draft",
-          PONumber: "CUSTOMER-APP-496",
-          QuoteNumber: "",
-          CustomerName: "",
-          ReceivedDate: "2026-10-22",
-          Currency: "IDR",
-          ID: 41,
-          CustomerID: 0,
-          SourceRevision: 0,
-          SourceMissing: true,
-          SourceState: "never",
-        },
-      ],
-      Customers: [],
-      Page: 1,
-      PageSize: 15,
-      Total: 1,
-      TotalPages: 1,
-    });
-
+// Issue #655 retires the #496 PO-first entry: the Editor tab no longer opens a
+// source-less form. These drive the real top-level App to pin the replacement:
+// an untouched visit creates nothing and shows the selector entry, and the
+// leave guard still works on a stored draft opened from the Drafts list.
+describe("PO entry is the quotation selector (#655)", () => {
+  it("the Editor tab creates no record and offers only the selector", async () => {
     await renderApp();
     await act(async () => {
       button("Open Purchase Orders").click();
     });
     await flush();
 
-    // Opening the Editor creates no row and shows no fabricated source.
     expect(mocks.createBlankPurchaseOrderDraft).not.toHaveBeenCalled();
+    expect(mocks.createPurchaseOrderDraft).not.toHaveBeenCalled();
     expect(mocks.updatePurchaseOrderDraft).not.toHaveBeenCalled();
-    expect(document.body.textContent).toContain("New purchase order");
-    expect(document.body.textContent).toContain("Source missing");
-    expect(document.body.textContent).not.toContain("Draft 0");
-    expect(document.body.textContent).not.toContain("revision 0");
+    expect(document.getElementById("po-entry-heading")?.textContent).toBe(
+      "New purchase order"
+    );
+    expect(document.body.textContent).toContain(
+      "Start a purchase order from an issued quotation revision."
+    );
+    expect(
+      document.querySelector('input[aria-label="Customer PO number"]')
+    ).toBeNull();
 
-    typeInto(input("Customer PO number"), "CUSTOMER-APP-496");
-    await flush();
+    // The one creation path opens the shared selector; it creates no row until
+    // a source is confirmed.
     await act(async () => {
-      button("Save draft").click();
+      button("Add Purchase Order from a Quotation").click();
     });
     await flush();
-    expect(mocks.createBlankPurchaseOrderDraft).toHaveBeenCalledTimes(1);
-    expect(mocks.updatePurchaseOrderDraft).toHaveBeenCalledTimes(1);
+    expect(document.body.textContent).toContain("Quotation");
+    expect(mocks.createPurchaseOrderDraft).not.toHaveBeenCalled();
+    expect(mocks.createBlankPurchaseOrderDraft).not.toHaveBeenCalled();
+  });
 
-    // The Drafts tab reads the stored row through the same App wiring.
+  it("guards a stored draft's dirty values without a source-less editor", async () => {
+    mocks.listPurchaseOrders.mockResolvedValue({
+      PurchaseOrders: [
+        {
+          UUID: "po-uuid-guard",
+          State: "draft",
+          PONumber: "PO-GUARD-655",
+          QuoteNumber: "1502260012",
+          CustomerName: "PT. Infineon Technologies Batam",
+          ReceivedDate: "2026-10-22",
+          Currency: "IDR",
+          ID: 21,
+          CustomerID: 2,
+          SourceRevision: 0,
+          SourceMissing: false,
+          SourceState: "live",
+        },
+      ],
+      Customers: [{ Name: "PT. Infineon Technologies Batam", ID: 2 }],
+      Page: 1,
+      PageSize: 15,
+      Total: 1,
+      TotalPages: 1,
+    });
+    mocks.getPurchaseOrder.mockResolvedValue(
+      purchaseOrder({ PONumber: "PO-GUARD-655", ReceivedDate: "2026-10-22" })
+    );
+    await renderApp();
+    await act(async () => {
+      button("Open Purchase Orders").click();
+    });
+    await flush();
     await act(async () => {
       navTab("Drafts").click();
     });
     await act(async () => {
       await new Promise((resolve) => setTimeout(resolve, 300));
     });
-    const open = button("Open purchase order CUSTOMER-APP-496");
     await act(async () => {
-      open.click();
-    });
-    await flush();
-    expect(mocks.getPurchaseOrder).toHaveBeenCalledWith(41);
-    expect(input("Customer PO number").value).toBe("CUSTOMER-APP-496");
-  });
-
-  it("leaves untouched without a prompt and keeps dirty values on Keep editing", async () => {
-    await renderApp();
-    await act(async () => {
-      button("Open Purchase Orders").click();
+      button("Open purchase order PO-GUARD-655").click();
     });
     await flush();
 
-    // Untouched: leaving asks nothing.
-    await act(async () => {
-      button("Back to Home").click();
-    });
-    await flush();
-    expect(discardPrompt()).toBeNull();
-
-    // Return and type; leaving now asks.
-    await act(async () => {
-      button("Open Purchase Orders").click();
-    });
-    await flush();
-    typeInto(input("Customer PO number"), "KEEP-PO-496");
+    typeInto(input("Customer PO number"), "KEEP-PO-655");
     await flush();
     await act(async () => {
       button("Back to Home").click();
@@ -995,9 +928,8 @@ describe("PO-first draft (issue #496)", () => {
     });
     await flush();
     expect(discardPrompt()).toBeNull();
-    expect(input("Customer PO number").value).toBe("KEEP-PO-496");
+    expect(input("Customer PO number").value).toBe("KEEP-PO-655");
 
-    // Discard leaves the transient work behind and navigates.
     await act(async () => {
       button("Back to Home").click();
     });
@@ -1008,7 +940,6 @@ describe("PO-first draft (issue #496)", () => {
     });
     await flush();
     expect(discardPrompt()).toBeNull();
-    expect(document.body.textContent).not.toContain("New purchase order");
   });
 });
 
@@ -1018,9 +949,8 @@ async function createPurchaseOrder(): Promise<void> {
     button("Open Purchase Orders").click();
   });
   await flush();
-  // #496: the Editor tab opens the blank PO-first form. Linked creation still
-  // lives on the Drafts tab's Add action, which is the path this #492 test
-  // exercises.
+  // The Drafts tab's Add action is the same shared selector the Editor tab's
+  // entry page offers; this #492 test drives it from the list.
   await act(async () => {
     navTab("Drafts").click();
   });

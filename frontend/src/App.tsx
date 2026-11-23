@@ -3308,7 +3308,6 @@ function App() {
                 : purchaseOrderTab(preservedPOPage ?? "po")
             }
           pageSize={workspaceSettings.purchaseOrder.listPageSize}
-          blankDraft={blankPODraft}
           currencyOptions={currencyCatalogue ?? []}
           onLinkQuotation={() => {
             if (activeTutorial === "purchase-order") {

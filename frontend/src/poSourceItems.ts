@@ -234,6 +234,9 @@ export function linesFromSourceItem(
         discountPercent: "0",
         quotationItemNo: item.itemNo,
         quotationSubNo: sub.subNo,
+        // #655: a ghost is quotation-backed by definition; it creates its
+        // allocation on save. The extra line is the other, explicit action.
+        lineKind: "quotation",
         groupKey: `q:${item.itemNo}`,
         parentDescription: item.description,
         descriptionLines: [...sub.descriptionLines],
@@ -262,6 +265,7 @@ export function linesFromSourceItem(
       discountPercent: "0",
       quotationItemNo: item.itemNo,
       quotationSubNo: null,
+      lineKind: "quotation",
       groupKey: "",
       parentDescription: "",
       descriptionLines: [...item.descriptionLines],

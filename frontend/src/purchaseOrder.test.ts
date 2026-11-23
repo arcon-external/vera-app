@@ -624,6 +624,7 @@ describe("PO explained calculation (issue #470)", () => {
         discountPercent: line.discountPercent ?? "0",
         quotationItemNo: null,
         quotationSubNo: null,
+        lineKind: "quotation",
         groupKey: "",
         parentDescription: "",
         descriptionLines: [],
@@ -1017,32 +1018,6 @@ describe("PO-first draft states (issue #496)", () => {
     // Invalid combinations are named, not silently treated as zero.
     expect(purchaseOrderPpnBps("NonFTZ", "Goods", "Construction", "")).toBeNull();
     expect(purchaseOrderPpnBps("NonFTZ", "Services", "", "")).toBeNull();
-  });
-
-  it("keeps the typed header and lines when the first create adopts an id", () => {
-    const base = initialPurchaseOrderEditorState(
-      blankPurchaseOrderDraft({
-        currency: "IDR",
-        taxZone: "FTZ",
-        taxType: "Goods",
-        serviceCategory: "",
-        receivedDate: "2026-10-22",
-      }),
-      IDR
-    );
-    const typed = purchaseOrderEditorReducer(base, {
-      type: "headerChanged",
-      patch: { poNumber: "CUSTOMER-1" },
-    });
-    const created = purchaseOrderEditorReducer(typed, {
-      type: "created",
-      orderId: 41,
-      version: 1,
-    });
-    expect(created.orderId).toBe(41);
-    expect(created.version).toBe(1);
-    expect(created.header.poNumber).toBe("CUSTOMER-1");
-    expect(created.lines).toEqual(typed.lines);
   });
 
   it("sends the editable basis in the update payload", () => {
@@ -1458,6 +1433,79 @@ function groupedOrder(overrides: Partial<PurchaseOrderDTO> = {}): PurchaseOrderD
     ...overrides,
   });
 }
+
+describe("PO line kind (#655)", () => {
+  it("reads a missing kind as quotation and an explicit extra as extra", () => {
+    // The shared fixture predates #655: no LineKind is the compatibility shape
+    // an older server sends, and it must never read as anything but quotation.
+    expect(initial().lines.map((line) => line.lineKind)).toEqual([
+      "quotation",
+      "quotation",
+    ]);
+    const explicit = order({
+      Items: [
+        {
+          ...order().Items[0],
+          LineKind: "extra",
+          QuotationItemNo: null,
+          QuotationSubNo: null,
+        },
+        order().Items[1],
+      ],
+    });
+    const state = initial(explicit);
+    expect(state.lines.map((line) => line.lineKind)).toEqual([
+      "extra",
+      "quotation",
+    ]);
+  });
+
+  it("creates an added line as an explicit extra with no quotation reference", () => {
+    const state = purchaseOrderEditorReducer(initial(), {
+      type: "lineAdded",
+      uom: "Lot",
+    });
+    const added = state.lines[state.lines.length - 1];
+    if (added === undefined) throw new Error("no line was added");
+    expect(added.lineKind).toBe("extra");
+    expect(added.quotationItemNo).toBeNull();
+    expect(added.quotationSubNo).toBeNull();
+    expect(added.unitPrice).toBe("0");
+  });
+
+  it("carries each line's kind in the payload and the dirty snapshot", () => {
+    const payload = buildPurchaseOrderUpdate(initial(), USD);
+    expect(payload.error).toBeNull();
+    expect(payload.input?.Items.map((item) => item.LineKind)).toEqual([
+      "quotation",
+      "quotation",
+    ]);
+
+    const added = purchaseOrderEditorReducer(initial(), {
+      type: "lineAdded",
+      uom: "Pc",
+    });
+    expect(isPurchaseOrderDirty(added)).toBe(true);
+    const withExtra = buildPurchaseOrderUpdate(added, USD);
+    expect(withExtra.error).toBeNull();
+    expect(withExtra.input?.Items.map((item) => item.LineKind)).toEqual([
+      "quotation",
+      "quotation",
+      "extra",
+    ]);
+
+    // Flipping a loaded line's kind is a data change, never a silent one.
+    const flipped = purchaseOrderEditorReducer(initial(), {
+      type: "lineChanged",
+      key: 0,
+      patch: { lineKind: "extra" },
+    });
+    expect(isPurchaseOrderDirty(flipped)).toBe(true);
+    expect(buildPurchaseOrderUpdate(flipped, USD).input?.Items[0].LineKind).toBe(
+      "extra"
+    );
+  });
+});
 
 describe("aggregate header state and payload (#654)", () => {
   it("maps DTO groups and each line's membership to editor keys", () => {

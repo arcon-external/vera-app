@@ -59,6 +59,9 @@ type purchaseOrderRow struct {
 		RemainingQuantityScaled *int64 `json:"remainingQuantityScaled"`
 		// #654: the aggregate group this line belongs to; null when ungrouped.
 		AggregateGroupID *int64 `json:"aggregateGroupId"`
+		// #655: quotation or extra. An extra line carries no reference and no
+		// allocation; an absent value on write is the compatibility quotation.
+		LineKind string `json:"lineKind"`
 	} `json:"items"`
 	// #654: the PO-only presentation headers. A group has no price, cost,
 	// margin or variance of its own: TotalMinor is derived from its children.

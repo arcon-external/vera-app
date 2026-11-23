@@ -265,8 +265,14 @@ type POSourceAvailabilityResponse struct {
 // own calculation. They are returned, not recomputed, so a reopened order shows
 // the arithmetic it was saved with.
 type PurchaseOrderItemRow struct {
-	QuotationItemNo   *int     `json:"quotationItemNo"`
-	QuotationSubNo    *int     `json:"quotationSubNo"`
+	QuotationItemNo *int `json:"quotationItemNo"`
+	QuotationSubNo  *int `json:"quotationSubNo"`
+	// LineKind is quotation or extra (#655). A quotation line fulfils a leaf of
+	// the source revision and owns an allocation; an extra was never on the
+	// quotation, carries no reference and no allocation, and reports as a
+	// pass-through expense. The read always names it, so an older server's
+	// empty value is the only "absent quotation" a reader ever sees.
+	LineKind          string   `json:"lineKind"`
 	ID                int64    `json:"id"`
 	ClientKey         *string  `json:"clientKey"`
 	LineNumber        int      `json:"lineNumber"`
@@ -568,8 +574,12 @@ type PurchaseOrderCreateItemRow struct {
 // the server from array order, so drafts always carry 1..n without gaps. A row
 // discount mirrors the quotation's: a flag plus a 0-100 percentage.
 type PurchaseOrderItemInput struct {
-	QuotationItemNo   *int     `json:"quotationItemNo"`
-	QuotationSubNo    *int     `json:"quotationSubNo"`
+	QuotationItemNo *int `json:"quotationItemNo"`
+	QuotationSubNo  *int `json:"quotationSubNo"`
+	// LineKind is quotation or extra (#655). It is omitempty on purpose: an
+	// absent value is the compatibility quotation, so a client that predates
+	// #655 keeps writing exactly the payload it always did.
+	LineKind          string   `json:"lineKind,omitempty"`
 	ID                *int64   `json:"id"`
 	ClientKey         *string  `json:"clientKey"`
 	Description       string   `json:"description"`
@@ -860,8 +870,12 @@ type PurchaseOrderCorrectionAttachmentRow struct {
 
 // PurchaseOrderCorrectionItemRow is one line of a retained snapshot.
 type PurchaseOrderCorrectionItemRow struct {
-	QuotationItemNo   *int     `json:"quotationItemNo"`
-	QuotationSubNo    *int     `json:"quotationSubNo"`
+	QuotationItemNo *int `json:"quotationItemNo"`
+	QuotationSubNo  *int `json:"quotationSubNo"`
+	// LineKind is the kind the snapshot line carried (#655). A snapshot taken
+	// before the column existed reads quotation, so history can always tell an
+	// intentional extra from a legacy free line.
+	LineKind          string   `json:"lineKind"`
 	LineNumber        int      `json:"lineNumber"`
 	Description       string   `json:"description"`
 	QuantityScaled    int64    `json:"quantityScaled"`

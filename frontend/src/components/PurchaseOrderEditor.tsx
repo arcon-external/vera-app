@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
 import {
   CorrectPurchaseOrder,
-  CreatePurchaseOrderBlankDraft,
   FinalizePurchaseOrder,
   GetPurchaseOrderReview,
   LinkPurchaseOrderDraftSource,
@@ -38,6 +37,7 @@ import {
   newPurchaseOrderLineKey,
   parseQuantityScaled,
   PURCHASE_ORDER_BUSINESS_CATEGORY_OPTIONS,
+  PURCHASE_ORDER_SOURCE_REQUIRED_COPY,
   purchaseOrderEditorReducer,
   sourceStateOf,
   type PurchaseOrderBusinessCategory,
@@ -45,6 +45,7 @@ import {
   type PurchaseOrderEditorAction,
   type PurchaseOrderEditorState,
   type PurchaseOrderLine,
+  type PurchaseOrderLineKind,
   type PurchaseOrderUpdateInput,
 } from "../purchaseOrder";
 import {
@@ -589,8 +590,16 @@ function displayPurchaseOrderDate(raw: string): string {
   });
 }
 
-/** One empty editor line, with the stable alias every write submits. */
-function newEditorLine(key: number, uom: string): PurchaseOrderLine {
+/**
+ * One empty editor line, with the stable alias every write submits. The kind
+ * defaults to quotation because a fresh split part of a sourced line fulfils
+ * the same leaf; the explicit "Add extra line" action names extra itself.
+ */
+function newEditorLine(
+  key: number,
+  uom: string,
+  lineKind: PurchaseOrderLineKind = "quotation"
+): PurchaseOrderLine {
   return {
     key,
     clientKey: newPurchaseOrderLineKey(),
@@ -604,6 +613,7 @@ function newEditorLine(key: number, uom: string): PurchaseOrderLine {
     discountPercent: "0",
     quotationItemNo: null,
     quotationSubNo: null,
+    lineKind,
     groupKey: "",
     parentDescription: "",
     descriptionLines: [],
@@ -1176,7 +1186,14 @@ export function PurchaseOrderEditorView({
         state.lines,
         key,
         groupKey,
-        newEditorLine(state.nextKey, line.uom || uomOptions[0]?.value || "")
+        // A new part of a split line belongs to the same kind as the line it
+        // splits; an extra split stays extra and a quotation split stays
+        // quotation-backed.
+        newEditorLine(
+          state.nextKey,
+          line.uom || uomOptions[0]?.value || "",
+          line.lineKind
+        )
       )
     );
   };
@@ -1238,7 +1255,11 @@ export function PurchaseOrderEditorView({
       addSubLine(
         state.lines,
         group.groupKey,
-        newEditorLine(state.nextKey, group.lines[0]?.uom ?? "")
+        newEditorLine(
+          state.nextKey,
+          group.lines[0]?.uom ?? "",
+          group.lines[0]?.lineKind ?? "quotation"
+        )
       )
     );
   };
@@ -1930,11 +1951,11 @@ export function PurchaseOrderEditorView({
               </label>
               <Button
                 size="sm"
-                aria-label="Add line"
+                aria-label="Add extra line"
                 data-tutorial="po-add-line"
                 onClick={addLine}
               >
-                Add line
+                Add extra line
               </Button>
             </div>
           }
@@ -2341,7 +2362,7 @@ export function PurchaseOrderEditorPage({
     dispatch({ type: "lineAdded", uom: uomOptions[0]?.value ?? "" });
     setOpenMatchLineKey(null);
     setPendingFocus(`Description for line ${at}`);
-    reconciliation.announce(`Line ${at} added.`);
+    reconciliation.announce(`Extra line ${at} added.`);
   };
   useEffect(() => {
     if (pendingFocus === null) return;
@@ -2687,10 +2708,8 @@ export function PurchaseOrderEditorPage({
    * a second one.
    */
   type PersistedDraft = { id: number; version: number };
-  const persisting = useRef<Promise<PersistedDraft> | null>(null);
-  // Retained beyond the in-flight promise so a trigger that arrives after the
-  // create resolves but before React renders the `created` action still sees
-  // the one row.
+  // Retained after a write so a trigger that arrives before React renders the
+  // `saveSucceeded` action still sees the row as the server now stands.
   const persistedRef = useRef<PersistedDraft | null>(null);
   /**
    * #584: every successful write advances the retained version, so the next
@@ -2724,28 +2743,10 @@ export function PurchaseOrderEditorPage({
       return existing;
     }
     if (persistedRef.current !== null) return persistedRef.current;
-    if (persisting.current !== null) return persisting.current;
-    const promise = (async () => {
-      const created = await CreatePurchaseOrderBlankDraft(
-        new backend.PurchaseOrderBlankCreateInput({
-          ReceivedDate: current.header.receivedDate,
-          TaxZone: current.taxZone,
-          TaxType: current.taxType,
-          ServiceCategory: current.serviceCategory,
-          BusinessCategory: current.header.businessCategory,
-        })
-      );
-      dispatch({ type: "created", orderId: created.ID, version: created.Version });
-      const result = { id: created.ID, version: created.Version };
-      persistedRef.current = result;
-      return result;
-    })();
-    persisting.current = promise;
-    try {
-      return await promise;
-    } finally {
-      persisting.current = null;
-    }
+    // #655: a purchase order is created by the quotation selector, never from
+    // an empty form. A source-less draft has no row to create here; the guard
+    // is the refusal that keeps a stale caller from inventing one.
+    throw new Error(PURCHASE_ORDER_SOURCE_REQUIRED_COPY);
   };
 
   /**
@@ -2776,6 +2777,12 @@ export function PurchaseOrderEditorPage({
     const preflight = buildPurchaseOrderUpdate(editorStateRef.current, activeCurrency);
     if (preflight.input === null) {
       return { kind: "error", message: preflight.error ?? "The draft is incomplete." };
+    }
+    if (editorStateRef.current.orderId === 0) {
+      // #655: the selector creates the row; nothing here may create a
+      // source-less one. Refusing with the entry page's own sentence keeps the
+      // rule and the instruction the same.
+      return { kind: "error", message: PURCHASE_ORDER_SOURCE_REQUIRED_COPY };
     }
     let shared = workingCopyPersisting.current;
     if (shared === null) {
@@ -3075,7 +3082,7 @@ export function PurchaseOrderEditorPage({
       const message = "Add at least one line before Final Save.";
       dispatch({ type: "saveFailed", error: message });
       reconciliation.setBlockedAnnouncement(`Final Save is blocked. 1 blocker: ${message}.`);
-      const addLine = document.querySelector<HTMLElement>('[aria-label="Add line"]');
+      const addLine = document.querySelector<HTMLElement>('[aria-label="Add extra line"]');
       if (addLine !== null) addLine.focus();
       return;
     }
@@ -3418,7 +3425,7 @@ export function PurchaseOrderEditorPage({
     }
   };
   // U1: immediate removal keeps review history server-side; focus moves to
-  // the next line's description (or Add line) and never falls to body.
+  // the next line's description (or Add extra line) and never falls to body.
   const removeLine = (clientKey: string) => {
     const at = state.lines.findIndex((line) => line.clientKey === clientKey);
     if (at === -1) return;
@@ -3431,7 +3438,7 @@ export function PurchaseOrderEditorPage({
         `Description for line ${nextAt === -1 ? at + 1 : nextAt + 1}`
       );
     } else {
-      setPendingFocus("Add line");
+      setPendingFocus("Add extra line");
     }
     reconciliation.announce(`Line ${at + 1} removed.`);
   };
@@ -3536,10 +3543,18 @@ export function PurchaseOrderEditorPage({
           onMatchChange={(lineKey, quotationItemNo, quotationSubNo) => {
             const target = state.lines.find((line) => line.clientKey === lineKey);
             if (target === undefined) return;
+            // #655: the kind follows the reference. Choosing a match makes the
+            // line quotation-backed (and it gains an allocation on save);
+            // clearing it makes an explicit extra, never a silent legacy
+            // quotation line that strict mode would refuse.
             dispatch({
               type: "lineChanged",
               key: target.key,
-              patch: { quotationItemNo, quotationSubNo },
+              patch: {
+                quotationItemNo,
+                quotationSubNo,
+                lineKind: quotationItemNo === null ? "extra" : "quotation",
+              },
             });
           }}
           onCommitLine={(lineKey, field, explicitRaw) =>

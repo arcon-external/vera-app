@@ -593,6 +593,66 @@ describe("PO editor aggregate mode (#654)", () => {
     );
   }
 
+  it("keeps an extra child editable inside an aggregate with no internal economics", () => {
+    render(
+      aggregateOrder({
+        Items: [
+          aggregateDtoItem({
+            ID: 1,
+            LineNumber: 1,
+            AggregateGroupID: 1,
+            NetMinor: 20000,
+          }),
+          aggregateDtoItem({
+            ID: 2,
+            LineNumber: 2,
+            AggregateGroupID: 1,
+            Description: "Freight surcharge",
+            QuotationItemNo: null,
+            QuotationSubNo: null,
+            QuantityScaled: 20000,
+            UoM: "Lot",
+            UnitPriceMinor: 500000,
+            GrossMinor: 1000000,
+            NetMinor: 1000000,
+            LineKind: "extra",
+          }),
+        ],
+        AggregateGroups: [
+          {
+            ID: 1,
+            DisplayOrder: 1,
+            Title: "Delivered package",
+            OrderedQuantityScaled: 20000,
+            OrderedUoM: "Lot",
+            ShowChildrenToCustomer: true,
+            TotalMinor: 1020000,
+            DisplayUnitPriceMinor: 510000,
+          },
+        ],
+      })
+    );
+
+    // One header over both children, and the extra is an ordinary editable
+    // row beneath it - not a separate presentation with its own money.
+    const title = document.querySelector<HTMLInputElement>(
+      'input[aria-label="Aggregate line 1 title"]'
+    );
+    if (title === null) throw new Error("no aggregate header rendered");
+    expect(title.value).toBe("Delivered package");
+    const description = lineInput("Description for line 2");
+    expect(description.value).toBe("Freight surcharge");
+    typeInto(description, "Freight and handling");
+    expect(lineInput("Description for line 2").value).toBe("Freight and handling");
+
+    // Story 42: the group and its extra child carry no cost, margin, variance
+    // or supplier economics, and no "Extra Expense" classification label.
+    expect(document.body.textContent).not.toMatch(/extra expense/i);
+    expect(document.body.textContent).not.toMatch(/margin/i);
+    expect(document.body.textContent).not.toMatch(/variance/i);
+    expect(document.body.textContent).not.toMatch(/supplier/i);
+  });
+
   it("groups a selected line and a ghost into one line with the defaults", () => {
     render(
       aggregateOrder({

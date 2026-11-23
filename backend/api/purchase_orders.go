@@ -530,6 +530,11 @@ func purchaseOrderError(context echo.Context, err error) error {
 			"error": err.Error(),
 			"code":  "po_source_out_of_range",
 		})
+	case errors.Is(err, store.ErrPurchaseOrderLineKindInvalid):
+		return context.JSON(http.StatusUnprocessableEntity, map[string]string{
+			"error": err.Error(),
+			"code":  "po_line_kind_invalid",
+		})
 	case errors.Is(err, store.ErrPurchaseOrderBadReference):
 		return context.JSON(http.StatusUnprocessableEntity, map[string]string{"error": err.Error()})
 	case errors.Is(err, store.ErrPurchaseOrderBusinessCategoryRequired):
@@ -690,6 +695,7 @@ func mapPurchaseOrder(order store.PurchaseOrder) apicontract.PurchaseOrderRow {
 			Description:       item.Description,
 			QuotationItemNo:   item.QuotationItemNo,
 			QuotationSubNo:    item.QuotationSubNo,
+			LineKind:          item.LineKind,
 			ID:                item.ID,
 			ClientKey:         nilIfEmpty(item.ClientKey),
 			QuantityScaled:    item.QuantityScaled,
@@ -762,8 +768,12 @@ func purchaseOrderUpdateFromRequest(request apicontract.PurchaseOrderEditableReq
 	items := make([]store.PurchaseOrderItem, 0, len(request.Items))
 	for _, item := range request.Items {
 		items = append(items, store.PurchaseOrderItem{
-			QuotationItemNo:   item.QuotationItemNo,
-			QuotationSubNo:    item.QuotationSubNo,
+			QuotationItemNo: item.QuotationItemNo,
+			QuotationSubNo:  item.QuotationSubNo,
+			// An empty kind is left empty: the store normalizes it to quotation
+			// at the one validation seam, so the API does not carry a second
+			// default a caller could disagree with.
+			LineKind:          item.LineKind,
 			ID:                valueOrZero(item.ID),
 			ClientKey:         stringOrEmpty(item.ClientKey),
 			Description:       item.Description,
@@ -922,6 +932,7 @@ func mapPurchaseOrderCorrection(entry store.PurchaseOrderCorrection) apicontract
 		row.Items = append(row.Items, apicontract.PurchaseOrderCorrectionItemRow{
 			QuotationItemNo:   item.QuotationItemNo,
 			QuotationSubNo:    item.QuotationSubNo,
+			LineKind:          item.LineKind,
 			LineNumber:        item.LineNumber,
 			Description:       item.Description,
 			QuantityScaled:    item.QuantityScaled,

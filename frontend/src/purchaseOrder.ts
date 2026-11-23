@@ -40,6 +40,34 @@ export {
   parseUnitPriceMinor,
 };
 
+/**
+ * The two purchase order line kinds (#655). A quotation line fulfils one leaf
+ * of the issued revision it was copied from and owns the allocation; an extra
+ * line was never on the quotation, carries no reference and no allocation, and
+ * is a pass-through expense with zero margin.
+ */
+export type PurchaseOrderLineKind = "quotation" | "extra";
+
+/**
+ * The one sentence that keeps the editor and the entry page honest: a
+ * purchase order starts from an issued quotation revision, never from an empty
+ * form. The Editor tab shows it before anything is open, and it is the
+ * refusal if a source-less draft is ever reachable (#655).
+ */
+export const PURCHASE_ORDER_SOURCE_REQUIRED_COPY =
+  "Start a purchase order from an issued quotation revision. The quotation supplies the customer, currency and line items; the customer PO number and dates are entered here.";
+
+/**
+ * Reads a stored kind. Only the exact extra value flips a line: an absent or
+ * unknown value is the compatibility quotation, because a line the server did
+ * not call an extra still fulfils its reference.
+ */
+export function purchaseOrderLineKindOf(
+  raw: string | null | undefined
+): PurchaseOrderLineKind {
+  return raw === "extra" ? "extra" : "quotation";
+}
+
 /** One line as the desktop binding returns it (PascalCase = Wails models). */
 export interface PurchaseOrderDTOItem {
   /**
@@ -54,6 +82,12 @@ export interface PurchaseOrderDTOItem {
   ClientKey?: string | null;
   QuotationItemNo?: number | null;
   QuotationSubNo?: number | null;
+  /**
+   * #655: quotation or extra. Absent on a payload from a server older than
+   * #655, which only ever created quotation lines; read it through
+   * `purchaseOrderLineKindOf`, never by truthiness.
+   */
+  LineKind?: string;
   LineNumber: number;
   Description: string;
   QuantityScaled: number;
@@ -294,6 +328,12 @@ export interface PurchaseOrderLine {
   quotationItemNo: number | null;
   quotationSubNo: number | null;
   /**
+   * #655: quotation or extra. Structural, not a label: it decides whether the
+   * row carries a reference and an allocation, and it is part of the payload
+   * and the dirty snapshot. An extra line has no quotation reference.
+   */
+  lineKind: PurchaseOrderLineKind;
+  /**
    * Split-line identity (#573). Empty for a plain line; every row of one split
    * line shares the key, and the parent is a presentation of those rows.
    */
@@ -434,7 +474,6 @@ export type PurchaseOrderEditorAction =
       >;
     }
   | { type: "currencyChanged"; code: string; from: CurrencyInfo; to: CurrencyInfo }
-  | { type: "created"; orderId: number; version: number }
   | { type: "saveStarted" }
   | { type: "saveConflict" }
   | { type: "versionAdopted"; version: number }
@@ -466,6 +505,11 @@ export interface PurchaseOrderItemInput {
   ClientKey?: string | null;
   QuotationItemNo?: number | null;
   QuotationSubNo?: number | null;
+  /**
+   * #655: the line's kind. It is always sent explicitly, even for a quotation
+   * line, so the server never has to infer what the editor knew.
+   */
+  LineKind: PurchaseOrderLineKind;
   Description: string;
   QuantityScaled: number;
   UoM: string;
@@ -1108,6 +1152,7 @@ export function initialPurchaseOrderEditorState(
     discountPercent: String(item.DiscountPercent ?? 0),
     quotationItemNo: item.QuotationItemNo ?? null,
     quotationSubNo: item.QuotationSubNo ?? null,
+    lineKind: purchaseOrderLineKindOf(item.LineKind),
     groupKey: item.GroupKey ?? "",
     parentDescription: item.ParentDescription ?? "",
     descriptionLines: item.DescriptionLines ?? [],
@@ -1196,6 +1241,7 @@ export function serializePurchaseOrderEditor(
       discountPercent: line.discountPercent,
       quotationItemNo: line.quotationItemNo,
       quotationSubNo: line.quotationSubNo,
+      lineKind: line.lineKind,
       groupKey: line.groupKey,
       parentDescription: line.parentDescription,
       descriptionLines: line.descriptionLines,
@@ -1353,6 +1399,7 @@ export function buildPurchaseOrderUpdate(
       ClientKey: line.clientKey,
       QuotationItemNo: line.quotationItemNo,
       QuotationSubNo: line.quotationSubNo,
+      LineKind: line.lineKind,
       Description: line.description,
       QuantityScaled: quantity,
       UoM: line.uom,
@@ -1596,6 +1643,9 @@ export function purchaseOrderEditorReducer(
             discountPercent: "0",
             quotationItemNo: null,
             quotationSubNo: null,
+            // #655: the explicit add is the extra line. A quotation-backed
+            // line arrives from a ghost or a source match, never from here.
+            lineKind: "extra",
             groupKey: "",
             parentDescription: "",
             descriptionLines: [],
@@ -1622,6 +1672,7 @@ export function purchaseOrderEditorReducer(
             discountPercent: "0",
             quotationItemNo: action.quotationItemNo,
             quotationSubNo: action.quotationSubNo,
+            lineKind: "quotation",
             groupKey: "",
             parentDescription: "",
             descriptionLines: [],
@@ -1715,11 +1766,6 @@ export function purchaseOrderEditorReducer(
       });
       return { ...state, currency: action.code, lines };
     }
-    case "created":
-      // The first Save/upload persisted the transient row. Keep the working
-      // copy and only adopt the server identity, so a failed follow-up update
-      // retries against this row instead of creating a second one.
-      return { ...state, orderId: action.orderId, version: action.version };
     case "saveStarted":
       return { ...state, saving: true, error: null };
     case "saveConflict":

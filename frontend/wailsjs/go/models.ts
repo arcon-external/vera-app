@@ -2085,6 +2085,7 @@ export namespace backend {
 	export class PurchaseOrderCorrectionItemDTO {
 	    QuotationItemNo?: number;
 	    QuotationSubNo?: number;
+	    LineKind: string;
 	    LineNumber: number;
 	    Description: string;
 	    QuantityScaled: number;
@@ -2108,6 +2109,7 @@ export namespace backend {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.QuotationItemNo = source["QuotationItemNo"];
 	        this.QuotationSubNo = source["QuotationSubNo"];
+	        this.LineKind = source["LineKind"];
 	        this.LineNumber = source["LineNumber"];
 	        this.Description = source["Description"];
 	        this.QuantityScaled = source["QuantityScaled"];
@@ -2306,6 +2308,7 @@ export namespace backend {
 	export class PurchaseOrderItemInput {
 	    QuotationItemNo?: number;
 	    QuotationSubNo?: number;
+	    LineKind: string;
 	    ID?: number;
 	    ClientKey?: string;
 	    Description: string;
@@ -2327,6 +2330,7 @@ export namespace backend {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.QuotationItemNo = source["QuotationItemNo"];
 	        this.QuotationSubNo = source["QuotationSubNo"];
+	        this.LineKind = source["LineKind"];
 	        this.ID = source["ID"];
 	        this.ClientKey = source["ClientKey"];
 	        this.Description = source["Description"];
@@ -2468,6 +2472,7 @@ export namespace backend {
 	export class PurchaseOrderItemDTO {
 	    QuotationItemNo?: number;
 	    QuotationSubNo?: number;
+	    LineKind: string;
 	    ID: number;
 	    ClientKey?: string;
 	    LineNumber: number;
@@ -2495,6 +2500,7 @@ export namespace backend {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.QuotationItemNo = source["QuotationItemNo"];
 	        this.QuotationSubNo = source["QuotationSubNo"];
+	        this.LineKind = source["LineKind"];
 	        this.ID = source["ID"];
 	        this.ClientKey = source["ClientKey"];
 	        this.LineNumber = source["LineNumber"];
@@ -3725,6 +3731,7 @@ export namespace poreport {
 	    amountMinor: number;
 	    costedMinor: number;
 	    uncostedMinor: number;
+	    extraExpenseMinor: number;
 	    capitalMinor: number;
 	    marginMinor: number;
 	    marginBps?: number;
@@ -3742,6 +3749,7 @@ export namespace poreport {
 	        this.amountMinor = source["amountMinor"];
 	        this.costedMinor = source["costedMinor"];
 	        this.uncostedMinor = source["uncostedMinor"];
+	        this.extraExpenseMinor = source["extraExpenseMinor"];
 	        this.capitalMinor = source["capitalMinor"];
 	        this.marginMinor = source["marginMinor"];
 	        this.marginBps = source["marginBps"];
@@ -3807,6 +3815,7 @@ export namespace poreport {
 	    amountMinor: number;
 	    costedMinor: number;
 	    uncostedMinor: number;
+	    extraExpenseMinor: number;
 	    capitalMinor: number;
 	    marginMinor: number;
 	    marginBps?: number;
@@ -3822,6 +3831,7 @@ export namespace poreport {
 	        this.amountMinor = source["amountMinor"];
 	        this.costedMinor = source["costedMinor"];
 	        this.uncostedMinor = source["uncostedMinor"];
+	        this.extraExpenseMinor = source["extraExpenseMinor"];
 	        this.capitalMinor = source["capitalMinor"];
 	        this.marginMinor = source["marginMinor"];
 	        this.marginBps = source["marginBps"];
@@ -4056,6 +4066,7 @@ export namespace poreport {
 	    amountMinor: number;
 	    costedMinor: number;
 	    uncostedMinor: number;
+	    extraExpenseMinor: number;
 	    capitalMinor: number;
 	    marginMinor: number;
 	    marginBps?: number;
@@ -4074,6 +4085,7 @@ export namespace poreport {
 	        this.amountMinor = source["amountMinor"];
 	        this.costedMinor = source["costedMinor"];
 	        this.uncostedMinor = source["uncostedMinor"];
+	        this.extraExpenseMinor = source["extraExpenseMinor"];
 	        this.capitalMinor = source["capitalMinor"];
 	        this.marginMinor = source["marginMinor"];
 	        this.marginBps = source["marginBps"];
