@@ -988,3 +988,54 @@ func TestPurchaseOrderDraftSaveRoundTripsAggregateGroups(t *testing.T) {
 		}
 	}
 }
+
+// TestPurchaseOrderDraftSaveRefusesASplitPackageWithoutStoredGroupKeys proves
+// the server derives the display-group key the client derives (#648). A
+// pre-migration row carries no group_key, so the client identifies a split
+// package by its quotation item (`q:<item>`); without the same derivation the
+// placement rule sees no package and lets one package sit in two aggregates,
+// which the customer document renders as half a package in each.
+func TestPurchaseOrderDraftSaveRefusesASplitPackageWithoutStoredGroupKeys(t *testing.T) {
+	fixture := newAggregateSaveFixture(t, "vera_po_648_split_key")
+
+	split := indexedItems(fixture.order.Items, 0, 1, 2)
+	for index := range split {
+		split[index].GroupKey = ""
+	}
+	_, err := fixture.database.UpdatePurchaseOrderDraft(fixture.ctx,
+		draftUpdate(fixture.order, fixture.user, split, []PurchaseOrderAggregateGroupInput{
+			itemGroupInput("Left half", QuantityScale, "Lot"),
+			itemGroupInput("Right half", QuantityScale, "Lot"),
+		}))
+	if !errors.Is(err, ErrPurchaseOrderAggregateInvalid) {
+		t.Fatalf("split package without stored keys = %v; want ErrPurchaseOrderAggregateInvalid", err)
+	}
+	for _, message := range []string{"line 3", "splits display group", "q:2"} {
+		if !strings.Contains(err.Error(), message) {
+			t.Errorf("error %q does not name %q", err.Error(), message)
+		}
+	}
+
+	// The whole package in one aggregate is the arrangement the rule allows,
+	// so the derivation must not refuse every package without a stored key.
+	together := indexedItems(fixture.order.Items, 0, 1, 1)
+	for index := range together {
+		together[index].GroupKey = ""
+	}
+	saved, err := fixture.database.UpdatePurchaseOrderDraft(fixture.ctx,
+		draftUpdate(fixture.order, fixture.user, together,
+			[]PurchaseOrderAggregateGroupInput{itemGroupInput("Whole package", 2*QuantityScale, "Lot")}))
+	if err != nil {
+		t.Fatalf("whole package without stored keys = %v; want it saved", err)
+	}
+	if len(saved.AggregateGroups) != 1 {
+		t.Fatalf("groups after the whole-package save = %d; want 1", len(saved.AggregateGroups))
+	}
+	groupID := saved.AggregateGroups[0].ID
+	for _, line := range saved.Items[1:] {
+		if line.AggregateGroupID != groupID {
+			t.Errorf("line %d membership = %d; want the package group %d",
+				line.LineNumber, line.AggregateGroupID, groupID)
+		}
+	}
+}

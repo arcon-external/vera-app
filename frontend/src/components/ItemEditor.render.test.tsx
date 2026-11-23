@@ -232,6 +232,9 @@ describe("ItemEditor purchase-order mode (#573)", () => {
     expect(html).not.toContain("Enable a discount for sub-item 1 of line 1");
     expect(html).not.toContain("Discount percentage for sub-item 1 of line 1");
     expect(html).not.toContain('aria-label="Enable a discount for line 1"');
+    // #648 spec review: the split line's own discount control is absent too,
+    // not only the sub-item's.
+    expect(html).not.toContain('aria-label="Discount percentage for line 1"');
   });
 
   it("hides the Discount column and labels the price for a plain PO row", () => {
@@ -244,6 +247,8 @@ describe("ItemEditor purchase-order mode (#573)", () => {
     expect(html).not.toContain(">Unit cost<");
     expect(html).toContain(">Unit price<");
     expect(html).not.toContain('aria-label="Enable a discount for line 1"');
+    // #648 spec review: the percentage input is gone in PO mode as well.
+    expect(html).not.toContain('aria-label="Discount percentage for line 1"');
   });
 
   it("shows Unsold, extra-income and price-variance badges in PO mode", () => {
