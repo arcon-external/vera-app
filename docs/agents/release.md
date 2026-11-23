@@ -215,7 +215,10 @@ variable.
    free line returns `422 po_free_line_retired`; a row discount or a header
    discount/adjustment returns `422 po_discount_forbidden`. A v0.24.0 desktop
    creates only quotation-backed drafts and explicit extra lines, so it saves
-   normally.
+   normally. The v0.24.0 purchase-order editor still shows its row-discount
+   control; strict mode is what retires the value, so a staff member who sets
+   one receives `po_discount_forbidden` and must clear it. That refusal is the
+   cutover working, not a defect.
 
 ### Rollback
 
