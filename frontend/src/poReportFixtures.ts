@@ -72,19 +72,23 @@ function metrics(
   poCount: number,
   amountMinor: number,
   uncostedMinor: number,
-  capitalMinor: number
+  capitalMinor: number,
+  extraExpenseMinor = 0
 ): PurchaseOrderReportMetrics {
-  const costedMinor = amountMinor - uncostedMinor;
+  // The extra is its own pass-through bucket: it is amount, never costed and
+  // never uncosted, and the coverage denominator excludes it (#655).
+  const costedMinor = amountMinor - uncostedMinor - extraExpenseMinor;
   const marginMinor = costedMinor - capitalMinor;
   return {
     poCount,
     amountMinor,
     costedMinor,
     uncostedMinor,
+    extraExpenseMinor,
     capitalMinor,
     marginMinor,
     marginBps: fixtureRatioBps(marginMinor, capitalMinor),
-    coverageBps: fixtureRatioBps(costedMinor, amountMinor),
+    coverageBps: fixtureRatioBps(costedMinor, amountMinor - extraExpenseMinor),
   };
 }
 
@@ -250,6 +254,71 @@ export function purchaseOrderReportFixture(): PurchaseOrderReportData {
         text: "One purchase order in this range carries a retired whole-order adjustment. The amount includes it; no margin is inferred from it.",
       },
     ],
+  };
+}
+
+/**
+ * Issue #655: the Extra Expense bucket in both shapes it takes. March is a
+ * quoted line (5 x 10.000, cost 6.000) beside a freight extra (2 x 500.000);
+ * April carries only an extra expense. The extra is its own bucket, never
+ * costed and never margin, and the extra-only row is the zero-denominator case
+ * where coverage is unknown rather than 0% or 100% profit.
+ */
+export function purchaseOrderReportExtraExpenseFixture(): PurchaseOrderReportData {
+  const report = purchaseOrderReportFixture();
+  const march = metrics(1, 1_050_000, 0, 30_000, 1_000_000);
+  const april = metrics(1, 1_000_000, 0, 0, 1_000_000);
+  const periods = [
+    {
+      periodStart: "2026-03-01",
+      partial: false,
+      inProgress: false,
+      ...march,
+    },
+    {
+      periodStart: "2026-04-01",
+      partial: false,
+      inProgress: false,
+      ...april,
+    },
+  ];
+  const totals = metrics(2, 2_050_000, 0, 30_000, 2_000_000);
+  const emptyBasis = {
+    historyFrom: "",
+    historyTo: "",
+    completeMonths: 0,
+    poCount: 0,
+    asOf: "2026-11-19",
+  };
+  return {
+    ...report,
+    totals,
+    periods,
+    categories: [
+      {
+        businessCategory: "FM",
+        label: "Facility Management",
+        ...totals,
+      },
+    ],
+    categorySeries: [],
+    projection: {
+      monthly: {
+        status: "unavailable",
+        reason: "not_current_period",
+        method: "",
+        basis: emptyBasis,
+        buckets: [],
+      },
+      yearly: {
+        status: "unavailable",
+        reason: "not_current_period",
+        method: "",
+        basis: emptyBasis,
+        buckets: [],
+      },
+    },
+    notes: [],
   };
 }
 
@@ -677,6 +746,7 @@ export function purchaseOrderReportMaxFixture(): PurchaseOrderReportData {
     amountMinor: max,
     costedMinor: costed,
     uncostedMinor: uncosted,
+    extraExpenseMinor: 0,
     capitalMinor: capital,
     marginMinor: margin,
     marginBps: fixtureRatioBps(margin, capital),
@@ -698,6 +768,7 @@ const RECORDED_FUTURE_METRICS: PurchaseOrderReportMetrics = {
   amountMinor: 777_000,
   costedMinor: 700_000,
   uncostedMinor: 77_000,
+  extraExpenseMinor: 0,
   capitalMinor: 600_000,
   marginMinor: 100_000,
   marginBps: fixtureRatioBps(100_000, 600_000),
@@ -712,7 +783,8 @@ function addFixtureMetrics(
     base.poCount + add.poCount,
     base.amountMinor + add.amountMinor,
     base.uncostedMinor + add.uncostedMinor,
-    base.capitalMinor + add.capitalMinor
+    base.capitalMinor + add.capitalMinor,
+    base.extraExpenseMinor + add.extraExpenseMinor
   );
 }
 

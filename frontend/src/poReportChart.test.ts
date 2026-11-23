@@ -105,6 +105,7 @@ function metrics(
     amountMinor,
     costedMinor: amountMinor,
     uncostedMinor: 0,
+    extraExpenseMinor: 0,
     capitalMinor,
     marginMinor,
     marginBps,

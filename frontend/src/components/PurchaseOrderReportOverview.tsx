@@ -108,6 +108,11 @@ export function PurchaseOrderReportOverview({
         ? "Current year to date"
         : "Selected range";
   const totals = report?.totals;
+  const nonExtraMinor =
+    totals === undefined ? 0 : totals.amountMinor - totals.extraExpenseMinor;
+  const hasExtraExpense = totals !== undefined && totals.extraExpenseMinor > 0;
+  const showCoverage =
+    totals !== undefined && (totals.uncostedMinor > 0 || hasExtraExpense);
 
   const kpis =
     totals === undefined
@@ -316,15 +321,43 @@ export function PurchaseOrderReportOverview({
                 </div>
               ))}
             </dl>
-            {totals.uncostedMinor > 0 ? (
-              <p
+            {showCoverage ? (
+              <div
                 data-report-coverage=""
                 className="mt-4 border-t border-rule pt-3 text-small leading-relaxed text-ink-600"
               >
-                Coverage: {formatReportBps(totals.coverageBps)} of the amount is
-                costed; {money(entry, totals.uncostedMinor)} of{" "}
-                {money(entry, totals.amountMinor)} is uncosted.
-              </p>
+                {hasExtraExpense ? (
+                  <>
+                    <p>
+                      {nonExtraMinor > 0 ? (
+                        <>
+                          Coverage: {formatReportBps(totals.coverageBps)} of the
+                          non-extra amount; {money(entry, totals.costedMinor)} of{" "}
+                          {money(entry, nonExtraMinor)} is costed and{" "}
+                          {totals.uncostedMinor > 0
+                            ? `${money(entry, totals.uncostedMinor)} is uncosted.`
+                            : "nothing is uncosted."}
+                        </>
+                      ) : (
+                        <>
+                          Coverage: - · this range carries only extra expense, so
+                          there is no non-extra amount to measure.
+                        </>
+                      )}
+                    </p>
+                    <p data-report-extra-expense="" className="mt-1">
+                      Extra expense: {money(entry, totals.extraExpenseMinor)} —
+                      pass-through, excluded from cost, coverage and margin.
+                    </p>
+                  </>
+                ) : (
+                  <p>
+                    Coverage: {formatReportBps(totals.coverageBps)} of the amount
+                    is costed; {money(entry, totals.uncostedMinor)} of{" "}
+                    {money(entry, totals.amountMinor)} is uncosted.
+                  </p>
+                )}
+              </div>
             ) : null}
             {unresolvedCurrency ? (
               <p

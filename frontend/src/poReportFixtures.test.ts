@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   fixtureRatioBps,
+  purchaseOrderReportExtraExpenseFixture,
   purchaseOrderReportFixture,
   purchaseOrderReportMaxFixture,
   purchaseOrderReportMonthFixture,
@@ -22,8 +23,9 @@ import type {
 // fails one of these can still render; it just cannot be cited as proof.
 
 function assertRow(name: string, row: PurchaseOrderReportMetrics): void {
-  expect(row.amountMinor, `${name} amount = costed + uncosted`).toBe(
-    row.costedMinor + row.uncostedMinor
+  expect(row.extraExpenseMinor, `${name} extra expense`).toBeGreaterThanOrEqual(0);
+  expect(row.amountMinor, `${name} amount = costed + uncosted + extra`).toBe(
+    row.costedMinor + row.uncostedMinor + row.extraExpenseMinor
   );
   expect(row.marginMinor, `${name} margin = costed - capital`).toBe(
     row.costedMinor - row.capitalMinor
@@ -32,7 +34,7 @@ function assertRow(name: string, row: PurchaseOrderReportMetrics): void {
     fixtureRatioBps(row.marginMinor, row.capitalMinor)
   );
   expect(row.coverageBps, `${name} coverageBps`).toBe(
-    fixtureRatioBps(row.costedMinor, row.amountMinor)
+    fixtureRatioBps(row.costedMinor, row.amountMinor - row.extraExpenseMinor)
   );
 }
 
@@ -42,6 +44,7 @@ function sumRows(rows: PurchaseOrderReportMetrics[]): PurchaseOrderReportMetrics
     amountMinor: 0,
     costedMinor: 0,
     uncostedMinor: 0,
+    extraExpenseMinor: 0,
     capitalMinor: 0,
     marginMinor: 0,
     marginBps: null,
@@ -52,6 +55,7 @@ function sumRows(rows: PurchaseOrderReportMetrics[]): PurchaseOrderReportMetrics
     total.amountMinor += row.amountMinor;
     total.costedMinor += row.costedMinor;
     total.uncostedMinor += row.uncostedMinor;
+    total.extraExpenseMinor += row.extraExpenseMinor;
     total.capitalMinor += row.capitalMinor;
     total.marginMinor += row.marginMinor;
   }
@@ -66,6 +70,7 @@ function assertFooting(report: PurchaseOrderReportData): void {
     expect(period.amountMinor, `${period.periodStart} empty amount`).toBe(0);
     expect(period.costedMinor, `${period.periodStart} empty costed`).toBe(0);
     expect(period.uncostedMinor, `${period.periodStart} empty uncosted`).toBe(0);
+    expect(period.extraExpenseMinor, `${period.periodStart} empty extra`).toBe(0);
     expect(period.capitalMinor, `${period.periodStart} empty capital`).toBe(0);
     expect(period.marginMinor, `${period.periodStart} empty margin`).toBe(0);
   }
@@ -85,6 +90,9 @@ function assertFooting(report: PurchaseOrderReportData): void {
     );
     expect(sum.uncostedMinor, `${name} uncosted foots`).toBe(
       report.totals.uncostedMinor
+    );
+    expect(sum.extraExpenseMinor, `${name} extra expense foots`).toBe(
+      report.totals.extraExpenseMinor
     );
     expect(sum.capitalMinor, `${name} capital foots`).toBe(
       report.totals.capitalMinor
@@ -199,6 +207,7 @@ describe("purchase order report fixtures (issue #632)", () => {
       amountMinor: november.amountMinor,
       costedMinor: november.costedMinor,
       uncostedMinor: november.uncostedMinor,
+      extraExpenseMinor: november.extraExpenseMinor,
       capitalMinor: november.capitalMinor,
       marginMinor: november.marginMinor,
       marginBps: november.marginBps,
@@ -341,6 +350,48 @@ describe("purchase order report fixtures (issue #632)", () => {
         );
       }
     }
+  });
+
+  it("buckets extra expense separately and never folds it into cost or coverage (#655)", () => {
+    const report = purchaseOrderReportExtraExpenseFixture();
+    assertRow("totals", report.totals);
+    for (const period of report.periods) {
+      assertRow(`period ${period.periodStart}`, period);
+    }
+    for (const category of report.categories) {
+      assertRow(`category ${category.businessCategory}`, category);
+    }
+    assertFooting(report);
+
+    // March is a quoted line (5 x 10.000, cost 6.000) beside a pass-through
+    // freight of 2 x 500.000. April carries only an extra expense.
+    expect(report.totals).toMatchObject({
+      poCount: 2,
+      amountMinor: 2_050_000,
+      costedMinor: 50_000,
+      uncostedMinor: 0,
+      extraExpenseMinor: 2_000_000,
+      capitalMinor: 30_000,
+      marginMinor: 20_000,
+      // 50.000 / (2.050.000 - 2.000.000): the non-extra amount only.
+      coverageBps: 10000,
+    });
+
+    const [mixed, extraOnly] = report.periods;
+    expect(mixed.periodStart).toBe("2026-03-01");
+    expect(mixed.extraExpenseMinor).toBe(1_000_000);
+    expect(mixed.marginMinor).toBe(20_000);
+    expect(mixed.coverageBps).toBe(10000);
+
+    expect(extraOnly.periodStart).toBe("2026-04-01");
+    expect(extraOnly.amountMinor).toBe(1_000_000);
+    expect(extraOnly.costedMinor).toBe(0);
+    expect(extraOnly.extraExpenseMinor).toBe(1_000_000);
+    expect(extraOnly.uncostedMinor).toBe(0);
+    expect(extraOnly.marginMinor).toBe(0);
+    // A zero non-extra denominator is an unknown coverage, not 0% or 100%.
+    expect(extraOnly.coverageBps).toBeNull();
+    expect(extraOnly.marginBps).toBeNull();
   });
 
   it("keeps the maximum exact fixture footed with derived ratios", () => {
