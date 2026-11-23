@@ -452,19 +452,31 @@ func TestPurchaseOrderDraftRequiresAnExplicitRevisionAndIssuedSource(t *testing.
 	}
 }
 
-func TestPurchaseOrderDraftRefusesASecondActiveRecord(t *testing.T) {
+func TestPurchaseOrderDraftAllowsASecondDraftForTheSameQuotation(t *testing.T) {
 	server, token := testQuotationServer(t, "vera_api_po_unique")
 	quotationID, _ := exportForSelector(t, server, token, quotationInput())
 
-	if code, body := createPODraft(t, server, token, quotationID, 0, nil); code != http.StatusCreated {
+	code, body := createPODraft(t, server, token, quotationID, 0, nil)
+	if code != http.StatusCreated {
 		t.Fatalf("first create = %d; want 201 (%v)", code, body)
 	}
-	code, body := createPODraft(t, server, token, quotationID, 0, nil)
-	if code != http.StatusConflict {
-		t.Fatalf("second create = %d; want 409 (%v)", code, body)
+	first := decodePurchaseOrder(t, body)
+	code, body = createPODraft(t, server, token, quotationID, 0, nil)
+	if code != http.StatusCreated {
+		t.Fatalf("second create = %d; want 201 (%v)", code, body)
 	}
-	if body["code"] != "po_already_exists" {
-		t.Errorf("conflict code = %v; want po_already_exists", body["code"])
+	second := decodePurchaseOrder(t, body)
+	if first.ID == second.ID {
+		t.Fatalf("both creates returned purchase order %d", first.ID)
+	}
+	if first.QuotationID != quotationID || second.QuotationID != quotationID {
+		t.Errorf("source = %d/%d; want both on quotation %d",
+			first.QuotationID, second.QuotationID, quotationID)
+	}
+	list := listPOSources(t, server, token, "")
+	if len(list.Quotations) != 1 || list.Quotations[0].DraftPOCount != 2 {
+		t.Errorf("selector rows = %+v; want one quotation with two advisory drafts",
+			list.Quotations)
 	}
 }
 
@@ -543,18 +555,27 @@ func TestPurchaseOrderOccupancyFeedsTheSelector(t *testing.T) {
 	if active == nil || active.ID != draft.ID || active.State != "draft" {
 		t.Errorf("activePO = %+v; want draft %d", active, draft.ID)
 	}
-	if hidden := listPOSources(t, server, token, "?hideUsed=true"); len(hidden.Quotations) != 0 {
-		t.Errorf("hideUsed rows = %d; want the occupied quotation hidden", len(hidden.Quotations))
+	if list.Quotations[0].AllBought || list.Quotations[0].DraftPOCount != 1 {
+		t.Errorf("draft row badges = %+v; want a selectable partial row", list.Quotations[0])
+	}
+	// #651: the draft's allocation is advisory and does not reserve quantity,
+	// so hideUsed keeps the quotation visible.
+	if hidden := listPOSources(t, server, token, "?hideUsed=true"); len(hidden.Quotations) != 1 {
+		t.Errorf("hideUsed rows = %d; want the advisory draft still selectable", len(hidden.Quotations))
 	}
 
-	// A saved record still occupies the Quotation; only the action differs.
+	// Marking the same record saved makes its allocation count: the quotation
+	// is fully bought and the filter hides it.
 	setPurchaseOrderStateForTest(t, "vera_api_po_occupancy", draft.ID, "saved")
 	list = listPOSources(t, server, token, "")
 	if list.Quotations[0].ActivePO == nil || list.Quotations[0].ActivePO.State != "saved" {
 		t.Errorf("saved activePO = %+v; want state saved", list.Quotations[0].ActivePO)
 	}
+	if !list.Quotations[0].AllBought || list.Quotations[0].SavedPOCount != 1 {
+		t.Errorf("saved row badges = %+v; want All bought by one saved PO", list.Quotations[0])
+	}
 	if hidden := listPOSources(t, server, token, "?hideUsed=true"); len(hidden.Quotations) != 0 {
-		t.Errorf("hideUsed rows = %d; want the saved record hidden too", len(hidden.Quotations))
+		t.Errorf("hideUsed rows = %d; want the fully bought quotation hidden", len(hidden.Quotations))
 	}
 }
 

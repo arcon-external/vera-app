@@ -86,6 +86,7 @@ function renderHeader(
       onEdit={noop}
       purchaseOrder={null}
       purchaseOrderPending={false}
+      purchaseOrderAllBought={false}
       onCreatePurchaseOrder={noop}
       onOpenPurchaseOrder={noop}
       {...overrides}
@@ -103,22 +104,37 @@ describe("QuotationDetailHeader from-this-Quotation action (issue #499)", () => 
     expect(html).not.toContain("View PO");
   });
 
-  it("offers Open PO draft, and no creation attempt, when a draft occupies it", () => {
+  it("offers Create PO and Open PO draft while a draft exists and quantity remains", () => {
     const html = renderHeader({
       purchaseOrder: { id: 41, state: "draft" },
     });
     expect(buttonTagFor(html, "Open PO draft")).not.toContain(" disabled=");
-    expect(html).not.toContain("Create PO from this Quotation");
+    expect(buttonTagFor(html, "Create PO from this Quotation")).not.toContain(
+      " disabled="
+    );
     expect(html).not.toContain("View PO");
   });
 
-  it("offers View PO when the occupying record is finalized", () => {
+  it("offers Create PO and View PO while a saved record leaves remaining quantity", () => {
     const html = renderHeader({
       purchaseOrder: { id: 41, state: "saved" },
     });
     expect(buttonTagFor(html, "View PO")).not.toContain(" disabled=");
-    expect(html).not.toContain("Create PO from this Quotation");
+    expect(buttonTagFor(html, "Create PO from this Quotation")).not.toContain(
+      " disabled="
+    );
     expect(html).not.toContain("Open PO draft");
+  });
+
+  it("disables creation with revision guidance when every item is bought", () => {
+    const html = renderHeader({
+      purchaseOrder: { id: 41, state: "saved" },
+      purchaseOrderAllBought: true,
+    });
+    expect(html).not.toContain("Create PO from this Quotation");
+    const guidance = buttonTagFor(html, "All bought — revise the quotation");
+    expect(guidance).toContain(" disabled=");
+    expect(buttonTagFor(html, "View PO")).not.toContain(" disabled=");
   });
 
   it("disables creation until the occupancy answer arrives", () => {

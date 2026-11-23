@@ -119,11 +119,11 @@ func TestPurchaseOrderSourceRepairIsAdminOnlyOverTheAPI(t *testing.T) {
 	for _, row := range rows {
 		byID[row.ID] = row
 	}
-	if row, ok := byID[originalID]; !ok || row.ActivePO != nil {
-		t.Errorf("repaired quotation = %v; want it selectable", row.ActivePO)
+	if row, ok := byID[originalID]; !ok || row.ActivePO == nil {
+		t.Errorf("the record's quotation = %v; want its PO listed", row.ActivePO)
 	}
 	if row, ok := byID[occupiedID]; !ok || row.ActivePO == nil {
-		t.Errorf("unrelated occupied quotation = %v; want it still disabled", row.ActivePO)
+		t.Errorf("another occupied quotation = %v; want its PO listed", row.ActivePO)
 	}
 
 	// The review compares against the candidate revision without writing.
@@ -307,12 +307,12 @@ func TestPurchaseOrderSourceRepairRequiresReasonVersionAndAFreeTarget(t *testing
 		t.Fatalf("correction with a link = %d (%v); want 422 po_protected_field", code, body)
 	}
 
-	// An occupied target is refused by name.
+	// A quotation with another PO is a valid target now.
 	createPODraft(t, server, adminToken, occupiedID, 0, nil)
 	code, body = doJSON(t, server, http.MethodPost, path+"/source-repair", adminToken,
-		repairBody(saved, occupiedID, 0, "move to an occupied quotation"))
-	if code != http.StatusConflict || body["code"] != "po_target_occupied" {
-		t.Fatalf("occupied target = %d (%v); want 409 po_target_occupied", code, body)
+		repairBody(saved, occupiedID, 0, "move beside another PO"))
+	if code != http.StatusOK {
+		t.Fatalf("occupied target = %d (%v); want 200", code, body)
 	}
 
 	// The target Quotation must still exist.

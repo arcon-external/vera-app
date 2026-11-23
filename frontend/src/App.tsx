@@ -17,6 +17,7 @@ import {
   ListPOSourceQuotations,
   ListPOSourceRevisions,
   ValidatePOSource,
+  GetQuotationAvailability,
   CreatePurchaseOrderDraft,
   GetPurchaseOrder,
   ReviewPurchaseOrderSource,
@@ -79,10 +80,12 @@ import { PurchaseOrderReportsPage } from "./components/PurchaseOrderReportsPage"
 import { AdminDashboard, adminTabForPage } from "./components/AdminDashboard";
 import { POQuotationSelector } from "./components/POQuotationSelector";
 import type {
+  POSourceAvailability,
   POSourcePage,
   POSourceQuery,
   POSourceRevision,
   POSourceSelection,
+  POSourceSelectionItem,
   POSourceValidation,
 } from "./poSelector";
 import { PurchaseOrderDiscardPrompt } from "./components/PurchaseOrderEditor";
@@ -106,6 +109,7 @@ import {
   TUTORIAL_PRACTICE_COPY,
   TUTORIAL_RECONCILIATION_TRANSPORT,
   TUTORIAL_SELECTOR_PAGE,
+  TUTORIAL_SELECTOR_AVAILABILITY,
   TUTORIAL_SELECTOR_REVISIONS,
   TUTORIAL_SELECTOR_VALIDATION,
   tutorialOrder as buildTutorialOrder,
@@ -1020,16 +1024,26 @@ function App() {
   );
 
   const createPurchaseOrderFromQuotation = useCallback(
-    async (quotationID: number, revision: number) => {
-      const draft = await CreatePurchaseOrderDraft({
-        QuotationID: quotationID,
-        RevisionNumber: revision,
-        // Issue #492: the received date is a PO fact the source revision never
-        // supplies. Blank means the server stores today in WIB.
-        ReceivedDate: workspaceSettings.purchaseOrder.receivedDate,
-        // #628: the category is chosen in the editor; a new draft is Unassigned.
-        BusinessCategory: "",
-      });
+    async (
+      quotationID: number,
+      revision: number,
+      items?: POSourceSelectionItem[]
+    ) => {
+      const draft = await CreatePurchaseOrderDraft(
+        backend.PurchaseOrderCreateInput.createFrom({
+          QuotationID: quotationID,
+          RevisionNumber: revision,
+          Items: (items ?? []).map((item) => ({
+            QuotationItemNo: item.quotationItemNo,
+            QuotationSubNo: item.quotationSubNo ?? undefined,
+          })),
+          // Issue #492: the received date is a PO fact the source revision
+          // never supplies. Blank means the server stores today in WIB.
+          ReceivedDate: workspaceSettings.purchaseOrder.receivedDate,
+          // #628: the category is chosen in the editor; a new draft is Unassigned.
+          BusinessCategory: "",
+        })
+      );
       // The cross-workspace move still asks the leave guard. The detail page
       // holds no editable state, so it answers at once today; routing through
       // it means a future editable surface cannot be discarded silently.
@@ -2656,6 +2670,12 @@ function App() {
                   id: row.ActivePO.ID,
                   state: row.ActivePO.State === "saved" ? "saved" : "draft",
                 },
+          allBought: row.AllBought,
+          leafCount: row.LeafCount,
+          remainingLeafCount: row.RemainingLeafCount,
+          savedPoCount: row.SavedPOCount,
+          draftPoCount: row.DraftPOCount,
+          legacyHeaderDiscount: row.LegacyHeaderDiscount,
         })),
         page: page.Page,
         pageSize: page.PageSize,
@@ -2673,6 +2693,38 @@ function App() {
         revision: revision.Revision,
         issuedAt: revision.IssuedAt,
       }));
+    },
+    []
+  );
+
+  const loadPOSourceAvailability = useCallback(
+    async (quotationId: number, revision: number): Promise<POSourceAvailability> => {
+      const availability = await GetQuotationAvailability(quotationId, revision);
+      return {
+        quotationId: availability.QuotationID,
+        revisionNumber: availability.RevisionNumber,
+        latestRevision: availability.LatestRevision,
+        allBought: availability.AllBought,
+        legacyHeaderDiscount: availability.LegacyHeaderDiscount,
+        savedPoCount: availability.SavedPOCount,
+        draftPoCount: availability.DraftPOCount,
+        items: (availability.Items ?? []).map((item) => ({
+          quotationItemNo: item.QuotationItemNo,
+          quotationSubNo: item.QuotationSubNo ?? null,
+          label: item.Label,
+          description: item.Description,
+          parentDescription: item.ParentDescription,
+          groupKey: item.GroupKey,
+          descriptionLines: item.DescriptionLines ?? [],
+          uom: item.UoM,
+          quotedQuantityScaled: item.QuotedQuantityScaled,
+          boughtQuantityScaled: item.BoughtQuantityScaled,
+          draftQuantityScaled: item.DraftQuantityScaled,
+          remainingQuantityScaled: item.RemainingQuantityScaled,
+          overBoughtQuantityScaled: item.OverBoughtQuantityScaled,
+          quotedUnitPriceMinor: item.QuotedUnitPriceMinor,
+        })),
+      };
     },
     []
   );
@@ -2830,10 +2882,16 @@ function App() {
       ) : null}
       <POQuotationSelector
         open={poSelectorOpen}
-        mode={poSelectorMode === "repair" ? "repair" : "entry"}
+        mode={
+          poSelectorMode === "repair"
+            ? "repair"
+            : poSelectorMode === "link"
+              ? "link"
+              : "entry"
+        }
         excludePOID={poSelectorRepairID ?? undefined}
         onClose={closePOSourceSelector}
-        onConfirm={async (selection) => {
+        onConfirm={async (selection, items) => {
           if (poSelectorMode === "repair") {
             if (poSelectorRepairID === null) {
               throw new Error("The saved purchase order is no longer open.");
@@ -2860,15 +2918,21 @@ function App() {
             setPage("po");
             return;
           }
-          const draft = await CreatePurchaseOrderDraft({
-            QuotationID: selection.quotationId,
-            RevisionNumber: selection.revisionNumber,
-            // Issue #492: the received date is a PO fact the source revision
-            // never supplies. Blank means the server stores today in WIB.
-            ReceivedDate: workspaceSettings.purchaseOrder.receivedDate,
-            // #628: the category is chosen in the editor; a new draft is Unassigned.
-            BusinessCategory: "",
-          });
+          const draft = await CreatePurchaseOrderDraft(
+            backend.PurchaseOrderCreateInput.createFrom({
+              QuotationID: selection.quotationId,
+              RevisionNumber: selection.revisionNumber,
+              Items: (items ?? []).map((item) => ({
+                QuotationItemNo: item.quotationItemNo,
+                QuotationSubNo: item.quotationSubNo ?? undefined,
+              })),
+              // Issue #492: the received date is a PO fact the source revision
+              // never supplies. Blank means the server stores today in WIB.
+              ReceivedDate: workspaceSettings.purchaseOrder.receivedDate,
+              // #628: the category is chosen in the editor; a new draft is Unassigned.
+              BusinessCategory: "",
+            })
+          );
           adoptCreatedPurchaseOrder(draft);
           closePOSourceSelector();
         }}
@@ -2889,6 +2953,8 @@ function App() {
         loadPage={loadPOSourcePage}
         loadRevisions={loadPOSourceRevisions}
         validate={validatePOSourceSelection}
+        loadAvailability={loadPOSourceAvailability}
+        currency={liveEntry ?? IDR_FALLBACK_ENTRY}
       />
       <POQuotationSelector
         open={tutorialSelectorOpen}
@@ -2902,6 +2968,7 @@ function App() {
         loadPage={async () => TUTORIAL_SELECTOR_PAGE}
         loadRevisions={async () => TUTORIAL_SELECTOR_REVISIONS}
         validate={async () => TUTORIAL_SELECTOR_VALIDATION}
+        loadAvailability={async () => TUTORIAL_SELECTOR_AVAILABILITY}
       />
       {checkingSession ? (
         <div className="flex min-h-full items-center justify-center px-5">

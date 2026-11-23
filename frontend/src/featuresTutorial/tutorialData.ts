@@ -4,6 +4,7 @@ import type {
   PurchaseOrderSourceLineDTO,
 } from "../poFinalize";
 import type {
+  POSourceAvailability,
   POSourcePage,
   POSourceQuotation,
   POSourceRevision,
@@ -281,6 +282,37 @@ const TUTORIAL_ROW: POSourceQuotation = {
   latestRevision: 0,
   issuedRevisionCount: 1,
   activePO: null,
+  allBought: false,
+  leafCount: 1,
+  remainingLeafCount: 1,
+  savedPoCount: 0,
+  draftPoCount: 0,
+  legacyHeaderDiscount: false,
+};
+
+export const TUTORIAL_SELECTOR_AVAILABILITY: POSourceAvailability = {
+  quotationId: -1,
+  revisionNumber: 0,
+  latestRevision: 0,
+  allBought: false,
+  legacyHeaderDiscount: false,
+  savedPoCount: 0,
+  draftPoCount: 0,
+  items: [
+    {
+      quotationItemNo: 1,
+      quotationSubNo: null,
+      label: "1",
+      description: TUTORIAL_SUBJECT,
+      uom: "Lot",
+      quotedQuantityScaled: 10_000,
+      boughtQuantityScaled: 0,
+      draftQuantityScaled: 0,
+      remainingQuantityScaled: 10_000,
+      overBoughtQuantityScaled: 0,
+      quotedUnitPriceMinor: 0,
+    },
+  ],
 };
 
 export const TUTORIAL_SELECTOR_PAGE: POSourcePage = {

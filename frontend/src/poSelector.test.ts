@@ -35,6 +35,12 @@ function quotation(overrides: Partial<POSourceQuotation> = {}): POSourceQuotatio
     latestRevision: 1,
     issuedRevisionCount: 2,
     activePO: null,
+    allBought: false,
+    leafCount: 2,
+    remainingLeafCount: 2,
+    savedPoCount: 0,
+    draftPoCount: 0,
+    legacyHeaderDiscount: false,
     ...overrides,
   };
 }
@@ -188,18 +194,53 @@ describe("PO source selector state machine (issue #467)", () => {
     expect(backToQuotations.revisions).toEqual([]);
   });
 
-  it("refuses to select a Quotation occupied by a draft or a saved PO", () => {
-    for (const activePO of [
-      { id: 20, state: "draft" as const },
-      { id: 21, state: "saved" as const },
-    ]) {
-      const used = quotation({ activePO });
-      const state = run([
-        { type: "rowsLoaded", page: pageOf(used) },
-        { type: "quotationSelected", quotation: used },
+  it("selects a partly bought Quotation and refuses an All bought one", () => {
+    const partial = quotation({
+      activePO: { id: 21, state: "saved" },
+      savedPoCount: 1,
+      remainingLeafCount: 1,
+    });
+    const selected = run([
+      { type: "rowsLoaded", page: pageOf(partial) },
+      { type: "quotationSelected", quotation: partial },
+    ]);
+    expect(selected.step).toBe(2);
+    expect(selected.selected).toEqual(partial);
+
+    const allBought = quotation({
+      activePO: { id: 22, state: "saved" },
+      allBought: true,
+      remainingLeafCount: 0,
+      savedPoCount: 2,
+    });
+    const refused = run([
+      { type: "rowsLoaded", page: pageOf(allBought) },
+      { type: "quotationSelected", quotation: allBought },
+    ]);
+    expect(refused.step).toBe(1);
+    expect(refused.selected).toBeNull();
+  });
+
+  it("lets repair and link select an All bought quotation", () => {
+    const allBought = quotation({
+      allBought: true,
+      remainingLeafCount: 0,
+      savedPoCount: 2,
+    });
+    const entry = run([
+      { type: "rowsLoaded", page: pageOf(allBought) },
+      { type: "quotationSelected", quotation: allBought },
+    ]);
+    expect(entry.step).toBe(1);
+    expect(entry.selected).toBeNull();
+
+    for (const allowAllBought of [true]) {
+      const repair = run([
+        { type: "rowsLoaded", page: pageOf(allBought) },
+        { type: "quotationSelected", quotation: allBought, allowAllBought },
       ]);
-      expect(state.step).toBe(1);
-      expect(state.selected).toBeNull();
+      expect(repair.step).toBe(2);
+      expect(repair.selected).toEqual(allBought);
     }
   });
 
@@ -212,18 +253,34 @@ describe("PO source selector state machine (issue #467)", () => {
     expect(draftOf(quotation())).toBeNull();
   });
 
-  it("filters occupied rows only when the filter is on, and always hides them from selection", () => {
+  it("filters All bought rows when the filter is on and keeps partial rows visible", () => {
     const available = quotation({ id: 1, quoteNumber: "1502260001" });
-    const used = quotation({ id: 2, quoteNumber: "1502260002", activePO: { id: 20, state: "saved" } });
-    const draft = quotation({ id: 3, quoteNumber: "1502260003", activePO: { id: 21, state: "draft" } });
-    expect(visibleRows([available, used, draft], false)).toEqual([available, used, draft]);
-    expect(visibleRows([available, used, draft], true)).toEqual([available]);
-    expect(visibleRows([available, used], false)).toEqual([available, used]);
-    expect(visibleRows([available, used], true)).toEqual([available]);
-    // The filter is a view convenience; eligibility is still enforced on the
-    // row itself, so a used row that slips back into view stays unselectable.
+    const partial = quotation({
+      id: 2,
+      quoteNumber: "1502260002",
+      activePO: { id: 20, state: "saved" },
+      savedPoCount: 1,
+      remainingLeafCount: 1,
+    });
+    const allBought = quotation({
+      id: 3,
+      quoteNumber: "1502260003",
+      activePO: { id: 21, state: "saved" },
+      allBought: true,
+      savedPoCount: 2,
+      remainingLeafCount: 0,
+    });
+    expect(visibleRows([available, partial, allBought], false)).toEqual([
+      available,
+      partial,
+      allBought,
+    ]);
+    expect(visibleRows([available, partial, allBought], true)).toEqual([
+      available,
+      partial,
+    ]);
     const state = run([
-      { type: "rowsLoaded", page: pageOf(available, used) },
+      { type: "rowsLoaded", page: pageOf(available, partial) },
       { type: "hideUsedChanged", hideUsed: true },
     ]);
     expect(state.hideUsed).toBe(true);

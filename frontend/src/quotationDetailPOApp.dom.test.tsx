@@ -435,15 +435,16 @@ describe("create PO from the displayed Quotation revision (issue #499)", () => {
     );
   });
 
-  it("opens the occupying draft instead of creating a second PO", async () => {
+  it("offers another PO and opens the existing draft", async () => {
     mocks.getOccupancy.mockResolvedValue({
       QuotationID: QUOTATION_ID,
       ActivePO: { ID: 41, State: "draft" },
+      AllBought: false,
     });
     await openArchivedQuotation();
 
     expect(document.body.textContent).toContain("Open PO draft");
-    expect(document.body.textContent).not.toContain("Create PO from this Quotation");
+    expect(document.body.textContent).toContain("Create PO from this Quotation");
 
     act(() => button("Open PO draft").click());
     await flush();
@@ -454,10 +455,11 @@ describe("create PO from the displayed Quotation revision (issue #499)", () => {
     expect(document.body.textContent).toContain("Save draft");
   });
 
-  it("views the finalized PO instead of creating a second PO", async () => {
+  it("offers another PO and views the finalized one", async () => {
     mocks.getOccupancy.mockResolvedValue({
       QuotationID: QUOTATION_ID,
       ActivePO: { ID: 41, State: "saved" },
+      AllBought: false,
     });
     mocks.getPurchaseOrder.mockImplementation(async () => {
       const saved = draftFor(0);
@@ -475,7 +477,7 @@ describe("create PO from the displayed Quotation revision (issue #499)", () => {
     await openArchivedQuotation();
 
     expect(document.body.textContent).toContain("View PO");
-    expect(document.body.textContent).not.toContain("Create PO from this Quotation");
+    expect(document.body.textContent).toContain("Create PO from this Quotation");
     expect(document.body.textContent).not.toContain("Open PO draft");
 
     act(() => button("View PO").click());
@@ -487,15 +489,16 @@ describe("create PO from the displayed Quotation revision (issue #499)", () => {
     expect(document.body.textContent).toContain("Saved record 41");
   });
 
-  it("turns a concurrent occupied create into Open PO draft, never a retry", async () => {
+  it("turns a concurrent create refusal into the open action, never a retry", async () => {
     mocks.getOccupancy
       .mockResolvedValueOnce({ QuotationID: QUOTATION_ID, ActivePO: null })
       .mockResolvedValue({
         QuotationID: QUOTATION_ID,
         ActivePO: { ID: 41, State: "draft" },
+        AllBought: false,
       });
     mocks.createDraft.mockRejectedValue(
-      new Error("this quotation already has a purchase order")
+      new Error("the purchase order could not be created")
     );
     await openArchivedQuotation();
 
@@ -503,15 +506,51 @@ describe("create PO from the displayed Quotation revision (issue #499)", () => {
     await flush();
     await flush();
 
-    // One attempt only: the 409 is not retried, and the page adopts the
-    // record the server says now occupies the Quotation.
+    // One attempt only: the refusal is not retried, and the page adopts the
+    // record the server says already exists. Creation stays available because
+    // the quotation still has remaining quantity.
     expect(mocks.createDraft).toHaveBeenCalledTimes(1);
     expect(mocks.getOccupancy).toHaveBeenCalledTimes(2);
     expect(document.body.textContent).toContain("Open PO draft");
-    expect(document.body.textContent).not.toContain("Create PO from this Quotation");
+    expect(document.body.textContent).toContain("Create PO from this Quotation");
+    // The real server error is shown, not the retired single-PO message.
     expect(document.body.textContent).toContain(
-      "This quotation already has a purchase order draft. Use Open PO draft to continue it."
+      "the purchase order could not be created"
     );
+    expect(document.body.textContent).not.toContain(
+      "This quotation already has a purchase order draft"
+    );
+  });
+
+  it("turns a failed create on an exhausted quotation into the All bought state", async () => {
+    mocks.getOccupancy
+      .mockResolvedValueOnce({ QuotationID: QUOTATION_ID, ActivePO: null })
+      .mockResolvedValue({
+        QuotationID: QUOTATION_ID,
+        ActivePO: { ID: 41, State: "saved" },
+        AllBought: true,
+      });
+    mocks.createDraft.mockRejectedValue(
+      new Error("this quotation has no remaining quantity to order")
+    );
+    await openArchivedQuotation();
+
+    act(() => button("Create PO from this Quotation").click());
+    await flush();
+    await flush();
+
+    expect(mocks.createDraft).toHaveBeenCalledTimes(1);
+    expect(document.body.textContent).toContain(
+      "Every quoted item is bought. Revise the quotation to order more."
+    );
+    expect(document.body.textContent).not.toContain(
+      "Create PO from this Quotation"
+    );
+    expect(
+      document.querySelector(
+        'button[aria-label="All bought — revise the quotation"]'
+      )
+    ).not.toBeNull();
   });
 
   it("returns to the loaded revision after a failed older-revision switch, and creates only what is shown", async () => {

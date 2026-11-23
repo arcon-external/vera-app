@@ -122,6 +122,14 @@ type POSourceQuotationRow struct {
 	CustomerName        string               `json:"customerName"`
 	LatestRevision      int16                `json:"latestRevision"`
 	IssuedRevisionCount int                  `json:"issuedRevisionCount"`
+	// Bought-state badges (#651). AllBought disables a new PO; a partial
+	// quotation stays selectable and shows its remaining leaf count.
+	AllBought            bool `json:"allBought"`
+	LeafCount            int  `json:"leafCount"`
+	RemainingLeafCount   int  `json:"remainingLeafCount"`
+	SavedPOCount         int  `json:"savedPoCount"`
+	DraftPOCount         int  `json:"draftPoCount"`
+	LegacyHeaderDiscount bool `json:"legacyHeaderDiscount"`
 }
 
 // POSourceListResponse is one page of the selector's first step. PageSize is
@@ -179,8 +187,47 @@ type POSourceValidationResponse struct {
 // creation. The detail page uses it to choose between Create PO from this
 // Quotation, Open PO draft, and View PO.
 type POSourceOccupancyResponse struct {
-	ActivePO    *POSourceActivePORow `json:"activePO"`
-	QuotationID int64                `json:"quotationId"`
+	ActivePO             *POSourceActivePORow `json:"activePO"`
+	QuotationID          int64                `json:"quotationId"`
+	AllBought            bool                 `json:"allBought"`
+	RemainingLeafCount   int                  `json:"remainingLeafCount"`
+	SavedPOCount         int                  `json:"savedPoCount"`
+	DraftPOCount         int                  `json:"draftPoCount"`
+	LegacyHeaderDiscount bool                 `json:"legacyHeaderDiscount"`
+}
+
+// POSourceAvailabilityItemRow is one priced leaf of the selected revision.
+// QuotedUnitPriceMinor is the row-discounted customer price; supplier cost is
+// never part of this shape (Story 42).
+type POSourceAvailabilityItemRow struct {
+	QuotationItemNo          int      `json:"quotationItemNo"`
+	QuotationSubNo           *int     `json:"quotationSubNo"`
+	Label                    string   `json:"label"`
+	Description              string   `json:"description"`
+	ParentDescription        string   `json:"parentDescription,omitempty"`
+	GroupKey                 string   `json:"groupKey,omitempty"`
+	DescriptionLines         []string `json:"descriptionLines,omitempty"`
+	UoM                      string   `json:"uom"`
+	QuotedQuantityScaled     int64    `json:"quotedQuantityScaled"`
+	BoughtQuantityScaled     int64    `json:"boughtQuantityScaled"`
+	DraftQuantityScaled      int64    `json:"draftQuantityScaled"`
+	RemainingQuantityScaled  int64    `json:"remainingQuantityScaled"`
+	OverBoughtQuantityScaled int64    `json:"overBoughtQuantityScaled"`
+	QuotedUnitPriceMinor     int64    `json:"quotedUnitPriceMinor"`
+}
+
+// POSourceAvailabilityResponse is the server-side bought state for one
+// quotation revision. AllBought is derived from the listed leaves; a draft
+// quantity is advisory and never reduces RemainingQuantityScaled.
+type POSourceAvailabilityResponse struct {
+	QuotationID          int64                         `json:"quotationId"`
+	RevisionNumber       int16                         `json:"revisionNumber"`
+	LatestRevision       int16                         `json:"latestRevision"`
+	AllBought            bool                          `json:"allBought"`
+	LegacyHeaderDiscount bool                          `json:"legacyHeaderDiscount"`
+	SavedPOCount         int                           `json:"savedPoCount"`
+	DraftPOCount         int                           `json:"draftPoCount"`
+	Items                []POSourceAvailabilityItemRow `json:"items"`
 }
 
 // PurchaseOrderItemRow is one entered PO line. QuotationItemNo and
@@ -432,6 +479,15 @@ type PurchaseOrderCreateRequest struct {
 	// BusinessCategory is optional at creation: a draft may start Unassigned.
 	// A supplied value must be one of the four codes.
 	BusinessCategory string `json:"businessCategory,omitempty"`
+	// Items selects the remaining quotation leaves for this draft. Empty means
+	// every leaf that still has quantity (#651).
+	Items []PurchaseOrderCreateItemRow `json:"items,omitempty"`
+}
+
+// PurchaseOrderCreateItemRow selects one remaining quotation leaf.
+type PurchaseOrderCreateItemRow struct {
+	QuotationItemNo int  `json:"quotationItemNo"`
+	QuotationSubNo  *int `json:"quotationSubNo"`
 }
 
 // PurchaseOrderItemInput is one replace-lines entry. LineNumber is assigned by

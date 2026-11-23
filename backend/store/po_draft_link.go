@@ -175,9 +175,6 @@ func (s *Store) PreviewPurchaseOrderDraftLink(
 	if err != nil {
 		return PurchaseOrderDraftLinkReview{}, err
 	}
-	if err := checkDraftLinkTargetAvailable(ctx, pool, schema, org.ID, order.ID, source.QuotationID); err != nil {
-		return PurchaseOrderDraftLinkReview{}, err
-	}
 	documentState, err := purchaseOrderDocumentState(ctx, pool, schema, order.ID)
 	if err != nil {
 		return PurchaseOrderDraftLinkReview{}, err
@@ -236,10 +233,23 @@ func (s *Store) LinkPurchaseOrderDraftSource(ctx context.Context, input Purchase
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
+	// #650/#651 global lock order: the target quotation first, then the PO. A
+	// never-linked or formerly-linked draft has no live quotation to lock, so
+	// the target is the only parent in this pair.
+	if err := lockQuotationForAllocation(ctx, tx, schema, input.QuotationID); err != nil {
+		return PurchaseOrder{}, err
+	}
+	peekedQuotationID, err := peekPurchaseOrderQuotationID(ctx, tx, schema, org.ID, input.ID)
+	if err != nil {
+		return PurchaseOrder{}, err
+	}
 	lock, err := lockPurchaseOrderWrite(ctx, tx, schema, org.ID, input.ID,
 		input.ExpectedVersion, PurchaseOrderStateDraft)
 	if err != nil {
 		return PurchaseOrder{}, err
+	}
+	if lock.LiveQuotationID != peekedQuotationID {
+		return PurchaseOrder{}, ErrPurchaseOrderVersionConflict
 	}
 	if lock.SourceState == PurchaseOrderSourceStateLive {
 		return PurchaseOrder{}, ErrPurchaseOrderDraftLinkNotEligible
@@ -251,9 +261,6 @@ func (s *Store) LinkPurchaseOrderDraftSource(ctx context.Context, input Purchase
 	source, err := loadPurchaseOrderSourceDetail(ctx, tx, schema,
 		input.QuotationID, input.RevisionNumber)
 	if err != nil {
-		return PurchaseOrder{}, err
-	}
-	if err := checkDraftLinkTargetAvailable(ctx, tx, schema, org.ID, stored.ID, source.QuotationID); err != nil {
 		return PurchaseOrder{}, err
 	}
 	// Currency is structural: the two sides are only one money when they are
@@ -367,6 +374,13 @@ func (s *Store) LinkPurchaseOrderDraftSource(ctx context.Context, input Purchase
 		// to the predicate cannot silently leave the link half-applied.
 		return PurchaseOrder{}, ErrPurchaseOrderNotDraft
 	}
+	// #651: the linked draft now has a source, so its lines must own the
+	// allocation picture the advisory count and the report read. Lines without
+	// a quotation reference stay legacy and write none.
+	if err := replacePurchaseOrderAllocations(
+		ctx, tx, schema, org.ID, stored.ID, source, stored.Items, false); err != nil {
+		return PurchaseOrder{}, err
+	}
 
 	generation, err := nextReconciliationGeneration(ctx, tx, schema, org.ID, stored.ID)
 	if err != nil {
@@ -406,28 +420,4 @@ func (s *Store) LinkPurchaseOrderDraftSource(ctx context.Context, input Purchase
 		return PurchaseOrder{}, fmt.Errorf("commit draft source link: %w", err)
 	}
 	return linked, nil
-}
-
-// checkDraftLinkTargetAvailable applies the occupancy rule inside the caller's
-// transaction. One Quotation has at most one active Purchase Order across every
-// revision; the partial unique index is the concurrency backstop and maps to
-// the same named refusal.
-func checkDraftLinkTargetAvailable(
-	ctx context.Context,
-	q purchaseOrderQuerier,
-	schema, orgID string,
-	orderID, quotationID int64,
-) error {
-	var occupied bool
-	if err := q.QueryRow(ctx, fmt.Sprintf(`
-		SELECT EXISTS (
-			SELECT 1 FROM %s.purchase_orders
-			WHERE org_id = $1 AND quotation_id = $2 AND id <> $3
-		)`, schema), orgID, quotationID, orderID).Scan(&occupied); err != nil {
-		return fmt.Errorf("check the target quotation %d occupancy: %w", quotationID, err)
-	}
-	if occupied {
-		return ErrPurchaseOrderTargetOccupied
-	}
-	return nil
 }

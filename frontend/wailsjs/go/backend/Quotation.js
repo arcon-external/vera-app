@@ -118,6 +118,10 @@ export function GetQuotation(arg1) {
   return window['go']['backend']['Quotation']['GetQuotation'](arg1);
 }
 
+export function GetQuotationAvailability(arg1, arg2) {
+  return window['go']['backend']['Quotation']['GetQuotationAvailability'](arg1, arg2);
+}
+
 export function GetQuotationPreviewHTML() {
   return window['go']['backend']['Quotation']['GetQuotationPreviewHTML']();
 }

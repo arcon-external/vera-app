@@ -107,6 +107,12 @@ func mapPOSourceQuotation(quotation store.POSourceQuotation) apicontract.POSourc
 		LatestRevision:      quotation.LatestRevision,
 		IssuedRevisionCount: quotation.IssuedRevisionCount,
 	}
+	row.AllBought = quotation.AllBought
+	row.LeafCount = quotation.LeafCount
+	row.RemainingLeafCount = quotation.RemainingLeafCount
+	row.SavedPOCount = quotation.SavedPOCount
+	row.DraftPOCount = quotation.DraftPOCount
+	row.LegacyHeaderDiscount = quotation.LegacyHeaderDiscount
 	if quotation.ActivePO != nil {
 		row.ActivePO = &apicontract.POSourceActivePORow{
 			ID:    quotation.ActivePO.ID,
@@ -172,7 +178,12 @@ func (s *Server) getPOSourceOccupancy(context echo.Context) error {
 		return context.JSON(http.StatusInternalServerError, map[string]string{"error": "read purchase order occupancy"})
 	}
 	response := apicontract.POSourceOccupancyResponse{
-		QuotationID: occupancy.QuotationID,
+		QuotationID:          occupancy.QuotationID,
+		AllBought:            occupancy.AllBought,
+		RemainingLeafCount:   occupancy.RemainingLeafCount,
+		SavedPOCount:         occupancy.SavedPOCount,
+		DraftPOCount:         occupancy.DraftPOCount,
+		LegacyHeaderDiscount: occupancy.LegacyHeaderDiscount,
 	}
 	if occupancy.ActivePO != nil {
 		response.ActivePO = &apicontract.POSourceActivePORow{
@@ -181,6 +192,74 @@ func (s *Server) getPOSourceOccupancy(context echo.Context) error {
 		}
 	}
 	return context.JSON(http.StatusOK, response)
+}
+
+// getPOSourceAvailability serves the workspace's bought-state read (#651):
+// quoted, saved-bought, draft, remaining and over-bought quantities for each
+// leaf of the requested revision (latest when the query omits it). The response
+// carries customer-facing sell values only; supplier cost never leaves the
+// report store.
+func (s *Server) getPOSourceAvailability(context echo.Context) error {
+	id, err := strconv.ParseInt(context.Param("id"), 10, 64)
+	if err != nil || id < 1 {
+		return context.JSON(http.StatusBadRequest, map[string]string{"error": "invalid quotation id"})
+	}
+	requestContext, err := s.organizationContext(context.Request().Context())
+	if err != nil {
+		return context.JSON(http.StatusInternalServerError, map[string]string{"error": "resolve organization"})
+	}
+	revision := int16(-1)
+	if raw := context.QueryParam("revision"); raw != "" {
+		parsed, parseErr := strconv.ParseInt(raw, 10, 16)
+		if parseErr != nil || parsed < 0 {
+			return context.JSON(http.StatusBadRequest, map[string]string{"error": "invalid revision"})
+		}
+		revision = int16(parsed)
+	}
+	var availability store.QuotationAvailability
+	if revision < 0 {
+		availability, err = s.database.GetQuotationAvailability(requestContext, id)
+	} else {
+		availability, err = s.database.GetQuotationAvailabilityForRevision(requestContext, id, revision)
+	}
+	if errors.Is(err, store.ErrPOSourceNotFound) || errors.Is(err, store.ErrPurchaseOrderSourceNotFound) {
+		return context.JSON(http.StatusNotFound, map[string]string{"error": "quotation not found"})
+	}
+	if errors.Is(err, store.ErrPOSourceInvalid) || errors.Is(err, store.ErrPurchaseOrderInvalid) {
+		return context.JSON(http.StatusBadRequest, map[string]string{"error": "invalid quotation id"})
+	}
+	if err != nil {
+		return context.JSON(http.StatusInternalServerError, map[string]string{"error": "read quotation availability"})
+	}
+	rows := make([]apicontract.POSourceAvailabilityItemRow, 0, len(availability.Items))
+	for _, item := range availability.Items {
+		rows = append(rows, apicontract.POSourceAvailabilityItemRow{
+			QuotationItemNo:          item.QuotationItemNo,
+			QuotationSubNo:           item.QuotationSubNo,
+			Label:                    item.Label,
+			Description:              item.Description,
+			ParentDescription:        item.ParentDescription,
+			GroupKey:                 item.GroupKey,
+			DescriptionLines:         item.DescriptionLines,
+			UoM:                      item.UoM,
+			QuotedQuantityScaled:     item.QuotedQuantityScaled,
+			BoughtQuantityScaled:     item.BoughtQuantityScaled,
+			DraftQuantityScaled:      item.DraftQuantityScaled,
+			RemainingQuantityScaled:  item.RemainingQuantityScaled,
+			OverBoughtQuantityScaled: item.OverBoughtQuantityScaled,
+			QuotedUnitPriceMinor:     item.QuotedUnitPriceMinor,
+		})
+	}
+	return context.JSON(http.StatusOK, apicontract.POSourceAvailabilityResponse{
+		QuotationID:          availability.QuotationID,
+		RevisionNumber:       availability.RevisionNumber,
+		LatestRevision:       availability.LatestRevision,
+		AllBought:            availability.AllBought,
+		LegacyHeaderDiscount: availability.LegacyHeaderDiscount,
+		SavedPOCount:         availability.SavedPOCount,
+		DraftPOCount:         availability.DraftPOCount,
+		Items:                rows,
+	})
 }
 
 // validatePOSource is the selector's confirm gate. The exact pair must still

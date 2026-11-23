@@ -63,6 +63,8 @@ export function GetPurchaseOrderReview(arg1:number):Promise<backend.PurchaseOrde
 
 export function GetQuotation(arg1:number):Promise<backend.ArchivedQuotation>;
 
+export function GetQuotationAvailability(arg1:number,arg2:number):Promise<backend.POSourceAvailabilityDTO>;
+
 export function GetQuotationPreviewHTML():Promise<string>;
 
 export function GetQuotationRevision(arg1:number,arg2:number):Promise<backend.ArchivedQuotation>;

@@ -122,6 +122,7 @@ func NewServer(database *store.Store, service *auth.Service, templates *backend.
 	server.echo.GET("/v1/po-sources", server.listPOSources, server.requireSession)
 	server.echo.GET("/v1/po-sources/:id/revisions", server.listPOSourceRevisions, server.requireSession)
 	server.echo.GET("/v1/po-sources/:id/occupancy", server.getPOSourceOccupancy, server.requireSession)
+	server.echo.GET("/v1/po-sources/:id/availability", server.getPOSourceAvailability, server.requireSession)
 	server.echo.POST("/v1/po-sources/validate", server.validatePOSource, server.requireSession)
 	// Manual Purchase Order drafts (issue #468). Creating is the server-side
 	// revalidation of the selector's exact pair; reading reopens a draft;

@@ -38,6 +38,12 @@ func replacePurchaseOrderAllocations(
 	orderID int64,
 	source PurchaseOrderSource,
 	lines []PurchaseOrderItem,
+	// skipDuplicateLeaves lets a draft carry two lines that claim one leaf
+	// while the reviewer is resolving the duplicate. The first line keeps the
+	// allocation; the duplicate stays unallocated and finalization refuses it
+	// through the unresolved-difference gate. Every committed path passes
+	// false, so the typed refusal is still the rule there.
+	skipDuplicateLeaves bool,
 ) error {
 	// One quotation leaf may appear at most once in a purchase order. The
 	// database enforces it with po_allocations_po_source_uidx (NULLS NOT
@@ -45,6 +51,7 @@ func replacePurchaseOrderAllocations(
 	// the raw 23505 into the typed refusal the editor can explain, before any
 	// allocation is cleared.
 	claimed := make(map[string]int, len(lines))
+	skipLine := make(map[int]bool)
 	for index, item := range lines {
 		if item.QuotationItemNo == nil {
 			continue
@@ -55,6 +62,10 @@ func replacePurchaseOrderAllocations(
 		}
 		key := allocationSourceKey(*item.QuotationItemNo, item.QuotationSubNo)
 		if first, taken := claimed[key]; taken {
+			if skipDuplicateLeaves {
+				skipLine[lineNumber] = true
+				continue
+			}
 			leaf := fmt.Sprintf("quotation item %d", *item.QuotationItemNo)
 			if item.QuotationSubNo != nil {
 				leaf = fmt.Sprintf("quotation item %d sub-item %d",
@@ -85,14 +96,21 @@ func replacePurchaseOrderAllocations(
 			// must not invent an allocation for either.
 			continue
 		}
+		lineNumber := item.LineNumber
+		if lineNumber < 1 {
+			lineNumber = index + 1
+		}
+		if skipLine[lineNumber] {
+			continue
+		}
 		if item.ID < 1 {
 			return fmt.Errorf("%w: line %d has no persisted id for its allocation",
-				ErrPurchaseOrderInvalid, index+1)
+				ErrPurchaseOrderInvalid, lineNumber)
 		}
 		sourceLine, ok := bySource[allocationSourceKey(*item.QuotationItemNo, item.QuotationSubNo)]
 		if !ok {
 			return fmt.Errorf("%w: line %d names a source leaf missing from revision %d",
-				ErrPurchaseOrderInvalid, index+1, source.RevisionNumber)
+				ErrPurchaseOrderInvalid, lineNumber, source.RevisionNumber)
 		}
 		if _, err := tx.Exec(ctx, fmt.Sprintf(`
 			INSERT INTO %s.purchase_order_allocations (

@@ -1596,9 +1596,97 @@ export namespace backend {
 	        this.State = source["State"];
 	    }
 	}
+	export class POSourceAvailabilityItemDTO {
+	    QuotationItemNo: number;
+	    QuotationSubNo?: number;
+	    Label: string;
+	    Description: string;
+	    ParentDescription: string;
+	    GroupKey: string;
+	    DescriptionLines: string[];
+	    UoM: string;
+	    QuotedQuantityScaled: number;
+	    BoughtQuantityScaled: number;
+	    DraftQuantityScaled: number;
+	    RemainingQuantityScaled: number;
+	    OverBoughtQuantityScaled: number;
+	    QuotedUnitPriceMinor: number;
+
+	    static createFrom(source: any = {}) {
+	        return new POSourceAvailabilityItemDTO(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.QuotationItemNo = source["QuotationItemNo"];
+	        this.QuotationSubNo = source["QuotationSubNo"];
+	        this.Label = source["Label"];
+	        this.Description = source["Description"];
+	        this.ParentDescription = source["ParentDescription"];
+	        this.GroupKey = source["GroupKey"];
+	        this.DescriptionLines = source["DescriptionLines"];
+	        this.UoM = source["UoM"];
+	        this.QuotedQuantityScaled = source["QuotedQuantityScaled"];
+	        this.BoughtQuantityScaled = source["BoughtQuantityScaled"];
+	        this.DraftQuantityScaled = source["DraftQuantityScaled"];
+	        this.RemainingQuantityScaled = source["RemainingQuantityScaled"];
+	        this.OverBoughtQuantityScaled = source["OverBoughtQuantityScaled"];
+	        this.QuotedUnitPriceMinor = source["QuotedUnitPriceMinor"];
+	    }
+	}
+	export class POSourceAvailabilityDTO {
+	    QuotationID: number;
+	    RevisionNumber: number;
+	    LatestRevision: number;
+	    AllBought: boolean;
+	    LegacyHeaderDiscount: boolean;
+	    SavedPOCount: number;
+	    DraftPOCount: number;
+	    Items: POSourceAvailabilityItemDTO[];
+
+	    static createFrom(source: any = {}) {
+	        return new POSourceAvailabilityDTO(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.QuotationID = source["QuotationID"];
+	        this.RevisionNumber = source["RevisionNumber"];
+	        this.LatestRevision = source["LatestRevision"];
+	        this.AllBought = source["AllBought"];
+	        this.LegacyHeaderDiscount = source["LegacyHeaderDiscount"];
+	        this.SavedPOCount = source["SavedPOCount"];
+	        this.DraftPOCount = source["DraftPOCount"];
+	        this.Items = this.convertValues(source["Items"], POSourceAvailabilityItemDTO);
+	    }
+
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+
 	export class POSourceOccupancyDTO {
 	    ActivePO?: POSourceActivePODTO;
 	    QuotationID: number;
+	    AllBought: boolean;
+	    RemainingLeafCount: number;
+	    SavedPOCount: number;
+	    DraftPOCount: number;
+	    LegacyHeaderDiscount: boolean;
 
 	    static createFrom(source: any = {}) {
 	        return new POSourceOccupancyDTO(source);
@@ -1608,6 +1696,11 @@ export namespace backend {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.ActivePO = this.convertValues(source["ActivePO"], POSourceActivePODTO);
 	        this.QuotationID = source["QuotationID"];
+	        this.AllBought = source["AllBought"];
+	        this.RemainingLeafCount = source["RemainingLeafCount"];
+	        this.SavedPOCount = source["SavedPOCount"];
+	        this.DraftPOCount = source["DraftPOCount"];
+	        this.LegacyHeaderDiscount = source["LegacyHeaderDiscount"];
 	    }
 
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
@@ -1636,6 +1729,12 @@ export namespace backend {
 	    ID: number;
 	    LatestRevision: number;
 	    IssuedRevisionCount: number;
+	    AllBought: boolean;
+	    LeafCount: number;
+	    RemainingLeafCount: number;
+	    SavedPOCount: number;
+	    DraftPOCount: number;
+	    LegacyHeaderDiscount: boolean;
 
 	    static createFrom(source: any = {}) {
 	        return new POSourceQuotationDTO(source);
@@ -1650,6 +1749,12 @@ export namespace backend {
 	        this.ID = source["ID"];
 	        this.LatestRevision = source["LatestRevision"];
 	        this.IssuedRevisionCount = source["IssuedRevisionCount"];
+	        this.AllBought = source["AllBought"];
+	        this.LeafCount = source["LeafCount"];
+	        this.RemainingLeafCount = source["RemainingLeafCount"];
+	        this.SavedPOCount = source["SavedPOCount"];
+	        this.DraftPOCount = source["DraftPOCount"];
+	        this.LegacyHeaderDiscount = source["LegacyHeaderDiscount"];
 	    }
 
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
@@ -2188,8 +2293,23 @@ export namespace backend {
 		}
 	}
 
+	export class PurchaseOrderCreateItemDTO {
+	    QuotationItemNo: number;
+	    QuotationSubNo?: number;
+
+	    static createFrom(source: any = {}) {
+	        return new PurchaseOrderCreateItemDTO(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.QuotationItemNo = source["QuotationItemNo"];
+	        this.QuotationSubNo = source["QuotationSubNo"];
+	    }
+	}
 	export class PurchaseOrderCreateInput {
 	    ReceivedDate: string;
+	    Items: PurchaseOrderCreateItemDTO[];
 	    QuotationID: number;
 	    RevisionNumber: number;
 	    BusinessCategory: string;
@@ -2201,11 +2321,31 @@ export namespace backend {
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.ReceivedDate = source["ReceivedDate"];
+	        this.Items = this.convertValues(source["Items"], PurchaseOrderCreateItemDTO);
 	        this.QuotationID = source["QuotationID"];
 	        this.RevisionNumber = source["RevisionNumber"];
 	        this.BusinessCategory = source["BusinessCategory"];
 	    }
+
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
 	}
+
 	export class PurchaseOrderItemDTO {
 	    QuotationItemNo?: number;
 	    QuotationSubNo?: number;

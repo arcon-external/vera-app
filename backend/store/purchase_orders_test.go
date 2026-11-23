@@ -264,7 +264,7 @@ func TestPurchaseOrderDraftDefaultsReceivedDateAndAcceptsAnOverride(t *testing.T
 	}
 }
 
-func TestPurchaseOrderDraftOneActiveRecordPerQuotationUnderConcurrency(t *testing.T) {
+func TestPurchaseOrderDraftConcurrentCreatesAllSucceed(t *testing.T) {
 	database := openTestSchema(t, "vera_po_unique")
 	quotation := seedPOQuotation(t, database, "PT. Buyer", "Concurrent")
 	user := poTestUser(t, database)
@@ -288,21 +288,21 @@ func TestPurchaseOrderDraftOneActiveRecordPerQuotationUnderConcurrency(t *testin
 	wait.Wait()
 	close(results)
 
-	created, exists, other := 0, 0, 0
+	// #651 removed the one-active-record rule. Drafts are advisory and do not
+	// reserve quantity, so every concurrent create is a valid second PO.
+	created, other := 0, 0
 	for err := range results {
 		switch {
 		case err == nil:
 			created++
-		case errors.Is(err, ErrPurchaseOrderExists):
-			exists++
 		default:
 			other++
 			t.Errorf("unexpected concurrent create error: %v", err)
 		}
 	}
-	if created != 1 || exists != attempts-1 || other != 0 {
-		t.Errorf("concurrent creates = %d created / %d refused / %d other; want 1/%d/0",
-			created, exists, other, attempts-1)
+	if created != attempts || other != 0 {
+		t.Errorf("concurrent creates = %d created / %d other; want %d/0",
+			created, other, attempts)
 	}
 }
 

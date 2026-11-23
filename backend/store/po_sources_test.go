@@ -49,13 +49,11 @@ func TestPOSourcePageOverflowErrorIsNotNotFound(t *testing.T) {
 	}
 }
 
-// Issue #499: the archived Quotation detail asks one narrow question before it
-// offers an action -- does this Quotation already have its one PO? The answer
-// is about the Quotation, not the revision on screen: a PO follows every
-// revision, so switching the revision selector must not make an occupied
-// Quotation look free. The create path still owns the decision; this read only
-// chooses the label.
-func TestPOSourceOccupancyAnswersTheOneActiveRecordAcrossRevisions(t *testing.T) {
+// Issue #499/#651: the archived Quotation detail asks whether the quotation is
+// fully bought and which record to reopen. Bought state spans revisions and is
+// derived from saved allocations; drafts are advisory and never make a
+// quotation look consumed.
+func TestPOSourceOccupancyAnswersBoughtStateAcrossRevisions(t *testing.T) {
 	database := openTestSchema(t, "vera_po_source_occupancy")
 	quotation := seedPOQuotation(t, database, "PT. Buyer", "Occupancy")
 	user := poTestUser(t, database)
@@ -102,14 +100,14 @@ func TestPOSourceOccupancyAnswersTheOneActiveRecordAcrossRevisions(t *testing.T)
 		Currency: "USD", RevisionNumber: 1, QuoteNumber: quotation.QuoteNumber,
 		HTMLSnapshot: "<html>revision one</html>",
 		Items: []RevisionItem{{
-			ItemNo: 1, Description: "Priced widget", Qty: 1, UoM: "Pc",
-			UnitPrice: 100, OriginalTotal: 100, MarginalizedUnitPrice: 100,
-			MarginalizedTotal: 100, ListUnitPrice: 100,
+			ItemNo: 1, Description: "Priced widget", Qty: 2, UoM: "Pc",
+			UnitPrice: 100, OriginalTotal: 200, MarginalizedUnitPrice: 100,
+			MarginalizedTotal: 200, ListUnitPrice: 100,
 		}},
 		Totals: RevisionTotals{
-			OriginalSubtotal: 100, OriginalGrand: 100,
-			MarginalizedSubtotal: 100, MarginalizedGrand: 100,
-			MarginalizedGrandAfterTax: 100, CustomerGrandTotal: 100,
+			OriginalSubtotal: 200, OriginalGrand: 200,
+			MarginalizedSubtotal: 200, MarginalizedGrand: 200,
+			MarginalizedGrandAfterTax: 200, CustomerGrandTotal: 200,
 		},
 	}); err != nil {
 		t.Fatalf("seed second revision: %v", err)
@@ -123,19 +121,62 @@ func TestPOSourceOccupancyAnswersTheOneActiveRecordAcrossRevisions(t *testing.T)
 			occupancy.ActivePO, draft.ID)
 	}
 
-	// The one-PO rule is per Quotation across revisions, which is why the
-	// lookup is not keyed by revision: a create from the new revision is
-	// refused, so no second record can legitimately appear.
-	if _, err := database.CreatePurchaseOrderDraft(ctx, PurchaseOrderCreate{
+	// One quotation may now produce many POs across revisions. Drafts do not
+	// reserve quantity, so the second create is allowed and the occupancy read
+	// reports two advisory drafts with no saved record.
+	second, err := database.CreatePurchaseOrderDraft(ctx, PurchaseOrderCreate{
 		QuotationID:    quotation.ID,
 		RevisionNumber: 1,
 		CreatedBy:      user.ID,
-	}); !errors.Is(err, ErrPurchaseOrderExists) {
-		t.Errorf("create from revision one error = %v; want ErrPurchaseOrderExists", err)
+	})
+	if err != nil {
+		t.Fatalf("create the second draft: %v", err)
+	}
+	occupancy, err = database.GetPOSourceOccupancy(ctx, quotation.ID)
+	if err != nil {
+		t.Fatalf("get multi-draft occupancy: %v", err)
+	}
+	if occupancy.SavedPOCount != 0 || occupancy.DraftPOCount != 2 {
+		t.Errorf("occupancy counts = %d saved / %d draft; want 0/2",
+			occupancy.SavedPOCount, occupancy.DraftPOCount)
+	}
+	if occupancy.AllBought {
+		t.Error("two advisory drafts made the quotation look fully bought")
+	}
+	if occupancy.ActivePO == nil || occupancy.ActivePO.ID != second.ID ||
+		occupancy.ActivePO.State != PurchaseOrderStateDraft {
+		t.Errorf("active PO = %+v; want the newest draft %d", occupancy.ActivePO, second.ID)
 	}
 
-	// The finalized state is reported, not collapsed into "occupied": the
-	// detail page's action is View PO rather than Open PO draft.
+	// Reduce the first draft's item 1 to one unit so saving it leaves room for
+	// a later order. The draft save rewrites the allocation too (#651).
+	firstUpdate := PurchaseOrderUpdate{
+		ID:                    draft.ID,
+		BillingAddress:        draft.BillingAddress,
+		DeliveryAddress:       draft.DeliveryAddress,
+		ShipToCode:            draft.ShipToCode,
+		ContactEmail:          draft.ContactEmail,
+		ContactPhone:          draft.ContactPhone,
+		PONumber:              draft.PONumber,
+		Incoterms:             draft.Incoterms,
+		PaymentTerms:          draft.PaymentTerms,
+		PODate:                draft.PODate,
+		RequestedDeliveryDate: draft.RequestedDeliveryDate,
+		ReceivedDate:          &draft.ReceivedDate,
+		BusinessCategory:      draft.BusinessCategory,
+		Items:                 append([]PurchaseOrderItem(nil), draft.Items...),
+		DiscountPercent:       draft.DiscountPercent,
+		AdjustmentMinor:       draft.AdjustmentMinor,
+		AdjustmentReason:      draft.AdjustmentReason,
+		UpdatedBy:             user.ID,
+	}
+	firstUpdate.Items[0].QuantityScaled = QuantityScale
+	if _, err := updateDraft(t, database, ctx, firstUpdate); err != nil {
+		t.Fatalf("reduce the first draft: %v", err)
+	}
+
+	// A saved record consumes its allocation, but the quotation still has room:
+	// AllBought stays false until every leaf is exhausted.
 	pool, err := database.poolOrError()
 	if err != nil {
 		t.Fatalf("pool: %v", err)
@@ -152,10 +193,37 @@ func TestPOSourceOccupancyAnswersTheOneActiveRecordAcrossRevisions(t *testing.T)
 	if err != nil {
 		t.Fatalf("get saved occupancy: %v", err)
 	}
-	if occupancy.ActivePO == nil || occupancy.ActivePO.ID != draft.ID ||
-		occupancy.ActivePO.State != PurchaseOrderStateSaved {
-		t.Errorf("active PO = %+v; want saved %d", occupancy.ActivePO, draft.ID)
+	if occupancy.SavedPOCount != 1 || occupancy.DraftPOCount != 1 {
+		t.Errorf("occupancy counts = %d saved / %d draft; want 1/1",
+			occupancy.SavedPOCount, occupancy.DraftPOCount)
 	}
+	if occupancy.AllBought {
+		t.Error("one saved partial PO made the quotation fully bought")
+	}
+
+	// With two saved records the newest is still offered for reopening and the
+	// bought count is what the detail page labels.
+	if _, err := pool.Exec(ctx, fmt.Sprintf(
+		`UPDATE %s.purchase_orders
+		 SET state = 'saved', po_number = 'PO-499-B', po_number_key = 'po-499-b',
+		     saved_at = NOW(), saved_by = $2
+		 WHERE id = $1`, database.configSchema()),
+		second.ID, user.ID); err != nil {
+		t.Fatalf("mark the second saved: %v", err)
+	}
+	occupancy, err = database.GetPOSourceOccupancy(ctx, quotation.ID)
+	if err != nil {
+		t.Fatalf("get two-saved occupancy: %v", err)
+	}
+	if occupancy.SavedPOCount != 2 || occupancy.DraftPOCount != 0 {
+		t.Errorf("occupancy counts = %d saved / %d draft; want 2/0",
+			occupancy.SavedPOCount, occupancy.DraftPOCount)
+	}
+	if occupancy.ActivePO == nil || occupancy.ActivePO.ID != second.ID ||
+		occupancy.ActivePO.State != PurchaseOrderStateSaved {
+		t.Errorf("active PO = %+v; want the newest saved %d", occupancy.ActivePO, second.ID)
+	}
+
 }
 
 // TestPOSourceOccupancyIsOrganizationScopedAndNamesAMissingQuotation keeps the
@@ -200,5 +268,108 @@ func TestPOSourceOccupancyIsOrganizationScopedAndNamesAMissingQuotation(t *testi
 
 	if _, err := database.GetPOSourceOccupancy(ctxA, quotation.ID+9999); !errors.Is(err, ErrPOSourceNotFound) {
 		t.Errorf("unknown quotation error = %v; want ErrPOSourceNotFound", err)
+	}
+}
+
+// Issue #651: migration 053 removes the one-active-PO unique index and adds the
+// lookup the selector and availability read use. A fresh schema must carry the
+// replacement and not the old rule.
+func TestMigration053ReplacesTheOneActivePOIndex(t *testing.T) {
+	database := openTestSchema(t, "vera_po_651_index")
+	pool, err := database.poolOrError()
+	if err != nil {
+		t.Fatalf("pool: %v", err)
+	}
+	var oldExists, lookupExists bool
+	if err := pool.QueryRow(context.Background(), `
+		SELECT EXISTS (
+			SELECT 1 FROM pg_indexes
+			WHERE schemaname = $1 AND indexname = 'purchase_orders_active_quotation_idx'
+		)`, database.config.Schema).Scan(&oldExists); err != nil {
+		t.Fatalf("check the old index: %v", err)
+	}
+	if oldExists {
+		t.Error("migration 053 left the one-active-PO unique index in place")
+	}
+	if err := pool.QueryRow(context.Background(), `
+		SELECT EXISTS (
+			SELECT 1 FROM pg_indexes
+			WHERE schemaname = $1 AND indexname = 'purchase_orders_source_lookup_idx'
+		)`, database.config.Schema).Scan(&lookupExists); err != nil {
+		t.Fatalf("check the lookup index: %v", err)
+	}
+	if !lookupExists {
+		t.Error("migration 053 did not create the source lookup index")
+	}
+}
+
+// Issue #651 B1: repair mode excludes the record being repaired from the
+// bought-state calculation, so an admin can move a 100%-bought PO's source.
+// Other POs still count, and hideUsed keeps the repaired quotation visible.
+func TestPOSourceRepairModeExcludesTheRepairedPOsAllocations(t *testing.T) {
+	database := openTestSchema(t, "vera_po_651_repair_selector")
+	ctx := poContext(t, database)
+	staff := poTestUser(t, database)
+	repairedQuotation := seedReportQuotation(t, database, 2, "PT. Repair Mode", "Repair mode source",
+		"IDR", "FTZ", []reportQuotationLine{{
+			Description: "Repair line", UoM: "Pc", Qty: 2, Cost: 100, Sell: 250,
+		}})
+	repairedPO := savedPurchaseOrder(t, database, ctx, staff, repairedQuotation, "PO-651-REPAIR-MODE")
+
+	// The repaired PO alone exhausts its quotation in ordinary entry.
+	normal, _, err := database.ListPOSourceQuotations(ctx, 1, "", false, 0)
+	if err != nil {
+		t.Fatalf("normal selector: %v", err)
+	}
+	if len(normal) != 1 || !normal[0].AllBought {
+		t.Fatalf("normal rows = %+v; want the quotation All bought", normal)
+	}
+	if hidden, _, err := database.ListPOSourceQuotations(ctx, 1, "", true, 0); err != nil {
+		t.Fatalf("normal hidden selector: %v", err)
+	} else if len(hidden) != 0 {
+		t.Fatalf("normal hideUsed rows = %d; want the bought quotation hidden", len(hidden))
+	}
+
+	// Repair mode ignores the repaired record's own allocations, so the same
+	// quotation is selectable again and hideUsed keeps it visible.
+	repair, _, err := database.ListPOSourceQuotations(ctx, 1, "", false, repairedPO.ID)
+	if err != nil {
+		t.Fatalf("repair-mode selector: %v", err)
+	}
+	if len(repair) != 1 {
+		t.Fatalf("repair-mode rows = %d; want the repaired quotation", len(repair))
+	}
+	row := repair[0]
+	if row.AllBought || row.RemainingLeafCount != row.LeafCount {
+		t.Errorf("repair-mode row = %+v; want the quoted quantity restored", row)
+	}
+	if row.ActivePO == nil || row.ActivePO.ID != repairedPO.ID {
+		t.Errorf("repair-mode active PO = %+v; want the record being repaired", row.ActivePO)
+	}
+	if visible, _, err := database.ListPOSourceQuotations(ctx, 1, "", true, repairedPO.ID); err != nil {
+		t.Fatalf("repair-mode hidden selector: %v", err)
+	} else if len(visible) != 1 {
+		t.Errorf("repair-mode hideUsed rows = %d; want the repaired quotation visible", len(visible))
+	}
+
+	// Another quotation fully bought by a different PO is still All bought.
+	otherQuotation := seedReportQuotation(t, database, 3, "PT. Other Bought", "Other bought source",
+		"IDR", "FTZ", []reportQuotationLine{{
+			Description: "Other line", UoM: "Pc", Qty: 1, Cost: 100, Sell: 250,
+		}})
+	savedPurchaseOrder(t, database, ctx, staff, otherQuotation, "PO-651-OTHER-BOUGHT")
+	repair, _, err = database.ListPOSourceQuotations(ctx, 1, "", false, repairedPO.ID)
+	if err != nil {
+		t.Fatalf("repair-mode selector with another PO: %v", err)
+	}
+	byID := map[int64]POSourceQuotation{}
+	for _, candidate := range repair {
+		byID[candidate.ID] = candidate
+	}
+	if row, ok := byID[repairedQuotation.ID]; !ok || row.AllBought {
+		t.Errorf("repaired quotation = %+v; want it selectable", row)
+	}
+	if row, ok := byID[otherQuotation.ID]; !ok || !row.AllBought {
+		t.Errorf("other bought quotation = %+v; want it still All bought", row)
 	}
 }

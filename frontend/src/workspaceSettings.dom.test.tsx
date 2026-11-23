@@ -63,6 +63,7 @@ const mocks = vi.hoisted(() => ({
   listPOSourceQuotations: vi.fn((..._args: unknown[]): unknown => undefined),
   listPOSourceRevisions: vi.fn((..._args: unknown[]): unknown => undefined),
   validatePOSource: vi.fn(async (..._args: unknown[]) => ({ Valid: true, Reason: "" })),
+  getQuotationAvailability: vi.fn((..._args: unknown[]): unknown => undefined),
   createPurchaseOrderDraft: vi.fn((..._args: unknown[]): unknown => undefined),
   createBlankPurchaseOrderDraft: vi.fn((..._args: unknown[]): unknown => undefined),
   updatePurchaseOrderDraft: vi.fn((..._args: unknown[]): unknown => undefined),
@@ -124,6 +125,8 @@ vi.mock("@backend/backend/Quotation", async (importOriginal) => {
     ListPOSourceQuotations: (...args: unknown[]) => mocks.listPOSourceQuotations(...args),
     ListPOSourceRevisions: (...args: unknown[]) => mocks.listPOSourceRevisions(...args),
     ValidatePOSource: (...args: unknown[]) => mocks.validatePOSource(...args),
+    GetQuotationAvailability: (...args: unknown[]) =>
+      mocks.getQuotationAvailability(...args),
     CreatePurchaseOrderDraft: (...args: unknown[]) =>
       mocks.createPurchaseOrderDraft(...args),
     CreatePurchaseOrderBlankDraft: (...args: unknown[]) =>
@@ -233,6 +236,12 @@ beforeEach(() => {
         LatestRevision: 0,
         IssuedRevisionCount: 1,
         ActivePO: null,
+        AllBought: false,
+        LeafCount: 1,
+        RemainingLeafCount: 1,
+        SavedPOCount: 0,
+        DraftPOCount: 0,
+        LegacyHeaderDiscount: false,
       },
     ],
     Page: 1,
@@ -242,6 +251,30 @@ beforeEach(() => {
   });
   mocks.listPOSourceRevisions.mockResolvedValue({
     Revisions: [{ Revision: 0, IssuedAt: "2026-10-20T10:00:00+07:00" }],
+  });
+  mocks.getQuotationAvailability.mockResolvedValue({
+    QuotationID: 12,
+    RevisionNumber: 0,
+    LatestRevision: 0,
+    AllBought: false,
+    LegacyHeaderDiscount: false,
+    SavedPOCount: 0,
+    DraftPOCount: 0,
+    Items: [
+      {
+        QuotationItemNo: 1,
+        QuotationSubNo: null,
+        Label: "1",
+        Description: "Test item",
+        UoM: "Lot",
+        QuotedQuantityScaled: 20_000,
+        BoughtQuantityScaled: 0,
+        DraftQuantityScaled: 0,
+        RemainingQuantityScaled: 20_000,
+        OverBoughtQuantityScaled: 0,
+        QuotedUnitPriceMinor: 100_000,
+      },
+    ],
   });
   mocks.createPurchaseOrderDraft.mockResolvedValue(purchaseOrder());
   mocks.createBlankPurchaseOrderDraft.mockResolvedValue(

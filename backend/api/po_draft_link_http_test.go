@@ -267,7 +267,7 @@ func TestStaffLinksAFormerlyLinkedDraftOverHTTP(t *testing.T) {
 	}
 }
 
-func TestDraftLinkRefusesASavedRecordAndAnOccupiedTargetOverHTTP(t *testing.T) {
+func TestDraftLinkRefusesASavedRecordAndLinksToAnOccupiedTargetOverHTTP(t *testing.T) {
 	server, adminToken := testQuotationServer(t, "vera_api_po_497_refusals")
 	sourceID, _ := exportForSelector(t, server, adminToken, quotationInput())
 	occupiedID, _ := exportForSelector(t, server, adminToken, quotationInput())
@@ -288,7 +288,8 @@ func TestDraftLinkRefusesASavedRecordAndAnOccupiedTargetOverHTTP(t *testing.T) {
 		t.Errorf("saved link = %d %v; want 409 po_not_draft", code, body)
 	}
 
-	// One active record already occupies the target.
+	// A quotation that already has a PO is still a valid target: one quotation
+	// may produce many POs (#651).
 	code, body = createPODraft(t, server, staffToken, occupiedID, 0, nil)
 	if code != http.StatusCreated {
 		t.Fatalf("occupy target = %d (%v)", code, body)
@@ -297,13 +298,17 @@ func TestDraftLinkRefusesASavedRecordAndAnOccupiedTargetOverHTTP(t *testing.T) {
 	path := "/v1/purchase-orders/" + strconv.FormatInt(draft.ID, 10)
 	code, body = doJSON(t, server, http.MethodPost, path+"/source-link/review", staffToken,
 		draftLinkReviewRequest(occupiedID, 0))
-	if code != http.StatusConflict || body["code"] != "po_target_occupied" {
-		t.Errorf("occupied review = %d %v; want 409 po_target_occupied", code, body)
+	if code != http.StatusOK {
+		t.Errorf("review against a quotation with another PO = %d %v; want 200", code, body)
 	}
 	code, body = doJSON(t, server, http.MethodPost, path+"/source-link", staffToken,
 		draftLinkRequestBody(draft, occupiedID, 0, nil, []string{"1", "2"}, nil, ""))
-	if code != http.StatusConflict || body["code"] != "po_target_occupied" {
-		t.Errorf("occupied link = %d %v; want 409 po_target_occupied", code, body)
+	if code != http.StatusOK {
+		t.Errorf("link beside another PO = %d %v; want 200", code, body)
+	}
+	linked := decodePurchaseOrder(t, body)
+	if linked.QuotationID != occupiedID || linked.SourceState != "live" {
+		t.Errorf("linked draft = %+v; want the occupied target %d", linked, occupiedID)
 	}
 }
 

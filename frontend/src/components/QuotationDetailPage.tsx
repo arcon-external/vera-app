@@ -117,6 +117,8 @@ export interface QuotationDetailHeaderProps {
   purchaseOrder: QuotationDetailPurchaseOrder | null;
   /** True until the occupancy read answers; creation waits for it. */
   purchaseOrderPending: boolean;
+  /** Every quoted leaf is bought; creation is refused until a revision. */
+  purchaseOrderAllBought: boolean;
   /** Free: create from the revision on screen. */
   onCreatePurchaseOrder: () => void;
   /** Occupied: open the existing record by id. */
@@ -143,6 +145,7 @@ export function QuotationDetailHeader({
   onEdit,
   purchaseOrder,
   purchaseOrderPending,
+  purchaseOrderAllBought,
   onCreatePurchaseOrder,
   onOpenPurchaseOrder,
   revisionSwitching = false,
@@ -186,10 +189,19 @@ export function QuotationDetailHeader({
           )}
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          {/* #499: exactly one action. A free Quotation creates from the
-              displayed revision; an occupied one opens its existing record and
-              never offers a second creation attempt. */}
-          {purchaseOrder === null ? (
+          {/* #651: a quotation may produce many POs. Creation stays available
+              while any leaf has remaining quantity; an existing record is a
+              second, separate action. All bought disables creation with the
+              revision guidance instead of pretending the quotation is used. */}
+          {purchaseOrderAllBought ? (
+            <Button
+              variant="secondary"
+              aria-label="All bought — revise the quotation"
+              disabled
+            >
+              All bought — revise the quotation
+            </Button>
+          ) : (
             <Button
               variant="secondary"
               aria-label="Create PO from this Quotation"
@@ -198,7 +210,8 @@ export function QuotationDetailHeader({
             >
               Create PO from this Quotation
             </Button>
-          ) : (
+          )}
+          {purchaseOrder !== null ? (
             <Button
               variant="secondary"
               aria-label={purchaseOrder.state === "saved" ? "View PO" : "Open PO draft"}
@@ -206,7 +219,7 @@ export function QuotationDetailHeader({
             >
               {purchaseOrder.state === "saved" ? "View PO" : "Open PO draft"}
             </Button>
-          )}
+          ) : null}
           {onCopy ? (
             <QuotationCopyButton
               quotation={quotation}
@@ -248,6 +261,7 @@ export function QuotationDetailPage({
   // PO workspace.
   const [purchaseOrder, setPurchaseOrder] =
     useState<QuotationDetailPurchaseOrder | null>(null);
+  const [purchaseOrderAllBought, setPurchaseOrderAllBought] = useState(false);
   const [purchaseOrderPending, setPurchaseOrderPending] = useState(true);
   const [creatingPurchaseOrder, setCreatingPurchaseOrder] = useState(false);
   const { pushToast } = useToast();
@@ -274,15 +288,25 @@ export function QuotationDetailPage({
   // displayed revision: the PO follows every revision, so switching the
   // selector must not make an occupied Quotation look free.
   const readPurchaseOrder = useCallback(
-    async (id: number): Promise<QuotationDetailPurchaseOrder | null> => {
+    async (
+      id: number
+    ): Promise<{
+      purchaseOrder: QuotationDetailPurchaseOrder | null;
+      allBought: boolean;
+    }> => {
       const occupancy = await GetPOSourceOccupancy(id);
       const active = occupancy.ActivePO;
-      if (!active) return null;
       return {
-        id: active.ID,
-        // Only "saved" is finalized; anything else is the editable draft the
-        // server labels. The state is read, never assumed.
-        state: active.State === "saved" ? "saved" : "draft",
+        purchaseOrder:
+          active === null || active === undefined
+            ? null
+            : {
+                id: active.ID,
+                // Only "saved" is finalized; anything else is the editable
+                // draft the server labels. The state is read, never assumed.
+                state: active.State === "saved" ? "saved" : "draft",
+              },
+        allBought: occupancy.AllBought,
       };
     },
     []
@@ -294,13 +318,18 @@ export function QuotationDetailPage({
     setPurchaseOrderPending(true);
     void readPurchaseOrder(quotationID)
       .then((found) => {
-        if (active) setPurchaseOrder(found);
+        if (!active) return;
+        setPurchaseOrder(found.purchaseOrder);
+        setPurchaseOrderAllBought(found.allBought);
       })
       .catch(() => {
         // A failed read cannot decide the action. Creation stays offered
-        // because the server's create transaction is the real occupancy guard;
-        // a concurrent occupation answers 409 and is handled below.
-        if (active) setPurchaseOrder(null);
+        // because the server's create transaction is the real bought-state
+        // guard; a concurrent exhaustion answers 409 and is handled below.
+        if (active) {
+          setPurchaseOrder(null);
+          setPurchaseOrderAllBought(false);
+        }
       })
       .finally(() => {
         if (active) setPurchaseOrderPending(false);
@@ -397,19 +426,26 @@ export function QuotationDetailPage({
     try {
       await onCreatePurchaseOrder(quotation.ID, quotation.RevisionNumber);
     } catch (error) {
-      let found: QuotationDetailPurchaseOrder | null = null;
+      let found: {
+        purchaseOrder: QuotationDetailPurchaseOrder | null;
+        allBought: boolean;
+      } | null = null;
       try {
         found = await readPurchaseOrder(quotation.ID);
       } catch {
         found = null;
       }
       if (found !== null) {
-        setPurchaseOrder(found);
+        setPurchaseOrder(found.purchaseOrder);
+        setPurchaseOrderAllBought(found.allBought);
+        // #651: an existing draft or saved record is a normal partial-order
+        // state, never an occupancy refusal. Only an exhausted quotation has
+        // its own message; every other failure is the server's real error.
         pushToast(
           "error",
-          found.state === "saved"
-            ? "This quotation already has a finalized purchase order. Use View PO to open it."
-            : "This quotation already has a purchase order draft. Use Open PO draft to continue it."
+          found.allBought
+            ? "Every quoted item is bought. Revise the quotation to order more."
+            : errorMessage(error, "The purchase order could not be created.")
         );
       } else {
         pushToast(
@@ -464,6 +500,7 @@ export function QuotationDetailPage({
         onEdit={() => onEdit(quotation)}
         purchaseOrder={purchaseOrder}
         purchaseOrderPending={purchaseOrderPending}
+        purchaseOrderAllBought={purchaseOrderAllBought}
         revisionSwitching={switching || !revisionAligned || creatingPurchaseOrder}
         onCreatePurchaseOrder={() => void handleCreatePurchaseOrder()}
         onOpenPurchaseOrder={onOpenPurchaseOrder}

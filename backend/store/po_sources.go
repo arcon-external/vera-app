@@ -44,6 +44,13 @@ type POSourceActivePO struct {
 type POSourceOccupancy struct {
 	ActivePO    *POSourceActivePO
 	QuotationID int64
+	// Bought state (#651): a quotation with remaining leaves may produce
+	// another PO even when ActivePO already names a draft or saved record.
+	AllBought            bool
+	RemainingLeafCount   int
+	SavedPOCount         int
+	DraftPOCount         int
+	LegacyHeaderDiscount bool
 }
 
 // POSourceQuotation is one row of the selector's first step. It describes the
@@ -57,6 +64,16 @@ type POSourceQuotation struct {
 	ID                  int64
 	LatestRevision      int16
 	IssuedRevisionCount int
+	// Bought-state badges (#651). LeafCount and RemainingLeafCount describe the
+	// latest revision; SavedPOCount/DraftPOCount are advisory. AllBought is the
+	// selector's disable rule; LegacyHeaderDiscount warns that the revision
+	// must be reissued before a new PO may follow it.
+	LeafCount            int
+	RemainingLeafCount   int
+	SavedPOCount         int
+	DraftPOCount         int
+	AllBought            bool
+	LegacyHeaderDiscount bool
 }
 
 // POSourceRevision is one issued revision of a selected Quotation.
@@ -155,29 +172,97 @@ func (s *Store) ListPOSourceQuotations(ctx context.Context, page int, search str
 	}
 	offset := int64(page-1) * POSourcePageSize
 
-	// The latest revision supplies the row's subject and revision number. The
-	// search is not tied to it: the EXISTS clauses below reach every revision
-	// of the Quotation, matching step two's full revision list.
+	// The latest revision supplies the row's subject and badges. Bought state is
+	// derived from allocations across every revision, exactly as the
+	// availability read does, so the selector's Open / Partial / All bought
+	// label cannot disagree with the workspace.
+	availability := fmt.Sprintf(`
+		WITH latest AS (
+			SELECT DISTINCT ON (quotation_id)
+			       quotation_id, id AS revision_id, revision_number, discount_percent
+			FROM %[1]s.quotation_revisions
+			ORDER BY quotation_id, revision_number DESC
+		),
+		leaves AS (
+			SELECT l.quotation_id, i.item_no, NULL::integer AS sub_no,
+			       i.qty * %[2]d AS quoted_qty
+			FROM latest l
+			JOIN %[1]s.quotation_revision_items i ON i.revision_id = l.revision_id
+			WHERE NOT i.show_sub_prices
+			   OR NOT EXISTS (
+			       SELECT 1 FROM %[1]s.quotation_revision_sub_items s
+			       WHERE s.revision_item_id = i.id)
+			UNION ALL
+			SELECT l.quotation_id, i.item_no, s.sub_no, s.qty * %[2]d
+			FROM latest l
+			JOIN %[1]s.quotation_revision_items i ON i.revision_id = l.revision_id
+			JOIN %[1]s.quotation_revision_sub_items s ON s.revision_item_id = i.id
+			WHERE i.show_sub_prices
+		),
+		bought AS (
+			SELECT a.quotation_id, a.quotation_item_no,
+			       COALESCE(a.quotation_sub_no, 0) AS sub_no,
+			       SUM(a.quantity_scaled) AS bought_qty
+			FROM %[1]s.purchase_order_allocations a
+			JOIN %[1]s.purchase_orders po ON po.id = a.purchase_order_id
+			WHERE a.org_id = $2 AND po.state = 'saved'
+			  -- Repair mode (#651): the record being repaired must not make its
+			  -- own quotation look All bought (or hide it under hideUsed). Its
+			  -- other POs still count.
+			  AND ($3 = 0 OR po.id <> $3)
+			GROUP BY 1, 2, 3
+		),
+		source_state AS (
+			SELECT l.quotation_id,
+			       COUNT(*) AS leaf_count,
+			       COUNT(*) FILTER (
+			           WHERE COALESCE(b.bought_qty, 0) < l.quoted_qty
+			       ) AS remaining_leaf_count,
+			       BOOL_AND(COALESCE(b.bought_qty, 0) >= l.quoted_qty) AS all_bought
+			FROM leaves l
+			LEFT JOIN bought b
+			  ON b.quotation_id = l.quotation_id
+			 AND b.quotation_item_no = l.item_no
+			 AND b.sub_no = COALESCE(l.sub_no, 0)
+			GROUP BY l.quotation_id
+		)`, schema, QuantityScale)
+
 	from := fmt.Sprintf(`
-		FROM %s.quotations q
+		FROM %[1]s.quotations q
 		JOIN LATERAL (
-			SELECT r.id, r.revision_number, r.subject, r.created_at
-			FROM %s.quotation_revisions r
+			SELECT r.revision_number, r.subject, r.discount_percent
+			FROM %[1]s.quotation_revisions r
 			WHERE r.quotation_id = q.id
 			ORDER BY r.revision_number DESC
 			LIMIT 1
 		) l ON TRUE
-		JOIN %s.customers c ON c.id = q.customer_id
+		JOIN %[1]s.customers c ON c.id = q.customer_id
 		JOIN (
 			SELECT quotation_id, COUNT(*) AS issued_revision_count
-			FROM %s.quotation_revisions
+			FROM %[1]s.quotation_revisions
 			GROUP BY quotation_id
 		) counts ON counts.quotation_id = q.id
-		LEFT JOIN %s.purchase_orders po
-		  ON po.quotation_id = q.id AND po.org_id = $2 AND po.id <> $3`,
-		schema, schema, schema, schema, schema)
+		LEFT JOIN source_state ss ON ss.quotation_id = q.id
+		LEFT JOIN LATERAL (
+			SELECT id, state
+			FROM %[1]s.purchase_orders
+			WHERE quotation_id = q.id AND org_id = $2
+			ORDER BY (state = 'draft') DESC, id DESC
+			LIMIT 1
+		) active ON TRUE
+		LEFT JOIN (
+			SELECT quotation_id,
+			       COUNT(*) FILTER (WHERE state = 'saved') AS saved_count,
+			       COUNT(*) FILTER (WHERE state = 'draft') AS draft_count
+			FROM %[1]s.purchase_orders
+			WHERE org_id = $2 AND quotation_id IS NOT NULL
+			GROUP BY quotation_id
+		) po_counts ON po_counts.quotation_id = q.id`, schema)
 
-	where := " WHERE (NOT $1 OR po.id IS NULL)"
+	// hideUsed now means "hide a quotation that is fully bought"; a partial
+	// quotation stays selectable. The repaired record's own id no longer
+	// changes occupancy: a target may already carry other POs.
+	where := " WHERE (NOT $1 OR NOT COALESCE(ss.all_bought, FALSE))"
 	args := []any{hideUsed, org.ID, excludePOID}
 	if term := strings.TrimSpace(search); term != "" {
 		pattern := "%" + escapeLike(term) + "%"
@@ -205,13 +290,20 @@ func (s *Store) ListPOSourceQuotations(ctx context.Context, page int, search str
 	}
 
 	var total int
-	if err := pool.QueryRow(ctx, "SELECT COUNT(*) "+from+where, args...).Scan(&total); err != nil {
+	if err := pool.QueryRow(ctx, availability+" SELECT COUNT(*) "+from+where, args...).Scan(&total); err != nil {
 		return nil, 0, fmt.Errorf("count po source quotations: %w", err)
 	}
 
-	rows, err := pool.Query(ctx, fmt.Sprintf(`
+	rows, err := pool.Query(ctx, availability+fmt.Sprintf(`
 		SELECT q.id, q.quote_number, c.legal_name, l.subject,
-		       l.revision_number, counts.issued_revision_count, po.id, po.state
+		       l.revision_number, counts.issued_revision_count,
+		       active.id, active.state,
+		       COALESCE(ss.leaf_count, 0),
+		       COALESCE(ss.remaining_leaf_count, 0),
+		       COALESCE(po_counts.saved_count, 0),
+		       COALESCE(po_counts.draft_count, 0),
+		       COALESCE(ss.all_bought, FALSE),
+		       (l.discount_percent > 0)
 		%s%s
 		ORDER BY q.id DESC
 		LIMIT $%d OFFSET $%d`, from, where, len(args)+1, len(args)+2),
@@ -235,6 +327,12 @@ func (s *Store) ListPOSourceQuotations(ctx context.Context, page int, search str
 			&quotation.IssuedRevisionCount,
 			&activeID,
 			&activeState,
+			&quotation.LeafCount,
+			&quotation.RemainingLeafCount,
+			&quotation.SavedPOCount,
+			&quotation.DraftPOCount,
+			&quotation.AllBought,
+			&quotation.LegacyHeaderDiscount,
 		); err != nil {
 			return nil, 0, fmt.Errorf("scan po source quotation: %w", err)
 		}
@@ -371,22 +469,12 @@ func (s *Store) ValidatePOSource(ctx context.Context, quotationID int64, revisio
 	return validation, nil
 }
 
-// GetPOSourceOccupancy answers the archived detail page's occupancy question
-// for one Quotation (issue #499). It returns the one active PO the partial
-// unique index permits, scoped to the caller's organization, or a nil ActivePO
-// when the Quotation is free. Every revision of the Quotation shares the
-// answer; the revision on screen is not an input, because a PO follows the
-// Quotation and the one-PO rule spans revisions.
-//
-// The lookup exists so the detail page can offer Open PO draft or View PO
-// instead of a second creation attempt. It is a read: CreatePurchaseOrderDraft
-// still decides occupancy inside its transaction, and its unique-index
-// conflict remains the guard when this read is stale.
+// GetPOSourceOccupancy answers the archived detail page's bought-state
+// question for one Quotation (#499, #651): how much is still orderable, how
+// many POs exist, and the newest record the page may offer to reopen. It is a
+// read; creation and finalization re-check the remaining quantity under the
+// quotation lock, so a stale answer can only change the label.
 func (s *Store) GetPOSourceOccupancy(ctx context.Context, quotationID int64) (POSourceOccupancy, error) {
-	if quotationID < 1 {
-		return POSourceOccupancy{}, fmt.Errorf(
-			"%w: quotation id is required", ErrPOSourceInvalid)
-	}
 	org, err := s.RequireOrg(ctx)
 	if err != nil {
 		return POSourceOccupancy{}, err
@@ -396,31 +484,44 @@ func (s *Store) GetPOSourceOccupancy(ctx context.Context, quotationID int64) (PO
 		return POSourceOccupancy{}, err
 	}
 	schema := s.configSchema()
-
-	var occupancy POSourceOccupancy
-	var activeID pgtype.Int8
-	var activeState pgtype.Text
-	err = pool.QueryRow(ctx, fmt.Sprintf(`
-		SELECT q.id, po.id, po.state
-		FROM %s.quotations q
-		LEFT JOIN %s.purchase_orders po
-		  ON po.quotation_id = q.id AND po.org_id = $2
-		WHERE q.id = $1`, schema, schema),
-		quotationID, org.ID).Scan(&occupancy.QuotationID, &activeID, &activeState)
-	if errors.Is(err, pgx.ErrNoRows) {
-		// The detail page loaded this Quotation moments ago; a missing row is
-		// a deletion, and the caller names it rather than showing "free".
-		return POSourceOccupancy{}, ErrPOSourceNotFound
-	}
+	availability, err := getQuotationAvailability(ctx, pool, schema, org.ID, quotationID, -1)
 	if err != nil {
+		if errors.Is(err, ErrPurchaseOrderSourceNotFound) {
+			return POSourceOccupancy{}, ErrPOSourceNotFound
+		}
+		return POSourceOccupancy{}, err
+	}
+	occupancy := POSourceOccupancy{
+		QuotationID:          quotationID,
+		AllBought:            availability.AllBought,
+		RemainingLeafCount:   availabilityRemainingLeaves(availability),
+		SavedPOCount:         availability.SavedPOCount,
+		DraftPOCount:         availability.DraftPOCount,
+		LegacyHeaderDiscount: availability.LegacyHeaderDiscount,
+	}
+	var activeID int64
+	var activeState string
+	err = pool.QueryRow(ctx, fmt.Sprintf(`
+		SELECT id, state FROM %s.purchase_orders
+		WHERE org_id = $1 AND quotation_id = $2
+		ORDER BY (state = 'draft') DESC, id DESC
+		LIMIT 1`, schema), org.ID, quotationID).Scan(&activeID, &activeState)
+	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 		return POSourceOccupancy{}, fmt.Errorf(
 			"read po source occupancy for quotation %d: %w", quotationID, err)
 	}
-	if activeID.Valid {
-		occupancy.ActivePO = &POSourceActivePO{
-			ID:    activeID.Int64,
-			State: activeState.String,
-		}
+	if err == nil {
+		occupancy.ActivePO = &POSourceActivePO{ID: activeID, State: activeState}
 	}
 	return occupancy, nil
+}
+
+func availabilityRemainingLeaves(availability QuotationAvailability) int {
+	remaining := 0
+	for _, item := range availability.Items {
+		if item.RemainingQuantityScaled > 0 {
+			remaining++
+		}
+	}
+	return remaining
 }
