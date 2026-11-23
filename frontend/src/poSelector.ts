@@ -188,7 +188,12 @@ export type POSourceSelectorAction =
   | { type: "searchChanged"; search: string }
   | { type: "pageChanged"; page: number }
   | { type: "hideUsedChanged"; hideUsed: boolean }
-  | { type: "quotationSelected"; quotation: POSourceQuotation }
+  | {
+      type: "quotationSelected";
+      quotation: POSourceQuotation;
+      /** Repair and link may target an All bought quotation (#651 B1). */
+      allowAllBought?: boolean;
+    }
   | { type: "revisionsLoading" }
   | { type: "revisionsLoaded"; quotationId: number; revisions: POSourceRevision[] }
   | { type: "revisionsFailed"; quotationId: number; error: string }
@@ -355,9 +360,14 @@ export function poSourceSelectorReducer(
     case "hideUsedChanged":
       return { ...state, hideUsed: action.hideUsed, page: 1 };
     case "quotationSelected":
-      // Only a fully bought quotation is non-interactive (#651). A partial
-      // quotation stays selectable and may produce another PO.
-      if (state.step !== 1 || action.quotation.allBought) return state;
+      // Entry refuses a fully bought quotation (#651). Repair and link may
+      // target one, because moving or creating a link is not a new order.
+      if (
+        state.step !== 1 ||
+        (action.quotation.allBought && !action.allowAllBought)
+      ) {
+        return state;
+      }
       return {
         ...state,
         step: 2,

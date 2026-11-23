@@ -140,12 +140,14 @@ function StepOne({
   state,
   dispatch,
   onOpenDraft,
+  mode = "entry",
   tutorial = false,
 }: Pick<
   POQuotationSelectorViewProps,
-  "state" | "dispatch" | "onOpenDraft" | "tutorial"
+  "state" | "dispatch" | "onOpenDraft" | "mode" | "tutorial"
 >) {
   const rows = visibleRows(state.rows, state.hideUsed);
+  const isEntry = mode === "entry";
   return (
     <div className="grid gap-4">
       <label className="grid gap-1.5">
@@ -191,24 +193,34 @@ function StepOne({
         <ul className="grid max-h-[42vh] gap-2 overflow-y-auto scroll-thin pr-1">
           {rows.map((row) => {
             const allBought = row.allBought;
+            const blocked = isEntry && allBought;
             const draft = draftOf(row);
+            // Advisory drafts do not buy anything: a quotation with only
+            // drafts still reads Open (plus its "in draft" count). "Partial"
+            // means at least one saved PO consumed quantity (#651 NB2).
             const badge = allBought
               ? "All bought"
-              : row.savedPoCount > 0 || row.draftPoCount > 0
+              : row.savedPoCount > 0
                 ? "Partial"
                 : "Open";
             return (
               <li key={row.id} className="grid gap-1">
                 <button
                   type="button"
-                  disabled={allBought}
+                  disabled={blocked}
                   data-tutorial={tutorial ? "tutorial-quotation-row" : undefined}
-                  aria-disabled={allBought ? "true" : undefined}
+                  aria-disabled={blocked ? "true" : undefined}
                   aria-label={`Quotation ${row.quoteNumber}, ${row.customerName}`}
-                  aria-describedby={allBought ? `po-source-used-${row.id}` : undefined}
-                  onClick={() => dispatch({ type: "quotationSelected", quotation: row })}
+                  aria-describedby={blocked ? `po-source-used-${row.id}` : undefined}
+                  onClick={() =>
+                    dispatch({
+                      type: "quotationSelected",
+                      quotation: row,
+                      allowAllBought: !isEntry,
+                    })
+                  }
                   className={`grid w-full gap-1 rounded-lg border px-4 py-3 text-left transition ${
-                    allBought
+                    blocked
                       ? "cursor-not-allowed border-rule bg-paper-muted text-ink-400"
                       : "cursor-pointer border-rule bg-white text-ink-900 hover:border-accent-400 hover:bg-paper-muted"
                   }`}
@@ -227,7 +239,7 @@ function StepOne({
                   <span className="flex flex-wrap gap-2 text-caption">
                     <span
                       className={`font-medium ${
-                        allBought ? "text-danger-600" : "text-accent-700"
+                        blocked ? "text-danger-600" : "text-accent-700"
                       }`}
                     >
                       {badge}
@@ -255,7 +267,7 @@ function StepOne({
                 {/* The reason sits outside the disabled button: a disabled
                     control's descendants are not uniformly exposed, so the
                     description is a sibling the button points at. */}
-                {allBought ? (
+                {blocked ? (
                   <p
                     id={`po-source-used-${row.id}`}
                     className="px-1 text-caption font-medium text-danger-600"
@@ -575,6 +587,7 @@ export function POQuotationSelectorView({
               state={state}
               dispatch={dispatch}
               onOpenDraft={repairing ? undefined : onOpenDraft}
+              mode={mode}
               tutorial={tutorial}
             />
           ) : null}

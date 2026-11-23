@@ -79,6 +79,16 @@ const ALL_BOUGHT_ROW = {
   savedPoCount: 2,
 };
 
+const PARTIAL_ROW = {
+  ...OTHER,
+  id: 16,
+  quoteNumber: "1502260005",
+  activePO: { id: 23, state: "saved" as const },
+  leafCount: 2,
+  remainingLeafCount: 1,
+  savedPoCount: 1,
+};
+
 const TWO_REVISIONS: POSourceRevision[] = [
   { revision: 1, issuedAt: "2026-10-20T10:00:00+07:00" },
   { revision: 0, issuedAt: "2026-10-18T10:00:00+07:00" },
@@ -162,7 +172,7 @@ interface HarnessProps {
     selection: POSourceSelection,
     items?: POSourceSelectionItem[]
   ) => void;
-  mode?: "entry" | "repair";
+  mode?: "entry" | "repair" | "link";
   excludePOID?: number;
   tutorial?: boolean;
 }
@@ -290,12 +300,44 @@ async function reachConfirmation(): Promise<void> {
 }
 
 describe("POQuotationSelector interaction (issue #467 wave 3)", () => {
-  it("shows Open and Partial bought-state badges in the source list", async () => {
-    await renderHarness({ loadPage: async () => page([QUOTATION, DRAFT_ROW]) });
-    expect(document.body.textContent).toContain("Open");
-    expect(document.body.textContent).toContain("Partial");
-    expect(document.body.textContent).toContain("1 in draft");
+  it("shows Open, Partial and draft-advisory badges in the source list", async () => {
+    await renderHarness({
+      loadPage: async () => page([QUOTATION, PARTIAL_ROW, DRAFT_ROW]),
+    });
+    const open = button(
+      `Quotation ${QUOTATION.quoteNumber}, ${QUOTATION.customerName}`
+    );
+    expect(open.textContent).toContain("Open");
+    expect(open.textContent).not.toContain("Partial");
+    const partial = button(
+      `Quotation ${PARTIAL_ROW.quoteNumber}, ${PARTIAL_ROW.customerName}`
+    );
+    expect(partial.textContent).toContain("Partial");
+    expect(partial.textContent).toContain("1 of 2 left");
+    // A quotation with only advisory drafts still reads Open.
+    const draft = button(
+      `Quotation ${DRAFT_ROW.quoteNumber}, ${DRAFT_ROW.customerName}`
+    );
+    expect(draft.textContent).toContain("Open");
+    expect(draft.textContent).not.toContain("Partial");
+    expect(draft.textContent).toContain("1 in draft");
   });
+
+  it.each(["repair", "link"] as const)(
+    "lets %s mode select an All bought quotation",
+    async (mode) => {
+      await renderHarness({
+        mode,
+        loadPage: async () => page([ALL_BOUGHT_ROW]),
+      });
+      const row = button(
+        `Quotation ${ALL_BOUGHT_ROW.quoteNumber}, ${ALL_BOUGHT_ROW.customerName}`
+      );
+      expect(row.disabled).toBe(false);
+      await click(row);
+      expect(document.body.textContent).toContain("Step 2 of 3");
+    }
+  );
 
   it("disables Create PO for an All bought quotation with revision guidance", async () => {
     await renderHarness({ loadPage: async () => page([ALL_BOUGHT_ROW]) });

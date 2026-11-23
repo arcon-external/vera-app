@@ -188,7 +188,10 @@ function atStepThree(revision = 1) {
   ]);
 }
 
-function render(state: POSourceSelectorState): string {
+function render(
+  state: POSourceSelectorState,
+  mode: "entry" | "repair" | "link" = "entry"
+): string {
   // renderToString inserts comment nodes between dynamic text and its
   // neighbours ("Step <!-- -->2<!-- --> of 3"). They are not content, so the
   // assertions read the text as a user would.
@@ -199,6 +202,7 @@ function render(state: POSourceSelectorState): string {
       onClose={() => {}}
       onConfirm={() => {}}
       onOpenDraft={() => {}}
+      mode={mode}
     />
   ).replace(/<!-- -->/g, "");
 }
@@ -259,6 +263,32 @@ describe("POQuotationSelectorView step 1 (issue #467)", () => {
     expect(html).toContain(`id="${describedBy}"`);
     expect(html).toContain("All bought");
     expect(html).toContain("Revise the quotation to order more.");
+  });
+
+  it("lets repair and link select an All bought quotation", () => {
+    const state = stepOneState({
+      rows: [ALL_BOUGHT],
+      total: 1,
+      totalPages: 1,
+    });
+    for (const mode of ["repair", "link"] as const) {
+      const html = render(state, mode);
+      const row = buttonTagFor(html, "Quotation 1502260004, PT. Fully Bought");
+      expect(row).not.toContain(" disabled=");
+      expect(html).not.toContain("Revise the quotation to order more.");
+      expect(html).toContain("All bought");
+    }
+  });
+
+  it("shows Open, not Partial, for an advisory draft", () => {
+    const html = render(stepOneState());
+    const draft = buttonElementFor(
+      html,
+      "Quotation 1502260003, PT. Datalec Global Solution"
+    );
+    expect(draft).toContain("Open");
+    expect(draft).not.toContain("Partial");
+    expect(draft).toContain("1 in draft");
   });
 
   it("offers Open draft for a draft while the row stays selectable for another PO", () => {

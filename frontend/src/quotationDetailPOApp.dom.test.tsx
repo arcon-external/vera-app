@@ -513,9 +513,44 @@ describe("create PO from the displayed Quotation revision (issue #499)", () => {
     expect(mocks.getOccupancy).toHaveBeenCalledTimes(2);
     expect(document.body.textContent).toContain("Open PO draft");
     expect(document.body.textContent).toContain("Create PO from this Quotation");
+    // The real server error is shown, not the retired single-PO message.
     expect(document.body.textContent).toContain(
-      "This quotation already has a purchase order draft. Use Open PO draft to continue it."
+      "the purchase order could not be created"
     );
+    expect(document.body.textContent).not.toContain(
+      "This quotation already has a purchase order draft"
+    );
+  });
+
+  it("turns a failed create on an exhausted quotation into the All bought state", async () => {
+    mocks.getOccupancy
+      .mockResolvedValueOnce({ QuotationID: QUOTATION_ID, ActivePO: null })
+      .mockResolvedValue({
+        QuotationID: QUOTATION_ID,
+        ActivePO: { ID: 41, State: "saved" },
+        AllBought: true,
+      });
+    mocks.createDraft.mockRejectedValue(
+      new Error("this quotation has no remaining quantity to order")
+    );
+    await openArchivedQuotation();
+
+    act(() => button("Create PO from this Quotation").click());
+    await flush();
+    await flush();
+
+    expect(mocks.createDraft).toHaveBeenCalledTimes(1);
+    expect(document.body.textContent).toContain(
+      "Every quoted item is bought. Revise the quotation to order more."
+    );
+    expect(document.body.textContent).not.toContain(
+      "Create PO from this Quotation"
+    );
+    expect(
+      document.querySelector(
+        'button[aria-label="All bought — revise the quotation"]'
+      )
+    ).not.toBeNull();
   });
 
   it("returns to the loaded revision after a failed older-revision switch, and creates only what is shown", async () => {

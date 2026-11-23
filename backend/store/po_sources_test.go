@@ -302,3 +302,74 @@ func TestMigration053ReplacesTheOneActivePOIndex(t *testing.T) {
 		t.Error("migration 053 did not create the source lookup index")
 	}
 }
+
+// Issue #651 B1: repair mode excludes the record being repaired from the
+// bought-state calculation, so an admin can move a 100%-bought PO's source.
+// Other POs still count, and hideUsed keeps the repaired quotation visible.
+func TestPOSourceRepairModeExcludesTheRepairedPOsAllocations(t *testing.T) {
+	database := openTestSchema(t, "vera_po_651_repair_selector")
+	ctx := poContext(t, database)
+	staff := poTestUser(t, database)
+	repairedQuotation := seedReportQuotation(t, database, 2, "PT. Repair Mode", "Repair mode source",
+		"IDR", "FTZ", []reportQuotationLine{{
+			Description: "Repair line", UoM: "Pc", Qty: 2, Cost: 100, Sell: 250,
+		}})
+	repairedPO := savedPurchaseOrder(t, database, ctx, staff, repairedQuotation, "PO-651-REPAIR-MODE")
+
+	// The repaired PO alone exhausts its quotation in ordinary entry.
+	normal, _, err := database.ListPOSourceQuotations(ctx, 1, "", false, 0)
+	if err != nil {
+		t.Fatalf("normal selector: %v", err)
+	}
+	if len(normal) != 1 || !normal[0].AllBought {
+		t.Fatalf("normal rows = %+v; want the quotation All bought", normal)
+	}
+	if hidden, _, err := database.ListPOSourceQuotations(ctx, 1, "", true, 0); err != nil {
+		t.Fatalf("normal hidden selector: %v", err)
+	} else if len(hidden) != 0 {
+		t.Fatalf("normal hideUsed rows = %d; want the bought quotation hidden", len(hidden))
+	}
+
+	// Repair mode ignores the repaired record's own allocations, so the same
+	// quotation is selectable again and hideUsed keeps it visible.
+	repair, _, err := database.ListPOSourceQuotations(ctx, 1, "", false, repairedPO.ID)
+	if err != nil {
+		t.Fatalf("repair-mode selector: %v", err)
+	}
+	if len(repair) != 1 {
+		t.Fatalf("repair-mode rows = %d; want the repaired quotation", len(repair))
+	}
+	row := repair[0]
+	if row.AllBought || row.RemainingLeafCount != row.LeafCount {
+		t.Errorf("repair-mode row = %+v; want the quoted quantity restored", row)
+	}
+	if row.ActivePO == nil || row.ActivePO.ID != repairedPO.ID {
+		t.Errorf("repair-mode active PO = %+v; want the record being repaired", row.ActivePO)
+	}
+	if visible, _, err := database.ListPOSourceQuotations(ctx, 1, "", true, repairedPO.ID); err != nil {
+		t.Fatalf("repair-mode hidden selector: %v", err)
+	} else if len(visible) != 1 {
+		t.Errorf("repair-mode hideUsed rows = %d; want the repaired quotation visible", len(visible))
+	}
+
+	// Another quotation fully bought by a different PO is still All bought.
+	otherQuotation := seedReportQuotation(t, database, 3, "PT. Other Bought", "Other bought source",
+		"IDR", "FTZ", []reportQuotationLine{{
+			Description: "Other line", UoM: "Pc", Qty: 1, Cost: 100, Sell: 250,
+		}})
+	savedPurchaseOrder(t, database, ctx, staff, otherQuotation, "PO-651-OTHER-BOUGHT")
+	repair, _, err = database.ListPOSourceQuotations(ctx, 1, "", false, repairedPO.ID)
+	if err != nil {
+		t.Fatalf("repair-mode selector with another PO: %v", err)
+	}
+	byID := map[int64]POSourceQuotation{}
+	for _, candidate := range repair {
+		byID[candidate.ID] = candidate
+	}
+	if row, ok := byID[repairedQuotation.ID]; !ok || row.AllBought {
+		t.Errorf("repaired quotation = %+v; want it selectable", row)
+	}
+	if row, ok := byID[otherQuotation.ID]; !ok || !row.AllBought {
+		t.Errorf("other bought quotation = %+v; want it still All bought", row)
+	}
+}

@@ -206,6 +206,10 @@ func (s *Store) ListPOSourceQuotations(ctx context.Context, page int, search str
 			FROM %[1]s.purchase_order_allocations a
 			JOIN %[1]s.purchase_orders po ON po.id = a.purchase_order_id
 			WHERE a.org_id = $2 AND po.state = 'saved'
+			  -- Repair mode (#651): the record being repaired must not make its
+			  -- own quotation look All bought (or hide it under hideUsed). Its
+			  -- other POs still count.
+			  AND ($3 = 0 OR po.id <> $3)
 			GROUP BY 1, 2, 3
 		),
 		source_state AS (
@@ -259,27 +263,27 @@ func (s *Store) ListPOSourceQuotations(ctx context.Context, page int, search str
 	// quotation stays selectable. The repaired record's own id no longer
 	// changes occupancy: a target may already carry other POs.
 	where := " WHERE (NOT $1 OR NOT COALESCE(ss.all_bought, FALSE))"
-	args := []any{hideUsed, org.ID}
+	args := []any{hideUsed, org.ID, excludePOID}
 	if term := strings.TrimSpace(search); term != "" {
 		pattern := "%" + escapeLike(term) + "%"
 		where += fmt.Sprintf(`
 			AND (
-				q.quote_number ILIKE $3 ESCAPE '\'
+				q.quote_number ILIKE $4 ESCAPE '\'
 				OR EXISTS (
 					SELECT 1 FROM %s.quotation_revisions sr
-					WHERE sr.quotation_id = q.id AND sr.subject ILIKE $3 ESCAPE '\'
+					WHERE sr.quotation_id = q.id AND sr.subject ILIKE $4 ESCAPE '\'
 				)
-				OR c.legal_name ILIKE $3 ESCAPE '\'
+				OR c.legal_name ILIKE $4 ESCAPE '\'
 				OR EXISTS (
 					SELECT 1 FROM %s.quotation_revision_items i
 					JOIN %s.quotation_revisions sr ON sr.id = i.revision_id
-					WHERE sr.quotation_id = q.id AND i.description ILIKE $3 ESCAPE '\'
+					WHERE sr.quotation_id = q.id AND i.description ILIKE $4 ESCAPE '\'
 				)
 				OR EXISTS (
 					SELECT 1 FROM %s.quotation_revision_sub_items si
 					JOIN %s.quotation_revision_items i ON i.id = si.revision_item_id
 					JOIN %s.quotation_revisions sr ON sr.id = i.revision_id
-					WHERE sr.quotation_id = q.id AND si.description ILIKE $3 ESCAPE '\'
+					WHERE sr.quotation_id = q.id AND si.description ILIKE $4 ESCAPE '\'
 				)
 			)`, schema, schema, schema, schema, schema, schema)
 		args = append(args, pattern)

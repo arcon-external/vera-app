@@ -468,3 +468,170 @@ func TestDraftSaveRewritesAllocationsAndSnapshotsOverwrite(t *testing.T) {
 			snapshot[0], before)
 	}
 }
+
+// Issue #651 NB1: a split package's priced sub-items are the orderable leaves.
+// Buying 2.1 alone leaves 2.2 as the next ghost; buying 2.2 exhausts the
+// package. This is the QuotationSubNo != nil path through availability,
+// explicit creation and finalize.
+func TestQuotationAvailabilitySplitPackageBoughtBySubItem(t *testing.T) {
+	database := openTestSchema(t, "vera_po_651_subitems")
+	ctx := poContext(t, database)
+	user := poTestUser(t, database)
+	quotation := seedReportQuotation(t, database, 2, "PT. Sub Items", "Split package source",
+		"IDR", "FTZ", []reportQuotationLine{{
+			Description: "Installed package",
+			UoM:         "Lot",
+			Qty:         1,
+			Cost:        0,
+			Sell:        0,
+			SubItems: []reportQuotationSub{
+				{Description: "Mounting", UoM: "Pc", Qty: 2, Cost: 100, Sell: 200},
+				{Description: "Cabling", UoM: "Pc", Qty: 3, Cost: 50, Sell: 90},
+			},
+		}})
+
+	available := availabilityFor(t, database, ctx, quotation.ID)
+	if len(available.Items) != 2 {
+		t.Fatalf("split package leaves = %d; want the two priced sub-items", len(available.Items))
+	}
+	firstLeaf, ok := availabilityLeaf(available, 1, intPointer(1))
+	if !ok {
+		t.Fatalf("no availability leaf for 1.1: %+v", available.Items)
+	}
+	secondLeaf, ok := availabilityLeaf(available, 1, intPointer(2))
+	if !ok {
+		t.Fatalf("no availability leaf for 1.2: %+v", available.Items)
+	}
+	if firstLeaf.QuotedQuantityScaled != 2*QuantityScale ||
+		secondLeaf.QuotedQuantityScaled != 3*QuantityScale {
+		t.Errorf("split quantities = %d/%d; want 2/3 units",
+			firstLeaf.QuotedQuantityScaled, secondLeaf.QuotedQuantityScaled)
+	}
+
+	// Buy only 2.1.
+	firstPick := PurchaseOrderCreateItem{QuotationItemNo: 1, QuotationSubNo: intPointer(1)}
+	firstDraft, err := database.CreatePurchaseOrderDraft(ctx, PurchaseOrderCreate{
+		QuotationID:    quotation.ID,
+		RevisionNumber: quotation.RevisionNumber,
+		Items:          []PurchaseOrderCreateItem{firstPick},
+		CreatedBy:      user.ID,
+	})
+	if err != nil {
+		t.Fatalf("create the sub-item draft: %v", err)
+	}
+	if len(firstDraft.Items) != 1 || firstDraft.Items[0].QuotationSubNo == nil ||
+		*firstDraft.Items[0].QuotationSubNo != 1 {
+		t.Fatalf("sub-item draft lines = %+v; want only 2.1", firstDraft.Items)
+	}
+	if firstDraft.Items[0].QuantityScaled != 2*QuantityScale {
+		t.Errorf("sub-item draft quantity = %d; want the two remaining units",
+			firstDraft.Items[0].QuantityScaled)
+	}
+	firstInput := finalizeInput(firstDraft, user, "PO-651-SUB-A")
+	firstInput.AcknowledgedMissing = []string{"1.2"}
+	if _, err := database.FinalizePurchaseOrder(ctx, firstInput); err != nil {
+		t.Fatalf("finalize the 2.1 purchase order: %v", err)
+	}
+
+	afterFirst := availabilityFor(t, database, ctx, quotation.ID)
+	firstLeaf, _ = availabilityLeaf(afterFirst, 1, intPointer(1))
+	secondLeaf, _ = availabilityLeaf(afterFirst, 1, intPointer(2))
+	if firstLeaf.RemainingQuantityScaled != 0 {
+		t.Errorf("2.1 remaining = %d; want the sub-item exhausted",
+			firstLeaf.RemainingQuantityScaled)
+	}
+	if secondLeaf.RemainingQuantityScaled != 3*QuantityScale {
+		t.Errorf("2.2 remaining = %d; want the three-unit ghost",
+			secondLeaf.RemainingQuantityScaled)
+	}
+	if afterFirst.AllBought {
+		t.Error("buying 2.1 alone marked the split package All bought")
+	}
+
+	// Buy the remaining 2.2 in a second PO.
+	secondPick := PurchaseOrderCreateItem{QuotationItemNo: 1, QuotationSubNo: intPointer(2)}
+	secondDraft, err := database.CreatePurchaseOrderDraft(ctx, PurchaseOrderCreate{
+		QuotationID:    quotation.ID,
+		RevisionNumber: quotation.RevisionNumber,
+		Items:          []PurchaseOrderCreateItem{secondPick},
+		CreatedBy:      user.ID,
+	})
+	if err != nil {
+		t.Fatalf("create the second sub-item draft: %v", err)
+	}
+	if len(secondDraft.Items) != 1 || secondDraft.Items[0].QuotationSubNo == nil ||
+		*secondDraft.Items[0].QuotationSubNo != 2 ||
+		secondDraft.Items[0].QuantityScaled != 3*QuantityScale {
+		t.Fatalf("second sub-item draft = %+v; want 2.2 x 3", secondDraft.Items)
+	}
+	secondInput := finalizeInput(secondDraft, user, "PO-651-SUB-B")
+	secondInput.AcknowledgedMissing = []string{"1.1"}
+	if _, err := database.FinalizePurchaseOrder(ctx, secondInput); err != nil {
+		t.Fatalf("finalize the 2.2 purchase order: %v", err)
+	}
+	final := availabilityFor(t, database, ctx, quotation.ID)
+	if !final.AllBought {
+		t.Errorf("split package after both sub-items = %+v; want All bought", final.Items)
+	}
+	if _, err := database.CreatePurchaseOrderDraft(ctx, PurchaseOrderCreate{
+		QuotationID:    quotation.ID,
+		RevisionNumber: quotation.RevisionNumber,
+		CreatedBy:      user.ID,
+	}); !errors.Is(err, ErrQuotationFullyBought) {
+		t.Errorf("create on the exhausted split package = %v; want ErrQuotationFullyBought", err)
+	}
+}
+
+// Issue #651 NB3: a later revision that lowers the quantity below what is
+// already bought clamps remaining to zero and reports the excess as over-bought.
+func TestQuotationAvailabilityRevisionReductionIsOverBought(t *testing.T) {
+	database := openTestSchema(t, "vera_po_651_overbought")
+	ctx := poContext(t, database)
+	user := poTestUser(t, database)
+	rev0 := seedReportQuotation(t, database, 2, "PT. Over Bought", "Over bought source",
+		"IDR", "FTZ", []reportQuotationLine{{
+			Description: "Reduced line", UoM: "Pc", Qty: 10, Cost: 100, Sell: 250,
+		}})
+	finalizeAvailabilityQuantity(t, database, ctx, user, rev0, "PO-651-OVER", 4*QuantityScale)
+
+	if _, err := database.SaveRevision(ctx, RevisionDraft{
+		CustomerCode: 2, CustomerName: "PT. Over Bought", CustomerAddress: "Jl. Report Billing 1",
+		RecipientName: "Budi Santoso", RecipientAddress: "Jl. Report Recipient 9",
+		Subject: "Reduced revision", Incoterm: "CIF", ValidityDays: 30,
+		PaymentTermDays: 45, LeadTimeDays: 10, TaxZone: "FTZ", TaxType: "Goods",
+		Currency: "IDR", RevisionNumber: 1, QuoteNumber: rev0.QuoteNumber,
+		HTMLSnapshot: "<html>reduced revision</html>",
+		Items: []RevisionItem{{
+			ItemNo: 1, Description: "Reduced line", Qty: 3, UoM: "Pc",
+			UnitPrice: 100, OriginalTotal: 300, MarginalizedUnitPrice: 250,
+			MarginalizedTotal: 750, ListUnitPrice: 250,
+		}},
+		Totals: RevisionTotals{
+			OriginalSubtotal: 300, OriginalGrand: 300,
+			MarginalizedSubtotal: 750, MarginalizedGrand: 750,
+			MarginalizedGrandAfterTax: 750, CustomerGrandTotal: 750,
+		},
+	}); err != nil {
+		t.Fatalf("issue the reduced revision: %v", err)
+	}
+
+	available := availabilityFor(t, database, ctx, rev0.ID)
+	item := availabilityItem(t, available, 1)
+	if item.QuotedQuantityScaled != 3*QuantityScale {
+		t.Errorf("quoted after reduction = %d; want 3 units", item.QuotedQuantityScaled)
+	}
+	if item.BoughtQuantityScaled != 4*QuantityScale {
+		t.Errorf("bought = %d; want the historical 4 units", item.BoughtQuantityScaled)
+	}
+	if item.RemainingQuantityScaled != 0 {
+		t.Errorf("remaining = %d; want zero after the downward revision",
+			item.RemainingQuantityScaled)
+	}
+	if item.OverBoughtQuantityScaled != QuantityScale {
+		t.Errorf("over-bought = %d; want the one excess unit",
+			item.OverBoughtQuantityScaled)
+	}
+	if !available.AllBought {
+		t.Error("a downward revision below bought did not report All bought")
+	}
+}

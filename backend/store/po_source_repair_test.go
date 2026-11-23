@@ -423,6 +423,7 @@ func TestRepairPurchaseOrderSourceMovesToAQuotationWithAnotherPO(t *testing.T) {
 	original := seedRepairQuotation(t, database, 2, "PT. Buyer", "Original", "Jl. Billing A", 100, 45)
 	target := seedRepairQuotation(t, database, 2, "PT. Buyer", "Target", "Jl. Billing A", 100, 45)
 	saved := savedPurchaseOrder(t, database, ctx, staff, original, "PO-475-OCCUPIED")
+	before := readAllocations(t, database, ctx, saved.ID)
 	// #651 removed the one-active-record rule: the target may already have a
 	// draft (or saved record) and still receive another PO.
 	existing := createFinalizeDraft(t, database, ctx, staff, target)
@@ -453,6 +454,72 @@ func TestRepairPurchaseOrderSourceMovesToAQuotationWithAnotherPO(t *testing.T) {
 	}
 	if countRows(t, database, "purchase_orders", "id = $1", existing.ID) != 1 {
 		t.Error("the repair removed the target quotation's existing draft")
+	}
+
+	// #651 B2: the source_repair correction keeps the old quotation's frozen
+	// allocation picture before the live rows are replaced.
+	var correctionID int64
+	if err := database.pool.QueryRow(ctx, fmt.Sprintf(`
+		SELECT id FROM %s.purchase_order_corrections
+		WHERE purchase_order_id = $1 AND kind = $2
+		ORDER BY id DESC LIMIT 1`, database.configSchema()),
+		saved.ID, PurchaseOrderCorrectionKindSourceRepair).Scan(&correctionID); err != nil {
+		t.Fatalf("read the source repair correction: %v", err)
+	}
+	rows, err := database.pool.Query(ctx, fmt.Sprintf(`
+		SELECT quotation_id, line_number, quantity_scaled, revenue_minor,
+		       quoted_unit_price_minor, COALESCE(cost_unit_minor, -1)
+		FROM %s.purchase_order_correction_allocations
+		WHERE correction_id = $1
+		ORDER BY line_number`, database.configSchema()), correctionID)
+	if err != nil {
+		t.Fatalf("read the source repair allocation snapshot: %v", err)
+	}
+	defer rows.Close()
+	snapshot := make(map[int]struct {
+		quotationID int64
+		quantity    int64
+		revenue     int64
+		quoted      int64
+		cost        int64
+	})
+	for rows.Next() {
+		var line int
+		var row struct {
+			quotationID int64
+			quantity    int64
+			revenue     int64
+			quoted      int64
+			cost        int64
+		}
+		if err := rows.Scan(&row.quotationID, &line, &row.quantity, &row.revenue,
+			&row.quoted, &row.cost); err != nil {
+			t.Fatalf("scan the source repair allocation snapshot: %v", err)
+		}
+		snapshot[line] = row
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("iterate the source repair allocation snapshot: %v", err)
+	}
+	if len(snapshot) != 2 {
+		t.Fatalf("source repair snapshot = %d rows; want the pre-repair two allocations", len(snapshot))
+	}
+	for index, key := range []string{"1.0", "3.0"} {
+		want := before[key]
+		got, ok := snapshot[index+1]
+		if !ok {
+			t.Errorf("source repair snapshot missing line %d", index+1)
+			continue
+		}
+		if got.quotationID != original.ID {
+			t.Errorf("source repair snapshot line %d quotation = %d; want the original %d",
+				index+1, got.quotationID, original.ID)
+		}
+		if got.quantity != want.QuantityScaled || got.revenue != want.RevenueMinor ||
+			got.quoted != want.QuotedUnitPriceMinor || got.cost != want.CostUnitMinor {
+			t.Errorf("source repair snapshot line %d = %+v; want the pre-repair %+v",
+				index+1, got, want)
+		}
 	}
 }
 

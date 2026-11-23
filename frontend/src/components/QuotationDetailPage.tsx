@@ -438,15 +438,14 @@ export function QuotationDetailPage({
       if (found !== null) {
         setPurchaseOrder(found.purchaseOrder);
         setPurchaseOrderAllBought(found.allBought);
+        // #651: an existing draft or saved record is a normal partial-order
+        // state, never an occupancy refusal. Only an exhausted quotation has
+        // its own message; every other failure is the server's real error.
         pushToast(
           "error",
           found.allBought
             ? "Every quoted item is bought. Revise the quotation to order more."
-            : found.purchaseOrder?.state === "saved"
-              ? "This quotation already has a finalized purchase order. Use View PO to open it."
-              : found.purchaseOrder !== null
-                ? "This quotation already has a purchase order draft. Use Open PO draft to continue it."
-                : errorMessage(error, "The purchase order could not be created.")
+            : errorMessage(error, "The purchase order could not be created.")
         );
       } else {
         pushToast(

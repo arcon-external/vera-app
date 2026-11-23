@@ -221,6 +221,29 @@ describe("PO source selector state machine (issue #467)", () => {
     expect(refused.selected).toBeNull();
   });
 
+  it("lets repair and link select an All bought quotation", () => {
+    const allBought = quotation({
+      allBought: true,
+      remainingLeafCount: 0,
+      savedPoCount: 2,
+    });
+    const entry = run([
+      { type: "rowsLoaded", page: pageOf(allBought) },
+      { type: "quotationSelected", quotation: allBought },
+    ]);
+    expect(entry.step).toBe(1);
+    expect(entry.selected).toBeNull();
+
+    for (const allowAllBought of [true]) {
+      const repair = run([
+        { type: "rowsLoaded", page: pageOf(allBought) },
+        { type: "quotationSelected", quotation: allBought, allowAllBought },
+      ]);
+      expect(repair.step).toBe(2);
+      expect(repair.selected).toEqual(allBought);
+    }
+  });
+
   it("offers the draft action but never for a saved record", () => {
     expect(draftOf(quotation({ activePO: { id: 20, state: "draft" } }))).toEqual({
       id: 20,

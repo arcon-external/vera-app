@@ -248,6 +248,13 @@ func (s *Store) RepairPurchaseOrderSource(ctx context.Context, input PurchaseOrd
 		stored, source, comparison, input.Decisions); err != nil {
 		return PurchaseOrder{}, err
 	}
+	// #651: the repair replaces the allocations with the new source's picture.
+	// Keep the old quotation's frozen revenue, baseline and cost beside the
+	// immutable correction, exactly as a correction and a draft overwrite do.
+	if err := snapshotPurchaseOrderCorrectionAllocations(
+		ctx, tx, schema, correctionID, input.ID); err != nil {
+		return PurchaseOrder{}, err
+	}
 
 	customerChanged := source.CustomerID != stored.CustomerID
 	customerName := stored.CustomerName
