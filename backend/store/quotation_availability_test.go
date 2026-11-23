@@ -635,3 +635,170 @@ func TestQuotationAvailabilityRevisionReductionIsOverBought(t *testing.T) {
 		t.Error("a downward revision below bought did not report All bought")
 	}
 }
+
+// Issue #656: closure and expiry are quotation-level facts the selector, the
+// workspace and the report all read through this one shape. A closed quotation
+// reports who/when/why; an open one reports the latest revision's last valid
+// day and whether it has passed in the company's WIB calendar.
+func TestQuotationAvailabilityReportsClosure(t *testing.T) {
+	database := openTestSchema(t, "vera_po_656_availability_closure")
+	ctx := poContext(t, database)
+	admin := quotationClosureAdmin(t, database)
+	quotation := seedReportQuotation(t, database, 2, "PT. Closure", "Availability closure",
+		"IDR", "FTZ", []reportQuotationLine{{
+			Description: "Five unit line", UoM: "Pc", Qty: 5, Cost: 6_000, Sell: 10_000,
+		}})
+
+	fresh := availabilityFor(t, database, ctx, quotation.ID)
+	if fresh.Closed || fresh.ClosedAt != nil || fresh.ClosedReason != "" {
+		t.Fatalf("fresh availability reports closure %v/%v/%q; want open",
+			fresh.Closed, fresh.ClosedAt, fresh.ClosedReason)
+	}
+	if fresh.ValidUntil == nil {
+		t.Fatal("fresh availability has no ValidUntil; the expiry badge needs it")
+	}
+	if fresh.ExpiredUnclosed {
+		t.Error("a freshly issued quotation is already reported expired")
+	}
+
+	if _, err := database.CloseQuotation(ctx, quotation.ID, "customer cancelled the remainder", admin.ID); err != nil {
+		t.Fatalf("CloseQuotation: %v", err)
+	}
+	closed := availabilityFor(t, database, ctx, quotation.ID)
+	if !closed.Closed || closed.ClosedAt == nil {
+		t.Fatalf("closed availability = closed %v at %v; want the stored close",
+			closed.Closed, closed.ClosedAt)
+	}
+	if closed.ClosedReason != "customer cancelled the remainder" {
+		t.Errorf("closed reason = %q; want the stored reason", closed.ClosedReason)
+	}
+	if closed.ClosedByName != admin.DisplayName {
+		t.Errorf("closed by = %q; want %q", closed.ClosedByName, admin.DisplayName)
+	}
+	if closed.ExpiredUnclosed {
+		t.Error("a closed quotation is reported as expired-unclosed")
+	}
+}
+
+// TestQuotationAvailabilityExpiresOnTheWIBCalendarBoundary pins the calendar
+// arithmetic with an injected clock: the last valid day itself is still valid,
+// the next WIB day is not, and 17:00 UTC is already tomorrow in Jakarta.
+func TestQuotationAvailabilityExpiresOnTheWIBCalendarBoundary(t *testing.T) {
+	database := openTestSchema(t, "vera_po_656_availability_expiry")
+	ctx := poContext(t, database)
+	quotation := seedReportQuotation(t, database, 2, "PT. Expiry", "Expiry source",
+		"IDR", "FTZ", []reportQuotationLine{{
+			Description: "One unit line", UoM: "Pc", Qty: 1, Cost: 6_000, Sell: 10_000,
+		}})
+	pool, err := database.poolOrError()
+	if err != nil {
+		t.Fatalf("pool: %v", err)
+	}
+	// 2026-03-11 00:30 WIB, so the issue date is 2026-03-11 and the 30-day
+	// validity ends on 2026-04-10.
+	issuedAt := time.Date(2026, 3, 10, 17, 30, 0, 0, time.UTC)
+	if _, err := pool.Exec(ctx, fmt.Sprintf(`
+		UPDATE %s.quotation_revisions SET created_at = $2 WHERE quotation_id = $1`,
+		database.configSchema()), quotation.ID, issuedAt); err != nil {
+		t.Fatalf("age the issued revision: %v", err)
+	}
+
+	// 2026-04-10 23:59 WIB: the boundary day is still valid.
+	boundary, err := database.quotationAvailabilityAt(ctx, quotation.ID, -1,
+		time.Date(2026, 4, 10, 16, 59, 0, 0, time.UTC))
+	if err != nil {
+		t.Fatalf("availability on the boundary day: %v", err)
+	}
+	if boundary.ValidUntil == nil ||
+		!boundary.ValidUntil.Equal(time.Date(2026, 4, 10, 0, 0, 0, 0, time.UTC)) {
+		t.Fatalf("validUntil = %v; want 2026-04-10", boundary.ValidUntil)
+	}
+	if boundary.ExpiredUnclosed {
+		t.Error("the last valid day is already reported expired")
+	}
+
+	// 2026-04-11 00:00 WIB: one WIB day later, not one UTC day.
+	expired, err := database.quotationAvailabilityAt(ctx, quotation.ID, -1,
+		time.Date(2026, 4, 10, 17, 0, 0, 0, time.UTC))
+	if err != nil {
+		t.Fatalf("availability after the boundary: %v", err)
+	}
+	if !expired.ExpiredUnclosed {
+		t.Error("the day after the last valid day is not reported expired")
+	}
+
+	// Closing an expired quotation stops it from reading as expired-unclosed:
+	// the loss decision has been made, so the badge must not still ask for one.
+	admin := quotationClosureAdmin(t, database)
+	if _, err := database.CloseQuotation(ctx, quotation.ID, "customer cancelled", admin.ID); err != nil {
+		t.Fatalf("CloseQuotation: %v", err)
+	}
+	closed, err := database.quotationAvailabilityAt(ctx, quotation.ID, -1,
+		time.Date(2026, 4, 10, 17, 0, 0, 0, time.UTC))
+	if err != nil {
+		t.Fatalf("availability of the closed quotation: %v", err)
+	}
+	if !closed.Closed || closed.ExpiredUnclosed {
+		t.Errorf("closed expired quotation = closed %v / expiredUnclosed %v; want true/false",
+			closed.Closed, closed.ExpiredUnclosed)
+	}
+}
+
+// TestQuotationAvailabilityExpiryFollowsTheLatestIssuedRevision proves a new
+// revision resets the validity clock, and that asking for an older revision
+// still answers with the latest revision's expiry: a quotation is not expired
+// while its reissued document is valid.
+func TestQuotationAvailabilityExpiryFollowsTheLatestIssuedRevision(t *testing.T) {
+	database := openTestSchema(t, "vera_po_656_availability_expiry_latest")
+	ctx := poContext(t, database)
+	quotation := seedReportQuotation(t, database, 2, "PT. Reissued", "Reissue source",
+		"IDR", "FTZ", []reportQuotationLine{{
+			Description: "One unit line", UoM: "Pc", Qty: 1, Cost: 6_000, Sell: 10_000,
+		}})
+	pool, err := database.poolOrError()
+	if err != nil {
+		t.Fatalf("pool: %v", err)
+	}
+	if _, err := pool.Exec(ctx, fmt.Sprintf(`
+		UPDATE %s.quotation_revisions SET created_at = $2 WHERE quotation_id = $1`,
+		database.configSchema()), quotation.ID, time.Date(2020, 1, 1, 0, 0, 0, 0, time.UTC)); err != nil {
+		t.Fatalf("age the first revision: %v", err)
+	}
+	aged := availabilityFor(t, database, ctx, quotation.ID)
+	if !aged.ExpiredUnclosed {
+		t.Fatal("the aged first revision is not reported expired")
+	}
+
+	if _, err := database.SaveRevision(ctx, RevisionDraft{
+		CustomerCode: 2, CustomerName: "PT. Reissued", CustomerAddress: "Jl. Billing 1",
+		RecipientName: "Budi Santoso", RecipientAddress: "Jl. Recipient 9",
+		Subject: "Reissued", Incoterm: "CIF", ValidityDays: 30, PaymentTermDays: 45,
+		LeadTimeDays: 10, TaxZone: "FTZ", TaxType: "Goods", Currency: "IDR",
+		RevisionNumber: 1, QuoteNumber: quotation.QuoteNumber,
+		HTMLSnapshot: "<html>reissued</html>",
+		Items: []RevisionItem{{
+			ItemNo: 1, Description: "One unit line", Qty: 1, UoM: "Pc",
+			UnitPrice: 6_000, OriginalTotal: 6_000, MarginalizedUnitPrice: 10_000,
+			MarginalizedTotal: 10_000, ListUnitPrice: 10_000,
+		}},
+		Totals: RevisionTotals{
+			OriginalSubtotal: 6_000, OriginalGrand: 6_000,
+			MarginalizedSubtotal: 10_000, MarginalizedGrand: 10_000,
+			MarginalizedGrandAfterTax: 10_000, CustomerGrandTotal: 10_000,
+		},
+	}); err != nil {
+		t.Fatalf("issue the reissued revision: %v", err)
+	}
+
+	latest := availabilityFor(t, database, ctx, quotation.ID)
+	if latest.ExpiredUnclosed {
+		t.Error("a fresh reissue did not reset the validity clock")
+	}
+	older, err := database.GetQuotationAvailabilityForRevision(ctx, quotation.ID, 0)
+	if err != nil {
+		t.Fatalf("GetQuotationAvailabilityForRevision: %v", err)
+	}
+	if older.ExpiredUnclosed {
+		t.Error("asking for an older revision reported the quotation expired; expiry follows the latest revision")
+	}
+}

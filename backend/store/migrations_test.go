@@ -13,12 +13,21 @@ func TestLoadMigrationsReplacesSchemaPlaceholder(t *testing.T) {
 	if len(migrations) == 0 {
 		t.Fatal("no migrations loaded")
 	}
-	// Contiguity rather than a hand-written list of every version. The list was
-	// 1..14 spelled out across two statements, so every migration added a line to
-	// this test and a missing edit failed here rather than in the database.
-	for i, migration := range migrations {
-		if want := i + 1; migration.version != want {
-			t.Fatalf("migration at position %d is version %d; want %d (versions must be contiguous from 1)", i, migration.version, want)
+	// Order and uniqueness rather than contiguity. Migration numbers are
+	// assignments from the #648 register, not merge order: #654 owns 054, #655
+	// owns 055 and #656 owns 056, so a branch that merges before its neighbour
+	// leaves a temporary gap that the later ticket fills forward (a lower number
+	// applied after a higher one is a gap-fill, never a re-run). What must still
+	// hold is that no two files claim one version -- a duplicate would apply one
+	// of them and silently skip the other -- and that the sequence starts at 1
+	// and only increases.
+	if migrations[0].version != 1 {
+		t.Fatalf("migration at position 0 is version %d; want 1", migrations[0].version)
+	}
+	for i := 1; i < len(migrations); i++ {
+		if migrations[i].version <= migrations[i-1].version {
+			t.Fatalf("migration at position %d is version %d after %d; versions must strictly increase",
+				i, migrations[i].version, migrations[i-1].version)
 		}
 	}
 	if migrations[0].version != 1 || migrations[1].version != 2 || migrations[2].version != 3 || migrations[3].version != 4 || migrations[4].version != 5 || migrations[5].version != 6 || migrations[6].version != 7 || migrations[7].version != 8 || migrations[8].version != 9 || migrations[9].version != 10 || migrations[10].version != 11 || migrations[11].version != 12 || migrations[12].version != 13 || migrations[13].version != 14 {

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"testing"
+	"time"
 )
 
 // Issue #483: the selector's page is caller input and its offset is
@@ -371,5 +372,139 @@ func TestPOSourceRepairModeExcludesTheRepairedPOsAllocations(t *testing.T) {
 	}
 	if row, ok := byID[otherQuotation.ID]; !ok || !row.AllBought {
 		t.Errorf("other bought quotation = %+v; want it still All bought", row)
+	}
+}
+
+// Issue #656: the selector and the archived detail must show the same closure
+// and expiry facts the report acts on. The occupancy read is the detail page's
+// answer, and the selector row is the list's; they share the availability read,
+// so a closed quotation must not look orderable in either.
+func posourceRowByID(t *testing.T, rows []POSourceQuotation, quotationID int64) POSourceQuotation {
+	t.Helper()
+	for _, row := range rows {
+		if row.ID == quotationID {
+			return row
+		}
+	}
+	t.Fatalf("selector page has no quotation %d: %+v", quotationID, rows)
+	return POSourceQuotation{}
+}
+
+func TestPOSourceOccupancyPropagatesClosureAndExpiry(t *testing.T) {
+	database := openTestSchema(t, "vera_po_656_occupancy")
+	ctx := poContext(t, database)
+	admin := quotationClosureAdmin(t, database)
+	quotation := seedReportQuotation(t, database, 2, "PT. Occupancy", "Occupancy closure",
+		"IDR", "FTZ", []reportQuotationLine{{
+			Description: "One unit line", UoM: "Pc", Qty: 1, Cost: 6_000, Sell: 10_000,
+		}})
+	pool, err := database.poolOrError()
+	if err != nil {
+		t.Fatalf("pool: %v", err)
+	}
+	if _, err := pool.Exec(ctx, fmt.Sprintf(`
+		UPDATE %s.quotation_revisions SET created_at = $2 WHERE quotation_id = $1`,
+		database.configSchema()), quotation.ID, time.Now().AddDate(0, 0, -45)); err != nil {
+		t.Fatalf("age the issued revision: %v", err)
+	}
+
+	expired, err := database.GetPOSourceOccupancy(ctx, quotation.ID)
+	if err != nil {
+		t.Fatalf("GetPOSourceOccupancy: %v", err)
+	}
+	if expired.Closed {
+		t.Error("an open quotation reports Closed in the occupancy read")
+	}
+	if !expired.ExpiredUnclosed {
+		t.Error("a revision 45 days past a 30-day validity is not reported expired-unclosed")
+	}
+	if expired.ValidUntil == nil {
+		t.Error("the occupancy read has no ValidUntil; the badge needs it")
+	}
+
+	if _, err := database.CloseQuotation(ctx, quotation.ID, "customer cancelled", admin.ID); err != nil {
+		t.Fatalf("CloseQuotation: %v", err)
+	}
+	closed, err := database.GetPOSourceOccupancy(ctx, quotation.ID)
+	if err != nil {
+		t.Fatalf("GetPOSourceOccupancy after close: %v", err)
+	}
+	if !closed.Closed || closed.ClosedAt == nil || closed.ClosedReason != "customer cancelled" {
+		t.Errorf("occupancy closure = %v/%v/%q; want the stored close",
+			closed.Closed, closed.ClosedAt, closed.ClosedReason)
+	}
+	if closed.ClosedByName != admin.DisplayName {
+		t.Errorf("occupancy closed by = %q; want %q", closed.ClosedByName, admin.DisplayName)
+	}
+	if closed.ExpiredUnclosed {
+		t.Error("a closed quotation still reports expired-unclosed in occupancy")
+	}
+
+	if _, err := database.ReopenQuotation(ctx, quotation.ID, admin.ID); err != nil {
+		t.Fatalf("ReopenQuotation: %v", err)
+	}
+	reopened, err := database.GetPOSourceOccupancy(ctx, quotation.ID)
+	if err != nil {
+		t.Fatalf("GetPOSourceOccupancy after reopen: %v", err)
+	}
+	if reopened.Closed || !reopened.ExpiredUnclosed {
+		t.Errorf("reopened occupancy = closed %v / expired %v; want the aged open state back",
+			reopened.Closed, reopened.ExpiredUnclosed)
+	}
+}
+
+func TestListPOSourceQuotationsPropagatesClosureAndExpiry(t *testing.T) {
+	database := openTestSchema(t, "vera_po_656_selector")
+	ctx := poContext(t, database)
+	admin := quotationClosureAdmin(t, database)
+	closedQuotation := seedReportQuotation(t, database, 2, "PT. Closed", "Closed selector row",
+		"IDR", "FTZ", []reportQuotationLine{{
+			Description: "Five unit line", UoM: "Pc", Qty: 5, Cost: 6_000, Sell: 10_000,
+		}})
+	expiredQuotation := seedReportQuotation(t, database, 3, "PT. Expired", "Expired selector row",
+		"IDR", "FTZ", []reportQuotationLine{{
+			Description: "Three unit line", UoM: "Pc", Qty: 3, Cost: 6_000, Sell: 10_000,
+		}})
+	pool, err := database.poolOrError()
+	if err != nil {
+		t.Fatalf("pool: %v", err)
+	}
+	if _, err := pool.Exec(ctx, fmt.Sprintf(`
+		UPDATE %s.quotation_revisions SET created_at = $2 WHERE quotation_id = $1`,
+		database.configSchema()), expiredQuotation.ID, time.Now().AddDate(0, 0, -45)); err != nil {
+		t.Fatalf("age the expired revision: %v", err)
+	}
+	if _, err := database.CloseQuotation(ctx, closedQuotation.ID, "customer cancelled", admin.ID); err != nil {
+		t.Fatalf("CloseQuotation: %v", err)
+	}
+
+	// hideUsed must not hide a closed quotation that still has unbought room:
+	// closure is the opposite of "nothing left to order", and the historical row
+	// is the only place the decision is visible.
+	rows, _, err := database.ListPOSourceQuotations(ctx, 1, "", true, 0)
+	if err != nil {
+		t.Fatalf("ListPOSourceQuotations: %v", err)
+	}
+	closedRow := posourceRowByID(t, rows, closedQuotation.ID)
+	if !closedRow.Closed || closedRow.ClosedAt == nil || closedRow.ClosedReason != "customer cancelled" {
+		t.Errorf("closed selector row = %v/%v/%q; want the stored close",
+			closedRow.Closed, closedRow.ClosedAt, closedRow.ClosedReason)
+	}
+	if closedRow.ExpiredUnclosed {
+		t.Error("closed selector row is also reported expired-unclosed")
+	}
+	if closedRow.ValidUntil == nil {
+		t.Error("closed selector row has no ValidUntil")
+	}
+
+	expiredRow := posourceRowByID(t, rows, expiredQuotation.ID)
+	if expiredRow.Closed {
+		t.Error("an open selector row is reported closed")
+	}
+	if !expiredRow.ExpiredUnclosed {
+		t.Error("a revision 45 days past a 30-day validity is not reported expired-unclosed in the selector")
+	}
+	if expiredRow.ValidUntil == nil {
+		t.Error("expired selector row has no ValidUntil")
 	}
 }

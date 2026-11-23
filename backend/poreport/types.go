@@ -209,8 +209,9 @@ type PipelineSummary struct {
 //
 // Price variance has no cost effect (it is pure margin); quantity extra income
 // carries both the quoted revenue and the frozen cost of the extra units, so
-// its amount and margin differ. Closed loss is zero until #656 implements
-// explicit quotation closure.
+// its amount and margin differ. ClosedLoss is the unbought remainder of an
+// explicitly closed quotation (#656): it leaves Unsold, is subtracted from
+// NetRealizedVariance, and reopening the quotation moves it back to Unsold.
 type VarianceSummary struct {
 	QuantityExtraIncomeAmountMinor int64 `json:"quantityExtraIncomeAmountMinor"`
 	QuantityExtraIncomeMarginMinor int64 `json:"quantityExtraIncomeMarginMinor"`
