@@ -12,6 +12,7 @@ import {
   visibleRows,
 } from "./poSelector";
 import type {
+  POSourceAvailability,
   POSourceQuotation,
   POSourceRevision,
   POSourceSelectorState,
@@ -41,6 +42,11 @@ function quotation(overrides: Partial<POSourceQuotation> = {}): POSourceQuotatio
     savedPoCount: 0,
     draftPoCount: 0,
     legacyHeaderDiscount: false,
+    closed: false,
+    closedAt: null,
+    closedReason: "",
+    validUntil: null,
+    expiredUnclosed: false,
     ...overrides,
   };
 }
@@ -369,5 +375,133 @@ describe("PO source selector request timing and focus order (issue #467)", () =>
     expect(tabStopIndex(3, 2, true)).toBe(1);
     // An active element the list no longer contains falls back to the edge.
     expect(tabStopIndex(3, 7, false)).toBe(0);
+  });
+});
+
+describe("PO source selector closure and expiry (issue #656)", () => {
+  const CLOSED = quotation({
+    id: 21,
+    quoteNumber: "1502260021",
+    closed: true,
+    closedAt: "2026-11-20T03:04:05Z",
+    closedReason: "customer cancelled the remainder",
+    validUntil: "2026-12-01",
+  });
+
+  function availability(
+    overrides: Partial<POSourceAvailability> = {}
+  ): POSourceAvailability {
+    return {
+      quotationId: 12,
+      revisionNumber: 1,
+      latestRevision: 1,
+      allBought: false,
+      legacyHeaderDiscount: false,
+      savedPoCount: 0,
+      draftPoCount: 0,
+      closed: false,
+      closedAt: null,
+      closedReason: "",
+      validUntil: "2026-12-01",
+      expiredUnclosed: false,
+      items: [
+        {
+          quotationItemNo: 1,
+          quotationSubNo: null,
+          label: "1",
+          description: "Electrical installation",
+          uom: "Pc",
+          quotedQuantityScaled: 100000,
+          boughtQuantityScaled: 0,
+          draftQuantityScaled: 0,
+          remainingQuantityScaled: 100000,
+          overBoughtQuantityScaled: 0,
+          quotedUnitPriceMinor: 5000000,
+        },
+      ],
+      ...overrides,
+    };
+  }
+
+  function atConfirmStep(): POSourceSelectorState {
+    return run([
+      { type: "rowsLoaded", page: pageOf(quotation()) },
+      { type: "quotationSelected", quotation: quotation() },
+      { type: "revisionsLoaded", quotationId: 12, revisions: revisions(1) },
+      { type: "continue" },
+    ]);
+  }
+
+  it("refuses a closed quotation in entry mode but lets repair and link select it", () => {
+    const entry = run([
+      { type: "rowsLoaded", page: pageOf(CLOSED) },
+      { type: "quotationSelected", quotation: CLOSED },
+    ]);
+    expect(entry.step).toBe(1);
+    expect(entry.selected).toBeNull();
+
+    const repair = run([
+      { type: "rowsLoaded", page: pageOf(CLOSED) },
+      { type: "quotationSelected", quotation: CLOSED, allowAllBought: true },
+    ]);
+    expect(repair.step).toBe(2);
+    expect(repair.selected).toEqual(CLOSED);
+  });
+
+  it("keeps a closed row under the used filter even when it is fully bought", () => {
+    const closedAndBought = quotation({ ...CLOSED, allBought: true, remainingLeafCount: 0 });
+    const plainBought = quotation({
+      id: 22,
+      quoteNumber: "1502260022",
+      allBought: true,
+      remainingLeafCount: 0,
+    });
+    expect(visibleRows([closedAndBought], true)).toEqual([closedAndBought]);
+    expect(visibleRows([plainBought], true)).toEqual([]);
+  });
+
+  it("allows an expired-unclosed quotation: expiry is a badge, never a block", () => {
+    const expired = quotation({
+      id: 23,
+      quoteNumber: "1502260023",
+      validUntil: "2026-01-01",
+      expiredUnclosed: true,
+    });
+    const selected = run([
+      { type: "rowsLoaded", page: pageOf(expired) },
+      { type: "quotationSelected", quotation: expired },
+      { type: "revisionsLoaded", quotationId: 23, revisions: revisions(1) },
+    ]);
+    expect(selected.step).toBe(2);
+    expect(selected.selected).toEqual(expired);
+    expect(canContinue(selected)).toBe(true);
+  });
+
+  it("refuses to confirm entry when the availability read says closed", () => {
+    const complete = atConfirmStep();
+    const loaded = poSourceSelectorReducer(complete, {
+      type: "availabilityLoaded",
+      quotationId: 12,
+      revision: 1,
+      availability: availability({
+        closed: true,
+        closedAt: "2026-11-20T03:04:05Z",
+        closedReason: "customer cancelled",
+      }),
+    });
+    expect(loaded.step).toBe(3);
+    expect(loaded.selectedLeaves.length).toBeGreaterThan(0);
+    // Entry must not hand a closed source to Create PO...
+    expect(canConfirm(loaded, true)).toBe(false);
+    // ...while repair/link keep their existing pair-only rule.
+    expect(canConfirm(loaded, false)).toBe(true);
+
+    const open = poSourceSelectorReducer(complete, {
+      type: "availabilityLoaded",
+      quotationId: 12,
+      revision: 1,
+      availability: availability(),
+    });
+    expect(canConfirm(open, true)).toBe(true);
   });
 });

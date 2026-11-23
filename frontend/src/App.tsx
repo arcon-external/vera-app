@@ -21,6 +21,8 @@ import {
   CreatePurchaseOrderDraft,
   GetPurchaseOrder,
   ReviewPurchaseOrderSource,
+  CloseQuotation,
+  ReopenQuotation,
 } from "@backend/backend/Quotation";
 import { backend } from "@backend/models";
 import {
@@ -1054,6 +1056,31 @@ function App() {
       poLeave.request,
       workspaceSettings.purchaseOrder.receivedDate,
     ]
+  );
+
+  // #656: closure is an admin decision and changes what the reports count, so
+  // the answer replaces the detail's closure state and every cached report is
+  // invalidated. The page merges only the closure fields; the displayed
+  // revision's content does not move to the latest one.
+  const closeQuotationFromDetail = useCallback(
+    async (quotationID: number, reason: string) => {
+      const updated = (await CloseQuotation(
+        quotationID,
+        reason
+      )) as ArchivedQuotation;
+      invalidateReports();
+      return updated;
+    },
+    [invalidateReports]
+  );
+
+  const reopenQuotationFromDetail = useCallback(
+    async (quotationID: number) => {
+      const updated = (await ReopenQuotation(quotationID)) as ArchivedQuotation;
+      invalidateReports();
+      return updated;
+    },
+    [invalidateReports]
   );
   const [companyName, setCompanyName] = useState(DEFAULT_COMPANY_NAME);
   // The live company currency: the denomination fresh input is written in,
@@ -2678,6 +2705,11 @@ function App() {
           savedPoCount: row.SavedPOCount,
           draftPoCount: row.DraftPOCount,
           legacyHeaderDiscount: row.LegacyHeaderDiscount,
+          closed: row.Closed,
+          closedAt: row.ClosedAt ?? null,
+          closedReason: row.ClosedReason,
+          validUntil: row.ValidUntil ?? null,
+          expiredUnclosed: row.ExpiredUnclosed,
         })),
         page: page.Page,
         pageSize: page.PageSize,
@@ -2710,6 +2742,11 @@ function App() {
         legacyHeaderDiscount: availability.LegacyHeaderDiscount,
         savedPoCount: availability.SavedPOCount,
         draftPoCount: availability.DraftPOCount,
+        closed: availability.Closed,
+        closedAt: availability.ClosedAt ?? null,
+        closedReason: availability.ClosedReason,
+        validUntil: availability.ValidUntil ?? null,
+        expiredUnclosed: availability.ExpiredUnclosed,
         items: (availability.Items ?? []).map((item) => ({
           quotationItemNo: item.QuotationItemNo,
           quotationSubNo: item.QuotationSubNo ?? null,
@@ -3601,6 +3638,9 @@ function App() {
                 onEdit={handleEditQuotation}
                 onCreatePurchaseOrder={createPurchaseOrderFromQuotation}
                 onOpenPurchaseOrder={(id) => void openPurchaseOrder(id)}
+                isAdmin={isAdmin}
+                onCloseQuotation={closeQuotationFromDetail}
+                onReopenQuotation={reopenQuotationFromDetail}
               />
             )
           }

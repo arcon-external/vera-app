@@ -174,6 +174,7 @@ export namespace backend {
 	    ID: number;
 	    GrandTotal: number;
 	    RevisionNumber: number;
+	    Closed: boolean;
 	    OriginalGrand: number;
 	    OriginalSubtotal: number;
 	    MarginalizedAfterTax: number;
@@ -196,6 +197,11 @@ export namespace backend {
 	    DiscountPercent: number;
 	    ValidityDays: number;
 	    TaxRateBps: number;
+	    ClosedAt?: string;
+	    ClosedByName: string;
+	    ClosedReason: string;
+	    ValidUntil?: string;
+	    ExpiredUnclosed: boolean;
 
 	    static createFrom(source: any = {}) {
 	        return new ArchivedQuotation(source);
@@ -235,6 +241,7 @@ export namespace backend {
 	        this.ID = source["ID"];
 	        this.GrandTotal = source["GrandTotal"];
 	        this.RevisionNumber = source["RevisionNumber"];
+	        this.Closed = source["Closed"];
 	        this.OriginalGrand = source["OriginalGrand"];
 	        this.OriginalSubtotal = source["OriginalSubtotal"];
 	        this.MarginalizedAfterTax = source["MarginalizedAfterTax"];
@@ -257,6 +264,11 @@ export namespace backend {
 	        this.DiscountPercent = source["DiscountPercent"];
 	        this.ValidityDays = source["ValidityDays"];
 	        this.TaxRateBps = source["TaxRateBps"];
+	        this.ClosedAt = source["ClosedAt"];
+	        this.ClosedByName = source["ClosedByName"];
+	        this.ClosedReason = source["ClosedReason"];
+	        this.ValidUntil = source["ValidUntil"];
+	        this.ExpiredUnclosed = source["ExpiredUnclosed"];
 	    }
 
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
@@ -289,6 +301,7 @@ export namespace backend {
 	    ID: number;
 	    GrandTotal: number;
 	    RevisionNumber: number;
+	    Closed: boolean;
 
 	    static createFrom(source: any = {}) {
 	        return new ArchivedQuotationSummary(source);
@@ -305,6 +318,7 @@ export namespace backend {
 	        this.ID = source["ID"];
 	        this.GrandTotal = source["GrandTotal"];
 	        this.RevisionNumber = source["RevisionNumber"];
+	        this.Closed = source["Closed"];
 	    }
 	}
 	export class AuthUserDTO {
@@ -1642,6 +1656,11 @@ export namespace backend {
 	    LegacyHeaderDiscount: boolean;
 	    SavedPOCount: number;
 	    DraftPOCount: number;
+	    Closed: boolean;
+	    ClosedAt?: string;
+	    ClosedReason: string;
+	    ValidUntil?: string;
+	    ExpiredUnclosed: boolean;
 	    Items: POSourceAvailabilityItemDTO[];
 
 	    static createFrom(source: any = {}) {
@@ -1657,6 +1676,11 @@ export namespace backend {
 	        this.LegacyHeaderDiscount = source["LegacyHeaderDiscount"];
 	        this.SavedPOCount = source["SavedPOCount"];
 	        this.DraftPOCount = source["DraftPOCount"];
+	        this.Closed = source["Closed"];
+	        this.ClosedAt = source["ClosedAt"];
+	        this.ClosedReason = source["ClosedReason"];
+	        this.ValidUntil = source["ValidUntil"];
+	        this.ExpiredUnclosed = source["ExpiredUnclosed"];
 	        this.Items = this.convertValues(source["Items"], POSourceAvailabilityItemDTO);
 	    }
 
@@ -1687,6 +1711,12 @@ export namespace backend {
 	    SavedPOCount: number;
 	    DraftPOCount: number;
 	    LegacyHeaderDiscount: boolean;
+	    Closed: boolean;
+	    ClosedAt?: string;
+	    ClosedReason: string;
+	    ClosedByName: string;
+	    ValidUntil?: string;
+	    ExpiredUnclosed: boolean;
 
 	    static createFrom(source: any = {}) {
 	        return new POSourceOccupancyDTO(source);
@@ -1701,6 +1731,12 @@ export namespace backend {
 	        this.SavedPOCount = source["SavedPOCount"];
 	        this.DraftPOCount = source["DraftPOCount"];
 	        this.LegacyHeaderDiscount = source["LegacyHeaderDiscount"];
+	        this.Closed = source["Closed"];
+	        this.ClosedAt = source["ClosedAt"];
+	        this.ClosedReason = source["ClosedReason"];
+	        this.ClosedByName = source["ClosedByName"];
+	        this.ValidUntil = source["ValidUntil"];
+	        this.ExpiredUnclosed = source["ExpiredUnclosed"];
 	    }
 
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
@@ -1735,6 +1771,11 @@ export namespace backend {
 	    SavedPOCount: number;
 	    DraftPOCount: number;
 	    LegacyHeaderDiscount: boolean;
+	    Closed: boolean;
+	    ClosedAt?: string;
+	    ClosedReason: string;
+	    ValidUntil?: string;
+	    ExpiredUnclosed: boolean;
 
 	    static createFrom(source: any = {}) {
 	        return new POSourceQuotationDTO(source);
@@ -1755,6 +1796,11 @@ export namespace backend {
 	        this.SavedPOCount = source["SavedPOCount"];
 	        this.DraftPOCount = source["DraftPOCount"];
 	        this.LegacyHeaderDiscount = source["LegacyHeaderDiscount"];
+	        this.Closed = source["Closed"];
+	        this.ClosedAt = source["ClosedAt"];
+	        this.ClosedReason = source["ClosedReason"];
+	        this.ValidUntil = source["ValidUntil"];
+	        this.ExpiredUnclosed = source["ExpiredUnclosed"];
 	    }
 
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
@@ -3951,6 +3997,20 @@ export namespace poreport {
 	        this.coverageBps = source["coverageBps"];
 	    }
 	}
+	export class PipelineSummary {
+	    unsoldAmountMinor: number;
+	    unsoldMarginMinor: number;
+
+	    static createFrom(source: any = {}) {
+	        return new PipelineSummary(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.unsoldAmountMinor = source["unsoldAmountMinor"];
+	        this.unsoldMarginMinor = source["unsoldMarginMinor"];
+	    }
+	}
 	export class Population {
 	    availableCurrencies: string[];
 	    hasUnassigned: boolean;
@@ -4078,20 +4138,6 @@ export namespace poreport {
 	        this.bucket = source["bucket"];
 	        this.category = source["category"];
 	        this.currency = source["currency"];
-	    }
-	}
-	export class PipelineSummary {
-	    unsoldAmountMinor: number;
-	    unsoldMarginMinor: number;
-
-	    static createFrom(source: any = {}) {
-	        return new PipelineSummary(source);
-	    }
-
-	    constructor(source: any = {}) {
-	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.unsoldAmountMinor = source["unsoldAmountMinor"];
-	        this.unsoldMarginMinor = source["unsoldMarginMinor"];
 	    }
 	}
 	export class VarianceSummary {

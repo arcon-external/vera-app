@@ -47,12 +47,35 @@ function taxDetailLabel(quotation: ArchivedQuotation): string {
 import { useToast } from "../toast";
 import { copyQuotationToClipboard } from "../quotationClipboard";
 import { NoteCard } from "./NoteCard";
+import { QuotationCloseDialog } from "./QuotationCloseDialog";
 import { Select } from "./Select";
 import { Badge, Button, Card, SectionHeading } from "./ui";
 
 function padRevision(revision: number): string {
   return String(revision).padStart(2, "0");
 }
+
+/**
+ * The quotation-level closure and expiry state (#656). It is identical across
+ * a quotation's revisions, so switching the displayed revision never changes
+ * it; expiry follows the latest issued revision even when an older one is on
+ * screen.
+ */
+export interface QuotationClosureStatus {
+  closed: boolean;
+  closedAt: string | null;
+  closedByName: string;
+  closedReason: string;
+  expiredUnclosed: boolean;
+}
+
+const OPEN_CLOSURE: QuotationClosureStatus = {
+  closed: false,
+  closedAt: null,
+  closedByName: "",
+  closedReason: "",
+  expiredUnclosed: false,
+};
 
 /**
  * Copies the viewed revision's entry values as versioned JSON text. Exported
@@ -104,6 +127,12 @@ interface QuotationDetailPageProps {
    * (quotation.Currency) resolved below; the live entry is then just the
    * fallback for an unresolvable code. */
   currency?: CurrencyInfo;
+  /** Admin-only close/reopen (#656). The server re-checks the stored role. */
+  isAdmin?: boolean;
+  /** Closes the quotation and answers with its updated detail. */
+  onCloseQuotation?: (quotationID: number, reason: string) => Promise<ArchivedQuotation>;
+  /** Reopens the quotation and answers with its updated detail. */
+  onReopenQuotation?: (quotationID: number) => Promise<ArchivedQuotation>;
 }
 
 export interface QuotationDetailHeaderProps {
@@ -131,6 +160,14 @@ export interface QuotationDetailHeaderProps {
   revisionSwitching?: boolean;
   /** Copy is optional so the header's PO-only pins keep rendering without it. */
   onCopy?: (quotation: ArchivedQuotation) => void;
+  /** Closure and expiry (#656); quotation-level, identical across revisions. */
+  closure?: QuotationClosureStatus;
+  /** Admin-only close/reopen actions. */
+  isAdmin?: boolean;
+  /** True while a close or reopen request is in flight. */
+  closurePending?: boolean;
+  onCloseQuotation?: () => void;
+  onReopenQuotation?: () => void;
 }
 
 // The issued-Quotation header, exported so its two entry actions can be
@@ -150,6 +187,11 @@ export function QuotationDetailHeader({
   onOpenPurchaseOrder,
   revisionSwitching = false,
   onCopy,
+  closure = OPEN_CLOSURE,
+  isAdmin = false,
+  closurePending = false,
+  onCloseQuotation,
+  onReopenQuotation,
 }: QuotationDetailHeaderProps) {
   return (
     <header>
@@ -187,13 +229,28 @@ export function QuotationDetailHeader({
               </span>
             </Badge>
           )}
+          {closure.closed ? (
+            <Badge tone="danger">Closed</Badge>
+          ) : closure.expiredUnclosed ? (
+            <Badge tone="danger">Expired (unclosed)</Badge>
+          ) : null}
         </div>
         <div className="flex flex-wrap items-center gap-2">
           {/* #651: a quotation may produce many POs. Creation stays available
               while any leaf has remaining quantity; an existing record is a
               second, separate action. All bought disables creation with the
-              revision guidance instead of pretending the quotation is used. */}
-          {purchaseOrderAllBought ? (
+              revision guidance instead of pretending the quotation is used.
+              #656: a closed quotation wins the precedence -- its remainder is
+              Closed Loss, and the remedy is a reopen, not a revision. */}
+          {closure.closed ? (
+            <Button
+              variant="secondary"
+              aria-label="Closed — reopen to order"
+              disabled
+            >
+              Closed — reopen to order
+            </Button>
+          ) : purchaseOrderAllBought ? (
             <Button
               variant="secondary"
               aria-label="All bought — revise the quotation"
@@ -220,6 +277,26 @@ export function QuotationDetailHeader({
               {purchaseOrder.state === "saved" ? "View PO" : "Open PO draft"}
             </Button>
           ) : null}
+          {isAdmin && closure.closed && onReopenQuotation !== undefined ? (
+            <Button
+              variant="secondary"
+              aria-label="Reopen quotation"
+              disabled={closurePending}
+              onClick={onReopenQuotation}
+            >
+              Reopen quotation
+            </Button>
+          ) : null}
+          {isAdmin && !closure.closed && onCloseQuotation !== undefined ? (
+            <Button
+              variant="secondary"
+              aria-label="Close quotation"
+              disabled={closurePending}
+              onClick={onCloseQuotation}
+            >
+              Close quotation
+            </Button>
+          ) : null}
           {onCopy ? (
             <QuotationCopyButton
               quotation={quotation}
@@ -235,6 +312,16 @@ export function QuotationDetailHeader({
       <p className="mt-2 max-w-3xl text-body text-ink-500">
         {quotation.CustomerName}: {quotation.Subject}
       </p>
+      {closure.closed ? (
+        <p className="mt-2 max-w-3xl text-small text-ink-500">
+          Closed
+          {closure.closedByName !== "" ? ` by ${closure.closedByName}` : ""}
+          {closure.closedAt !== null
+            ? ` on ${closure.closedAt.slice(0, 10)}`
+            : ""}
+          {closure.closedReason !== "" ? ` — ${closure.closedReason}` : ""}.
+        </p>
+      ) : null}
     </header>
   );
 }
@@ -247,6 +334,9 @@ export function QuotationDetailPage({
   onCreatePurchaseOrder,
   onOpenPurchaseOrder,
   currency = IDR_ENTRY,
+  isAdmin = false,
+  onCloseQuotation,
+  onReopenQuotation,
 }: QuotationDetailPageProps) {
   const [quotation, setQuotation] = useState<ArchivedQuotation | null>(null);
   const [loading, setLoading] = useState(true);
@@ -264,6 +354,9 @@ export function QuotationDetailPage({
   const [purchaseOrderAllBought, setPurchaseOrderAllBought] = useState(false);
   const [purchaseOrderPending, setPurchaseOrderPending] = useState(true);
   const [creatingPurchaseOrder, setCreatingPurchaseOrder] = useState(false);
+  const [closeDialogOpen, setCloseDialogOpen] = useState(false);
+  const [closurePending, setClosurePending] = useState(false);
+  const [closureError, setClosureError] = useState<string | null>(null);
   const { pushToast } = useToast();
   // The catalogue, fetched like App.tsx fetches it: the revision code
   // resolves to its entry once loaded. Null until then -- figures fall back
@@ -293,6 +386,7 @@ export function QuotationDetailPage({
     ): Promise<{
       purchaseOrder: QuotationDetailPurchaseOrder | null;
       allBought: boolean;
+      closed: boolean;
     }> => {
       const occupancy = await GetPOSourceOccupancy(id);
       const active = occupancy.ActivePO;
@@ -307,6 +401,7 @@ export function QuotationDetailPage({
                 state: active.State === "saved" ? "saved" : "draft",
               },
         allBought: occupancy.AllBought,
+        closed: occupancy.Closed,
       };
     },
     []
@@ -422,6 +517,9 @@ export function QuotationDetailPage({
   const handleCreatePurchaseOrder = useCallback(async () => {
     if (quotation === null || quotation.RevisionNumber !== activeRevision) return;
     if (creatingPurchaseOrder) return;
+    // #656: closing is not undone by a stale page. The server refuses the
+    // create too; stopping here keeps the toast honest.
+    if (quotation.Closed) return;
     setCreatingPurchaseOrder(true);
     try {
       await onCreatePurchaseOrder(quotation.ID, quotation.RevisionNumber);
@@ -429,6 +527,7 @@ export function QuotationDetailPage({
       let found: {
         purchaseOrder: QuotationDetailPurchaseOrder | null;
         allBought: boolean;
+        closed: boolean;
       } | null = null;
       try {
         found = await readPurchaseOrder(quotation.ID);
@@ -439,13 +538,15 @@ export function QuotationDetailPage({
         setPurchaseOrder(found.purchaseOrder);
         setPurchaseOrderAllBought(found.allBought);
         // #651: an existing draft or saved record is a normal partial-order
-        // state, never an occupancy refusal. Only an exhausted quotation has
-        // its own message; every other failure is the server's real error.
+        // state, never an occupancy refusal. #656: a closed quotation has its
+        // own remedy. Every other failure is the server's real error.
         pushToast(
           "error",
-          found.allBought
-            ? "Every quoted item is bought. Revise the quotation to order more."
-            : errorMessage(error, "The purchase order could not be created.")
+          found.closed
+            ? "This quotation is closed. Reopen it before ordering."
+            : found.allBought
+              ? "Every quoted item is bought. Revise the quotation to order more."
+              : errorMessage(error, "The purchase order could not be created.")
         );
       } else {
         pushToast(
@@ -465,6 +566,71 @@ export function QuotationDetailPage({
     pushToast,
   ]);
 
+  // #656: a close or reopen answer is quotation-level. Merge only those fields
+  // into the mounted revision, so the content on screen does not jump to the
+  // latest revision just because an admin changed the quotation's state.
+  const applyClosure = useCallback((updated: ArchivedQuotation) => {
+    setQuotation((current) =>
+      current === null
+        ? current
+        : {
+            ...current,
+            Closed: updated.Closed,
+            ClosedAt: updated.ClosedAt,
+            ClosedByName: updated.ClosedByName,
+            ClosedReason: updated.ClosedReason,
+            ValidUntil: updated.ValidUntil,
+            ExpiredUnclosed: updated.ExpiredUnclosed,
+          }
+    );
+  }, []);
+
+  const handleCloseQuotation = useCallback(
+    async (reason: string) => {
+      if (quotation === null || onCloseQuotation === undefined) return;
+      setClosurePending(true);
+      setClosureError(null);
+      try {
+        const updated = await onCloseQuotation(quotation.ID, reason);
+        applyClosure(updated);
+        setCloseDialogOpen(false);
+        pushToast(
+          "success",
+          "Quotation closed. Its unbought remainder is Closed Loss."
+        );
+      } catch (error) {
+        // No optimistic close: keep the dialog and the typed reason on screen
+        // with the server's own refusal.
+        setClosureError(
+          errorMessage(error, "The quotation could not be closed.")
+        );
+      } finally {
+        setClosurePending(false);
+      }
+    },
+    [quotation, onCloseQuotation, applyClosure, pushToast]
+  );
+
+  const handleReopenQuotation = useCallback(async () => {
+    if (quotation === null || onReopenQuotation === undefined) return;
+    setClosurePending(true);
+    try {
+      const updated = await onReopenQuotation(quotation.ID);
+      applyClosure(updated);
+      pushToast(
+        "success",
+        "Quotation reopened. Its unbought remainder is Unsold again."
+      );
+    } catch (error) {
+      pushToast(
+        "error",
+        errorMessage(error, "The quotation could not be reopened.")
+      );
+    } finally {
+      setClosurePending(false);
+    }
+  }, [quotation, onReopenQuotation, applyClosure, pushToast]);
+
   if (loading) {
     return (
       <div className="space-y-4" aria-label="Loading quotation">
@@ -482,6 +648,14 @@ export function QuotationDetailPage({
       </Card>
     );
   }
+
+  const closure: QuotationClosureStatus = {
+    closed: quotation.Closed,
+    closedAt: quotation.ClosedAt ?? null,
+    closedByName: quotation.ClosedByName,
+    closedReason: quotation.ClosedReason,
+    expiredUnclosed: quotation.ExpiredUnclosed,
+  };
 
   return (
     <section
@@ -506,6 +680,22 @@ export function QuotationDetailPage({
         onOpenPurchaseOrder={onOpenPurchaseOrder}
         onCopy={(current) =>
           void copyQuotationToClipboard(current, navigator.clipboard, pushToast)
+        }
+        closure={closure}
+        isAdmin={isAdmin}
+        closurePending={closurePending}
+        onCloseQuotation={
+          onCloseQuotation === undefined
+            ? undefined
+            : () => {
+                setClosureError(null);
+                setCloseDialogOpen(true);
+              }
+        }
+        onReopenQuotation={
+          onReopenQuotation === undefined
+            ? undefined
+            : () => void handleReopenQuotation()
         }
       />
 
@@ -668,6 +858,20 @@ export function QuotationDetailPage({
           />
         </div>
       </Card>
+
+      <QuotationCloseDialog
+        open={closeDialogOpen}
+        isAdmin={isAdmin}
+        quotationNumber={quotation.QuoteNumber}
+        pending={closurePending}
+        error={closureError}
+        onCancel={() => {
+          if (closurePending) return;
+          setCloseDialogOpen(false);
+          setClosureError(null);
+        }}
+        onConfirm={(reason) => void handleCloseQuotation(reason)}
+      />
     </section>
   );
 }

@@ -11,6 +11,8 @@ export interface ArchivedQuotationSummary {
   CreatedAt: string;
   GrandTotal: number;
   DisplayGrand: string;
+  /** The quotation is closed (#656); every revision of it reads closed. */
+  Closed: boolean;
 }
 
 /**
@@ -165,4 +167,11 @@ export interface ArchivedQuotation extends ArchivedQuotationSummary {
   Items: ArchivedQuotationItem[];
   HTMLSnapshot: string;
   AvailableRevisions: number[];
+  // Closure and expiry (#656). Closure is quotation-level; expiry follows the
+  // latest issued revision even when an older one is displayed.
+  ClosedAt?: string | null;
+  ClosedByName: string;
+  ClosedReason: string;
+  ValidUntil?: string | null;
+  ExpiredUnclosed: boolean;
 }

@@ -40,6 +40,11 @@ const QUOTATION = {
   savedPoCount: 0,
   draftPoCount: 0,
   legacyHeaderDiscount: false,
+  closed: false,
+  closedAt: null,
+  closedReason: "",
+  validUntil: null,
+  expiredUnclosed: false,
 };
 
 const OTHER = {
@@ -56,6 +61,11 @@ const OTHER = {
   savedPoCount: 0,
   draftPoCount: 0,
   legacyHeaderDiscount: false,
+  closed: false,
+  closedAt: null,
+  closedReason: "",
+  validUntil: null,
+  expiredUnclosed: false,
 };
 
 const DRAFT_ROW = {
@@ -79,6 +89,24 @@ const ALL_BOUGHT_ROW = {
   savedPoCount: 2,
 };
 
+const CLOSED_ROW = {
+  ...OTHER,
+  id: 17,
+  quoteNumber: "1502260006",
+  closed: true,
+  closedAt: "2026-11-20T03:04:05Z",
+  closedReason: "customer cancelled the remainder",
+  validUntil: "2026-12-01",
+};
+
+const EXPIRED_ROW = {
+  ...OTHER,
+  id: 18,
+  quoteNumber: "1502260007",
+  validUntil: "2026-01-01",
+  expiredUnclosed: true,
+};
+
 const PARTIAL_ROW = {
   ...OTHER,
   id: 16,
@@ -100,6 +128,11 @@ const AVAILABILITY: POSourceAvailability = {
   latestRevision: 1,
   allBought: false,
   legacyHeaderDiscount: false,
+  closed: false,
+  closedAt: null,
+  closedReason: "",
+  validUntil: null,
+  expiredUnclosed: false,
   savedPoCount: 1,
   draftPoCount: 0,
   items: [
@@ -587,4 +620,30 @@ describe("POQuotationSelector tutorial anchors (issue #603)", () => {
   });
 });
 
+});
+
+// Issue #656: a closed quotation is visible but cannot be entered for a new
+// order; an expired-unclosed one is a warning badge only, because its
+// remainder is still Unsold and may be bought until an admin closes it.
+describe("POQuotationSelector closure interaction (issue #656)", () => {
+  it("does not enter a closed quotation from the entry path", async () => {
+    await renderHarness({ loadPage: async () => page([CLOSED_ROW]) });
+    await click(
+      button(`Quotation ${CLOSED_ROW.quoteNumber}, ${CLOSED_ROW.customerName}`)
+    );
+    expect(document.body.textContent).toContain("Step 1 of 3");
+    expect(document.body.textContent).toContain(
+      "This quotation is closed. Reopen it before ordering."
+    );
+  });
+
+  it("enters an expired-unclosed quotation and shows its badge", async () => {
+    await renderHarness({ loadPage: async () => page([EXPIRED_ROW]) });
+    const row = button(
+      `Quotation ${EXPIRED_ROW.quoteNumber}, ${EXPIRED_ROW.customerName}`
+    );
+    expect(row.textContent).toContain("Expired (unclosed)");
+    await click(row);
+    expect(document.body.textContent).toContain("Step 2 of 3");
+  });
 });

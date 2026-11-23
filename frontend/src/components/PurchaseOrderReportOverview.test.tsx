@@ -654,3 +654,40 @@ describe("PurchaseOrderReportOverview (issue #644)", () => {
     expect(reportMock).not.toHaveBeenCalled();
   });
 });
+
+// Issue #656: Closed Loss is no longer a placeholder. A closed quotation's
+// unbought remainder is a realized deduction: it appears in the variance card
+// as a red figure and in the net, and it never enters Actual.
+describe("PurchaseOrderReportOverview closed loss (issue #656)", () => {
+  it("renders a live closed loss as a deduction outside Actual", async () => {
+    const report = purchaseOrderReportYearFixture();
+    report.variance = {
+      ...report.variance!,
+      closedLossAmountMinor: 20_000_000,
+      closedLossMarginMinor: 8_000_000,
+      netRealizedVarianceAmountMinor: -16_000_000,
+      netRealizedVarianceMarginMinor: -7_600_000,
+    };
+    await render({ report });
+
+    const variance = overview().querySelector<HTMLElement>(
+      "[data-report-variance-card]"
+    );
+    expect(variance).not.toBeNull();
+    const closedLossRow = Array.from(
+      variance?.querySelectorAll<HTMLElement>("dl > div") ?? []
+    ).find((node) => node.querySelector("dt")?.textContent === "Closed loss");
+    expect(closedLossRow?.querySelector("dd")?.textContent).toContain(
+      "Rp20.000.000"
+    );
+    expect(closedLossRow?.querySelector("dd")?.className).toContain(
+      "text-danger-700"
+    );
+    expect(variance?.textContent).toContain("Rp-16.000.000");
+
+    const actual = overview().querySelector<HTMLElement>(
+      "[data-report-overview-actual]"
+    );
+    expect(actual?.textContent).not.toContain("Rp20.000.000");
+  });
+});

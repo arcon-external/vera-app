@@ -18,6 +18,10 @@ export function ClearRevisionContext() {
   return window['go']['backend']['Quotation']['ClearRevisionContext']();
 }
 
+export function CloseQuotation(arg1, arg2) {
+  return window['go']['backend']['Quotation']['CloseQuotation'](arg1, arg2);
+}
+
 export function ConfirmDeletion(arg1) {
   return window['go']['backend']['Quotation']['ConfirmDeletion'](arg1);
 }
@@ -200,6 +204,10 @@ export function RemovePurchaseOrderDocument(arg1, arg2) {
 
 export function RenderPDF() {
   return window['go']['backend']['Quotation']['RenderPDF']();
+}
+
+export function ReopenQuotation(arg1) {
+  return window['go']['backend']['Quotation']['ReopenQuotation'](arg1);
 }
 
 export function RepairPurchaseOrderSource(arg1) {

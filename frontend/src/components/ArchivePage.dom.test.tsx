@@ -78,6 +78,7 @@ function quotationRow(overrides: Record<string, unknown> = {}) {
     CreatedAt: "2026-10-02T10:00:00Z",
     GrandTotal: 1500000,
     DisplayGrand: "1.500.000",
+    Closed: false,
     ...overrides,
   };
 }
@@ -303,5 +304,20 @@ describe("quotation deletion success callback (issue #645)", () => {
     expect(confirmMock).toHaveBeenCalledTimes(1);
     expect(onDeleted).not.toHaveBeenCalled();
     expect(document.body.textContent).toContain("the quotation is locked");
+  });
+});
+
+// Issue #656: a closed quotation is part of the archive's history, so the row
+// carries its own badge. It is not hidden and not confused with a revision.
+describe("archive closure badge (issue #656)", () => {
+  it("marks a closed quotation", async () => {
+    listMock.mockResolvedValue([quotationRow({ Closed: true })]);
+    await renderArchive();
+    expect(container.textContent).toContain("Closed");
+  });
+
+  it("leaves an open quotation unmarked", async () => {
+    await renderArchive();
+    expect(container.textContent).not.toContain("Closed");
   });
 });

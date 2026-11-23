@@ -101,6 +101,9 @@ type QuotationSummaryRow struct {
 	ID             int64  `json:"id"`
 	GrandTotal     int64  `json:"grandTotal"`
 	RevisionNumber int16  `json:"revision"`
+	// Closed is the archive badge (#656). Closure is quotation-level, so every
+	// revision of a closed quotation reads closed.
+	Closed bool `json:"closed"`
 }
 
 // POSourceActivePORow is the active Purchase Order occupying a Quotation
@@ -130,6 +133,14 @@ type POSourceQuotationRow struct {
 	SavedPOCount         int  `json:"savedPoCount"`
 	DraftPOCount         int  `json:"draftPoCount"`
 	LegacyHeaderDiscount bool `json:"legacyHeaderDiscount"`
+	// Closure and expiry (#656). A closed row stays visible and disabled; its
+	// unbought remainder is Closed Loss, not Unsold. ExpiredUnclosed is an
+	// advisory badge only: expiry alone never becomes a loss.
+	Closed          bool    `json:"closed"`
+	ClosedAt        *string `json:"closedAt"`
+	ClosedReason    string  `json:"closedReason"`
+	ValidUntil      *string `json:"validUntil"`
+	ExpiredUnclosed bool    `json:"expiredUnclosed"`
 }
 
 // POSourceListResponse is one page of the selector's first step. PageSize is
@@ -194,6 +205,14 @@ type POSourceOccupancyResponse struct {
 	SavedPOCount         int                  `json:"savedPoCount"`
 	DraftPOCount         int                  `json:"draftPoCount"`
 	LegacyHeaderDiscount bool                 `json:"legacyHeaderDiscount"`
+	// Closure and expiry (#656). Closed disables creation; ClosedByName is the
+	// detail page's "who", which the selector rows do not need.
+	Closed          bool    `json:"closed"`
+	ClosedAt        *string `json:"closedAt"`
+	ClosedReason    string  `json:"closedReason"`
+	ClosedByName    string  `json:"closedByName"`
+	ValidUntil      *string `json:"validUntil"`
+	ExpiredUnclosed bool    `json:"expiredUnclosed"`
 }
 
 // POSourceAvailabilityItemRow is one priced leaf of the selected revision.
@@ -220,14 +239,21 @@ type POSourceAvailabilityItemRow struct {
 // quotation revision. AllBought is derived from the listed leaves; a draft
 // quantity is advisory and never reduces RemainingQuantityScaled.
 type POSourceAvailabilityResponse struct {
-	QuotationID          int64                         `json:"quotationId"`
-	RevisionNumber       int16                         `json:"revisionNumber"`
-	LatestRevision       int16                         `json:"latestRevision"`
-	AllBought            bool                          `json:"allBought"`
-	LegacyHeaderDiscount bool                          `json:"legacyHeaderDiscount"`
-	SavedPOCount         int                           `json:"savedPoCount"`
-	DraftPOCount         int                           `json:"draftPoCount"`
-	Items                []POSourceAvailabilityItemRow `json:"items"`
+	QuotationID          int64 `json:"quotationId"`
+	RevisionNumber       int16 `json:"revisionNumber"`
+	LatestRevision       int16 `json:"latestRevision"`
+	AllBought            bool  `json:"allBought"`
+	LegacyHeaderDiscount bool  `json:"legacyHeaderDiscount"`
+	SavedPOCount         int   `json:"savedPoCount"`
+	DraftPOCount         int   `json:"draftPoCount"`
+	// Closure and expiry (#656). A closed revision's remaining leaves are
+	// Closed Loss; the workspace disables ordering rather than hiding them.
+	Closed          bool                          `json:"closed"`
+	ClosedAt        *string                       `json:"closedAt"`
+	ClosedReason    string                        `json:"closedReason"`
+	ValidUntil      *string                       `json:"validUntil"`
+	ExpiredUnclosed bool                          `json:"expiredUnclosed"`
+	Items           []POSourceAvailabilityItemRow `json:"items"`
 }
 
 // PurchaseOrderItemRow is one entered PO line. QuotationItemNo and
@@ -990,6 +1016,22 @@ type QuotationDetail struct {
 	DisplayLeadTime string `json:"displayLeadTime"`
 	Revision        int16  `json:"revision"`
 	HasPDF          bool   `json:"hasPdf"`
+	// Closure and expiry (#656). Closure is quotation-level, so every revision
+	// of a closed quotation reads closed. ValidUntil follows the latest issued
+	// revision even when an older revision is requested; ExpiredUnclosed is
+	// false while closed.
+	Closed          bool    `json:"closed"`
+	ClosedAt        *string `json:"closedAt"`
+	ClosedReason    string  `json:"closedReason"`
+	ClosedByName    string  `json:"closedByName"`
+	ValidUntil      *string `json:"validUntil"`
+	ExpiredUnclosed bool    `json:"expiredUnclosed"`
+}
+
+// QuotationCloseRequest carries the mandatory reason for closing a quotation
+// (#656). The bound is 500 characters; the store trims and validates it again.
+type QuotationCloseRequest struct {
+	Reason string `json:"reason"`
 }
 
 // AttachDocumentRequest uploads locally rendered PDF bytes for a revision.

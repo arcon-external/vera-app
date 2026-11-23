@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/jackc/pgx/v5"
 )
@@ -50,6 +51,16 @@ var (
 // reason is not an auditable decision.
 var ErrQuotationCloseReasonRequired = errors.New("closing a quotation needs a reason")
 
+// MaxQuotationCloseReasonLength bounds the reason at 500 characters, not bytes:
+// the sentence is read by people, and a rejection at 500 ideographs must not be
+// a rejection at 500/3 of them. The database's CHECK refuses blank, not long.
+const MaxQuotationCloseReasonLength = 500
+
+// ErrQuotationCloseReasonTooLong refuses a reason over the bound. It is its own
+// sentinel so the wire can say "too long" rather than mislabel it as missing.
+var ErrQuotationCloseReasonTooLong = fmt.Errorf(
+	"the close reason must be at most %d characters", MaxQuotationCloseReasonLength)
+
 // ErrQuotationCloseForbidden refuses close or reopen from anyone but an enabled
 // admin. The route's middleware is the first gate; the store re-checks the
 // stored role inside the write transaction, exactly as the PO repair path does.
@@ -68,6 +79,9 @@ func (s *Store) CloseQuotation(
 	reason = strings.TrimSpace(reason)
 	if reason == "" {
 		return QuotationClosure{}, ErrQuotationCloseReasonRequired
+	}
+	if utf8.RuneCountInString(reason) > MaxQuotationCloseReasonLength {
+		return QuotationClosure{}, ErrQuotationCloseReasonTooLong
 	}
 	pool, err := s.poolOrError()
 	if err != nil {

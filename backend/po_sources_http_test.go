@@ -175,3 +175,72 @@ func TestGetPOSourceOccupancyMapsTheActiveRecordAndFreeAnswer(t *testing.T) {
 		t.Errorf("free answer = %+v; want quotation 12 with no active PO", free)
 	}
 }
+
+// Issue #656: every selector read carries the same closure and expiry answer.
+// The desktop wrapper is the only transport between the modal and the server,
+// so a field dropped here is a badge (or a disabled Create PO) that never
+// appears even though the server sent it.
+func TestPOSourceReadsMapClosureAndExpiry(t *testing.T) {
+	closedAt := "2026-11-20T03:04:05Z"
+	validUntil := "2026-12-01"
+	stubAPIClient(t, func(writer http.ResponseWriter, request *http.Request) {
+		switch request.URL.Path {
+		case "/v1/po-sources":
+			_ = json.NewEncoder(writer).Encode(apicontract.POSourceListResponse{
+				Page: 1, PageSize: 15, Total: 1, TotalPages: 1,
+				Quotations: []apicontract.POSourceQuotationRow{{
+					ID: 12, QuoteNumber: "1502260012", CustomerName: "PT. Infineon",
+					Closed: true, ClosedAt: &closedAt, ClosedReason: "customer cancelled",
+					ValidUntil: &validUntil, ExpiredUnclosed: false,
+				}},
+			})
+		case "/v1/po-sources/12/occupancy":
+			_ = json.NewEncoder(writer).Encode(apicontract.POSourceOccupancyResponse{
+				QuotationID: 12, Closed: true, ClosedAt: &closedAt,
+				ClosedReason: "customer cancelled", ClosedByName: "Closure Admin",
+				ValidUntil: &validUntil, ExpiredUnclosed: false,
+			})
+		case "/v1/po-sources/12/availability":
+			_ = json.NewEncoder(writer).Encode(apicontract.POSourceAvailabilityResponse{
+				QuotationID: 12, RevisionNumber: 0, LatestRevision: 0,
+				Closed: true, ClosedAt: &closedAt, ClosedReason: "customer cancelled",
+				ValidUntil: &validUntil, ExpiredUnclosed: false,
+				Items: []apicontract.POSourceAvailabilityItemRow{
+					{QuotationItemNo: 1, Label: "1", UoM: "Pc"},
+				},
+			})
+		default:
+			t.Errorf("unexpected path %s", request.URL.Path)
+		}
+	})
+
+	q := newTestQuotation()
+	page, err := q.ListPOSourceQuotations(POSourceQuery{Page: 1})
+	if err != nil {
+		t.Fatalf("ListPOSourceQuotations: %v", err)
+	}
+	row := page.Quotations[0]
+	if !row.Closed || row.ClosedAt == nil || *row.ClosedAt != closedAt ||
+		row.ClosedReason != "customer cancelled" || row.ValidUntil == nil ||
+		*row.ValidUntil != validUntil || row.ExpiredUnclosed {
+		t.Errorf("selector closure = %+v; want the closed row and its expiry", row)
+	}
+
+	occupancy, err := q.GetPOSourceOccupancy(12)
+	if err != nil {
+		t.Fatalf("GetPOSourceOccupancy: %v", err)
+	}
+	if !occupancy.Closed || occupancy.ClosedByName != "Closure Admin" ||
+		occupancy.ClosedReason != "customer cancelled" || occupancy.ClosedAt == nil {
+		t.Errorf("occupancy closure = %+v; want who/when/why", occupancy)
+	}
+
+	availability, err := q.GetQuotationAvailability(12, 0)
+	if err != nil {
+		t.Fatalf("GetQuotationAvailability: %v", err)
+	}
+	if !availability.Closed || availability.ClosedReason != "customer cancelled" ||
+		availability.ValidUntil == nil || *availability.ValidUntil != validUntil {
+		t.Errorf("availability closure = %+v; want the stored close", availability)
+	}
+}

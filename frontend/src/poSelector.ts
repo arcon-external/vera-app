@@ -33,6 +33,16 @@ export interface POSourceQuotation {
   savedPoCount: number;
   draftPoCount: number;
   legacyHeaderDiscount: boolean;
+  /**
+   * Closure and expiry (#656). A closed quotation keeps its unbought remainder
+   * as Closed Loss, so it cannot start a new PO. Expired-unclosed keeps
+   * reporting Unsold and is a badge only, never a block.
+   */
+  closed: boolean;
+  closedAt: string | null;
+  closedReason: string;
+  validUntil: string | null;
+  expiredUnclosed: boolean;
 }
 
 /** One priced leaf of the selected revision, from the availability read. */
@@ -62,6 +72,12 @@ export interface POSourceAvailability {
   legacyHeaderDiscount: boolean;
   savedPoCount: number;
   draftPoCount: number;
+  /** Closure and expiry (#656), from the quotation and its latest revision. */
+  closed: boolean;
+  closedAt: string | null;
+  closedReason: string;
+  validUntil: string | null;
+  expiredUnclosed: boolean;
   items: POSourceAvailabilityItem[];
 }
 
@@ -246,6 +262,7 @@ export function canConfirm(
     !state.availabilityLoading &&
     state.availabilityError === null &&
     state.availability !== null &&
+    !state.availability.closed &&
     state.selectedLeaves.length > 0
   );
 }
@@ -282,7 +299,20 @@ export function visibleRows(
   rows: POSourceQuotation[],
   hideUsed: boolean
 ): POSourceQuotation[] {
-  return hideUsed ? rows.filter((row) => !row.allBought) : rows;
+  // A closed row is a historical record, so the used filter keeps it: the
+  // filter is about "nothing left to buy", and a closed quotation may still
+  // have leaves. Showing it disabled is the safer default (#656).
+  return hideUsed ? rows.filter((row) => row.closed || !row.allBought) : rows;
+}
+
+/**
+ * Whether a quotation cannot start a new purchase order (#651, #656). A fully
+ * bought quotation has nothing left; a closed one keeps that remainder as
+ * Closed Loss. Expiry is deliberately absent: an expired-unclosed quotation
+ * still holds Unsold and may be ordered against until an admin closes it.
+ */
+export function quotationBlocked(row: POSourceQuotation): boolean {
+  return row.closed || row.allBought;
 }
 
 /** A draft already occupies the Quotation and can be reopened. */
@@ -360,11 +390,12 @@ export function poSourceSelectorReducer(
     case "hideUsedChanged":
       return { ...state, hideUsed: action.hideUsed, page: 1 };
     case "quotationSelected":
-      // Entry refuses a fully bought quotation (#651). Repair and link may
-      // target one, because moving or creating a link is not a new order.
+      // Entry refuses a quotation that cannot produce a new order -- fully
+      // bought (#651) or closed (#656). Repair and link may target one,
+      // because moving or creating a link is not a new order.
       if (
         state.step !== 1 ||
-        (action.quotation.allBought && !action.allowAllBought)
+        (quotationBlocked(action.quotation) && !action.allowAllBought)
       ) {
         return state;
       }

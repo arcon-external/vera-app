@@ -280,7 +280,10 @@ func (s *Store) ListPOSourceQuotations(ctx context.Context, page int, search str
 	// hideUsed now means "hide a quotation that is fully bought"; a partial
 	// quotation stays selectable. The repaired record's own id no longer
 	// changes occupancy: a target may already carry other POs.
-	where := " WHERE (NOT $1 OR NOT COALESCE(ss.all_bought, FALSE))"
+	// #656: a closed quotation is a historical record, so the used filter keeps
+	// it visible (and disabled by the client): the filter is about "nothing
+	// left to buy", while a closed row still explains where the remainder went.
+	where := " WHERE (NOT $1 OR NOT COALESCE(ss.all_bought, FALSE) OR q.closed_at IS NOT NULL)"
 	args := []any{hideUsed, org.ID, excludePOID}
 	if term := strings.TrimSpace(search); term != "" {
 		pattern := "%" + escapeLike(term) + "%"

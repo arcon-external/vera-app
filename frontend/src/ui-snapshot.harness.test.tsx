@@ -209,6 +209,11 @@ const PO_SELECTOR_ROWS: POSourceQuotation[] = [
     savedPoCount: 0,
     draftPoCount: 0,
     legacyHeaderDiscount: false,
+    closed: false,
+    closedAt: null,
+    closedReason: "",
+    validUntil: null,
+    expiredUnclosed: false,
   },
   {
     id: 11,
@@ -224,6 +229,11 @@ const PO_SELECTOR_ROWS: POSourceQuotation[] = [
     savedPoCount: 1,
     draftPoCount: 1,
     legacyHeaderDiscount: false,
+    closed: false,
+    closedAt: null,
+    closedReason: "",
+    validUntil: null,
+    expiredUnclosed: false,
   },
   {
     id: 10,
@@ -239,6 +249,11 @@ const PO_SELECTOR_ROWS: POSourceQuotation[] = [
     savedPoCount: 2,
     draftPoCount: 0,
     legacyHeaderDiscount: false,
+    closed: false,
+    closedAt: null,
+    closedReason: "",
+    validUntil: null,
+    expiredUnclosed: false,
   },
 ];
 const PO_SELECTOR_STEP_ONE = {

@@ -8,8 +8,9 @@ import { Card } from "./ui";
  *
  * Pipeline is open Unsold, still orderable, never added to Actual and never a
  * loss. Realized Variance is the commercial comparison against the quotation;
- * open Unsold is shown beside it but excluded from the net. Closed loss is a
- * zero placeholder until #656 implements quotation closure.
+ * open Unsold is shown beside it but excluded from the net. Closed loss is the
+ * unbought remainder of an explicitly closed quotation (#656): it is
+ * subtracted from the net, and reopening restores Unsold.
  */
 export interface PurchaseOrderReportPipelineVarianceCardsProps {
   report: PurchaseOrderReportData;

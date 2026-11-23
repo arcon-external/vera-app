@@ -569,6 +569,13 @@ func (s *Store) FinalizePurchaseOrder(ctx context.Context, input PurchaseOrderFi
 	if err != nil {
 		return PurchaseOrder{}, err
 	}
+	// #656: a draft opened before the close must not be finalizable after it,
+	// or a stale tab would silently buy back part of the Closed Loss. The read
+	// is under the quotation lock, so a close cannot slip between the check and
+	// the save.
+	if availability.Closed {
+		return PurchaseOrder{}, ErrQuotationClosed
+	}
 	for index, item := range input.Items {
 		if item.QuotationItemNo == nil {
 			continue

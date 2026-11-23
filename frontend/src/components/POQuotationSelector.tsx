@@ -9,6 +9,7 @@ import {
   initialPOSourceSelectorState,
   poSourceQueryDelay,
   poSourceSelectorReducer,
+  quotationBlocked,
   selectableAvailabilityItems,
   selectionItemsOf,
   selectionOf,
@@ -192,17 +193,24 @@ function StepOne({
       ) : (
         <ul className="grid max-h-[42vh] gap-2 overflow-y-auto scroll-thin pr-1">
           {rows.map((row) => {
+            const closed = row.closed;
             const allBought = row.allBought;
-            const blocked = isEntry && allBought;
+            const blocked = isEntry && quotationBlocked(row);
             const draft = draftOf(row);
+            const reasonId = `po-source-blocked-${row.id}`;
+            // A closed quotation is a different refusal from a fully bought
+            // one: reopening restores Unsold, while an all-bought source needs
+            // a revision. Closure wins the badge so the two are never confused.
             // Advisory drafts do not buy anything: a quotation with only
             // drafts still reads Open (plus its "in draft" count). "Partial"
             // means at least one saved PO consumed quantity (#651 NB2).
-            const badge = allBought
-              ? "All bought"
-              : row.savedPoCount > 0
-                ? "Partial"
-                : "Open";
+            const badge = closed
+              ? "Closed"
+              : allBought
+                ? "All bought"
+                : row.savedPoCount > 0
+                  ? "Partial"
+                  : "Open";
             return (
               <li key={row.id} className="grid gap-1">
                 <button
@@ -211,7 +219,7 @@ function StepOne({
                   data-tutorial={tutorial ? "tutorial-quotation-row" : undefined}
                   aria-disabled={blocked ? "true" : undefined}
                   aria-label={`Quotation ${row.quoteNumber}, ${row.customerName}`}
-                  aria-describedby={blocked ? `po-source-used-${row.id}` : undefined}
+                  aria-describedby={blocked ? reasonId : undefined}
                   onClick={() =>
                     dispatch({
                       type: "quotationSelected",
@@ -262,6 +270,11 @@ function StepOne({
                         Legacy header discount
                       </span>
                     ) : null}
+                    {row.expiredUnclosed ? (
+                      <span className="text-danger-600">
+                        Expired (unclosed)
+                      </span>
+                    ) : null}
                   </span>
                 </button>
                 {/* The reason sits outside the disabled button: a disabled
@@ -269,10 +282,12 @@ function StepOne({
                     description is a sibling the button points at. */}
                 {blocked ? (
                   <p
-                    id={`po-source-used-${row.id}`}
+                    id={reasonId}
                     className="px-1 text-caption font-medium text-danger-600"
                   >
-                    Every quoted item is bought. Revise the quotation to order more.
+                    {closed
+                      ? "This quotation is closed. Reopen it before ordering."
+                      : "Every quoted item is bought. Revise the quotation to order more."}
                   </p>
                 ) : null}
                 {draft !== null && onOpenDraft !== undefined ? (
@@ -444,13 +459,18 @@ function StepThree({
             still orderable · {state.availability.savedPoCount} saved ·{" "}
             {state.availability.draftPoCount} in draft
           </p>
+          {state.availability.closed ? (
+            <p role="alert" className="text-small text-danger-600">
+              This quotation is closed. Reopen it before ordering.
+            </p>
+          ) : null}
           {state.availability.legacyHeaderDiscount ? (
             <p role="alert" className="text-small text-danger-600">
               This revision carries a legacy whole-order discount. Reissue it
               with row-only discounts before ordering.
             </p>
           ) : null}
-          {selectable.length === 0 ? (
+          {!state.availability.closed && selectable.length === 0 ? (
             <p className="text-small text-danger-600">
               Every quoted item is bought. Revise the quotation to order more.
             </p>

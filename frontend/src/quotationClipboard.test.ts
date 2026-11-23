@@ -72,6 +72,12 @@ function makeArchived(overrides: Partial<ArchivedQuotation> = {}): ArchivedQuota
     DisplayNett: "",
     HTMLSnapshot: "",
     AvailableRevisions: [3],
+    Closed: false,
+    ClosedAt: null,
+    ClosedByName: "",
+    ClosedReason: "",
+    ValidUntil: null,
+    ExpiredUnclosed: false,
     Items: [
       {
         ItemNo: 1,

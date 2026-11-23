@@ -64,6 +64,12 @@ function archived(): ArchivedQuotation {
     DisplayNett: "",
     HTMLSnapshot: "",
     AvailableRevisions: [3],
+    Closed: false,
+    ClosedAt: null,
+    ClosedByName: "",
+    ClosedReason: "",
+    ValidUntil: null,
+    ExpiredUnclosed: false,
     Items: [],
   };
 }

@@ -468,6 +468,11 @@ func purchaseOrderError(context echo.Context, err error) error {
 			"error": "a correction needs a reason",
 			"code":  "po_correction_reason_required",
 		})
+	case errors.Is(err, store.ErrQuotationClosed):
+		return context.JSON(http.StatusConflict, map[string]string{
+			"error": err.Error(),
+			"code":  "quotation_closed",
+		})
 	case errors.Is(err, store.ErrQuotationFullyBought):
 		return context.JSON(http.StatusConflict, map[string]string{
 			"error": err.Error(),

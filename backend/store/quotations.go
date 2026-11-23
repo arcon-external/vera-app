@@ -183,8 +183,14 @@ type QuotationRecord struct {
 	ClosedAt     *time.Time
 	ClosedByName string
 	ClosedReason string
-	Items        []RevisionItem
-	PDFData      []byte
+	// ValidUntil and ExpiredUnclosed are the latest issued revision's offer
+	// window (#656), not the requested revision's: a reissue resets the clock,
+	// so an old page cannot declare a quotation expired after it was renewed.
+	// ExpiredUnclosed is false while closed -- closure wins.
+	ValidUntil      *time.Time
+	ExpiredUnclosed bool
+	Items           []RevisionItem
+	PDFData         []byte
 	QuotationSummary
 	Totals          RevisionTotals
 	CustomerCode    int16
@@ -277,10 +283,18 @@ func (s *Store) GetQuotation(ctx context.Context, quotationID int64, revision *i
 		       t.marginalized_grand_total, t.tax_amount,
 		       t.marginalized_grand_after_tax, t.profit_amount, t.nett_profit,
 		       t.ppn_amount, t.customer_grand_total,
-		       q.closed_at, q.closed_reason, COALESCE(cb.display_name, '')
+		       q.closed_at, q.closed_reason, COALESCE(cb.display_name, ''),
+		       latest.created_at, latest.validity_days
 		FROM %s.quotations q
 		JOIN %s.customers c ON c.id = q.customer_id
 		LEFT JOIN %s.users cb ON cb.id = q.closed_by
+		LEFT JOIN LATERAL (
+			SELECT lr.created_at, lr.validity_days
+			FROM %s.quotation_revisions lr
+			WHERE lr.quotation_id = q.id
+			ORDER BY lr.revision_number DESC
+			LIMIT 1
+		) latest ON TRUE
 		LEFT JOIN LATERAL (
 			SELECT address FROM %s.customer_addresses
 			WHERE customer_id = c.id AND is_primary = TRUE LIMIT 1
@@ -288,7 +302,7 @@ func (s *Store) GetQuotation(ctx context.Context, quotationID int64, revision *i
 		JOIN %s.quotation_revisions r ON r.quotation_id = q.id
 		JOIN %s.quotation_revision_totals t ON t.revision_id = r.id
 		JOIN %s.quotation_documents d ON d.revision_id = r.id
-		WHERE q.id = $1`, schema, schema, schema, schema, schema, schema, schema)
+		WHERE q.id = $1`, schema, schema, schema, schema, schema, schema, schema, schema)
 	args := []any{quotationID}
 	if revision == nil {
 		filter += " ORDER BY r.revision_number DESC LIMIT 1"
@@ -298,6 +312,8 @@ func (s *Store) GetQuotation(ctx context.Context, quotationID int64, revision *i
 	}
 
 	var record QuotationRecord
+	var latestIssuedAt time.Time
+	var latestValidityDays int16
 	err = pool.QueryRow(ctx, filter, args...).Scan(
 		&record.ID,
 		&record.UUID,
@@ -344,11 +360,16 @@ func (s *Store) GetQuotation(ctx context.Context, quotationID int64, revision *i
 		&record.ClosedAt,
 		&record.ClosedReason,
 		&record.ClosedByName,
+		&latestIssuedAt,
+		&latestValidityDays,
 	)
 	if err != nil {
 		return QuotationRecord{}, fmt.Errorf("get quotation %d: %w", quotationID, err)
 	}
 	record.GrandTotal = record.Totals.CustomerGrandTotal
+	validUntil, expired := quotationExpiryAt(latestIssuedAt, latestValidityDays, time.Now())
+	record.ValidUntil = &validUntil
+	record.ExpiredUnclosed = expired && record.ClosedAt == nil
 
 	rows, err := pool.Query(ctx, fmt.Sprintf(`
 		SELECT item_no, description, qty, uom, unit_price, margin_enabled,
@@ -602,6 +623,20 @@ func (s *Store) SaveRevision(ctx context.Context, draft RevisionDraft) (Quotatio
 	quoteID, quoteUUID, quoteNumber, revisionNumber, err := ensureQuotation(ctx, tx, schema, draft, customerID)
 	if err != nil {
 		return QuotationRecord{}, err
+	}
+	// #656: a new issued revision changes the closed population under the
+	// report, so a closed quotation is revised only after an explicit reopen.
+	// Only an existing quotation can be closed: a first revision creates the
+	// row, and the row is already locked when it existed.
+	if draft.QuoteNumber != "" {
+		var closedAt *time.Time
+		if err := tx.QueryRow(ctx, fmt.Sprintf(
+			`SELECT closed_at FROM %s.quotations WHERE id = $1`, schema), quoteID).Scan(&closedAt); err != nil {
+			return QuotationRecord{}, fmt.Errorf("read quotation %d closure: %w", quoteID, err)
+		}
+		if closedAt != nil {
+			return QuotationRecord{}, ErrQuotationClosed
+		}
 	}
 
 	var revisionID int64

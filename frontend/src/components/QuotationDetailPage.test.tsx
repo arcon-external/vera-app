@@ -56,6 +56,12 @@ const QUOTATION = {
   QuoteNumber: "1502260001",
   RevisionNumber: 1,
   AvailableRevisions: [1, 0],
+  Closed: false,
+  ClosedAt: null,
+  ClosedByName: "",
+  ClosedReason: "",
+  ValidUntil: null,
+  ExpiredUnclosed: false,
   CustomerName: "PT. Infineon Technologies Batam",
   Subject: "Electrical installation",
 } as ArchivedQuotation;
@@ -227,6 +233,12 @@ function makeQuotation(
     Items: [],
     HTMLSnapshot: "",
     AvailableRevisions: [1, 0],
+    Closed: false,
+    ClosedAt: null,
+    ClosedByName: "",
+    ClosedReason: "",
+    ValidUntil: null,
+    ExpiredUnclosed: false,
     ...overrides,
   };
 }
@@ -247,6 +259,12 @@ describe("Quotation detail legacy discount (issue #652)", () => {
         MarginalizedDiscount: 4100000,
         RevisionNumber: 0,
         AvailableRevisions: [0],
+        Closed: false,
+        ClosedAt: null,
+        ClosedByName: "",
+        ClosedReason: "",
+        ValidUntil: null,
+        ExpiredUnclosed: false,
       })
     );
 
@@ -317,11 +335,23 @@ describe("Quotation detail note card (#535)", () => {
               RevisionNumber: 1,
               Note: "Revision two note",
               AvailableRevisions: [1, 0],
+              Closed: false,
+              ClosedAt: null,
+              ClosedByName: "",
+              ClosedReason: "",
+              ValidUntil: null,
+              ExpiredUnclosed: false,
             })
           : makeQuotation({
               RevisionNumber: 0,
               Note: "Revision one note",
               AvailableRevisions: [1, 0],
+              Closed: false,
+              ClosedAt: null,
+              ClosedByName: "",
+              ClosedReason: "",
+              ValidUntil: null,
+              ExpiredUnclosed: false,
             })
     );
 
@@ -357,6 +387,221 @@ describe("Quotation detail note card (#535)", () => {
     await flush();
     expect(container.textContent).toContain("Revision two note");
     expect(container.textContent).not.toContain("Revision one note");
+
+    act(() => root.unmount());
+  });
+});
+
+// Issue #656: the header is where closure becomes visible and actionable. A
+// closed quotation cannot create a purchase order; the reason and the actor
+// stay on the page; an admin can reopen it, and an expired-unclosed quotation
+// is a warning badge only.
+describe("QuotationDetailHeader closure and expiry (issue #656)", () => {
+  const closed = {
+    closed: true,
+    closedAt: "2026-11-20T03:04:05Z",
+    closedByName: "Closure Admin",
+    closedReason: "customer cancelled the remainder",
+    expiredUnclosed: false,
+  };
+
+  it("marks a closed quotation and disables Create PO with the reopen reason", () => {
+    const html = renderHeader({ closure: closed });
+    expect(html).toContain("Closed");
+    expect(html).toContain("customer cancelled the remainder");
+    expect(html).toContain("Closure Admin");
+    expect(html).not.toContain("Create PO from this Quotation");
+    const guidance = buttonTagFor(html, "Closed — reopen to order");
+    expect(guidance).toContain(" disabled=");
+    // Closure is not "all bought": the remedy differs.
+    expect(html).not.toContain("All bought — revise the quotation");
+  });
+
+  it("shows an expired-unclosed badge without disabling Create PO", () => {
+    const html = renderHeader({
+      closure: {
+        ...closed,
+        closed: false,
+        closedAt: null,
+        closedByName: "",
+        closedReason: "",
+        expiredUnclosed: true,
+      },
+    });
+    expect(html).toContain("Expired (unclosed)");
+    expect(buttonTagFor(html, "Create PO from this Quotation")).not.toContain(
+      " disabled="
+    );
+  });
+
+  it("offers Close quotation to an admin on an open quotation", () => {
+    const html = renderHeader({ isAdmin: true, onCloseQuotation: noop });
+    expect(buttonTagFor(html, "Close quotation")).not.toContain(" disabled=");
+    expect(html).not.toContain("Reopen quotation");
+  });
+
+  it("offers Reopen quotation to an admin on a closed quotation", () => {
+    const html = renderHeader({
+      isAdmin: true,
+      closure: closed,
+      onReopenQuotation: noop,
+    });
+    expect(buttonTagFor(html, "Reopen quotation")).not.toContain(" disabled=");
+    expect(html).not.toContain("Close quotation<");
+  });
+
+  it("hides both closure actions from staff", () => {
+    for (const closure of [closed, { ...closed, closed: false }]) {
+      const html = renderHeader({ isAdmin: false, closure });
+      expect(html).not.toContain("Close quotation<");
+      expect(html).not.toContain("Reopen quotation");
+    }
+  });
+});
+
+// Issue #656: the whole close path through the real page. The dialog's own
+// behaviour is covered beside it; this proves the page wires it to the binding
+// wrapper, merges the answer without changing the displayed revision, and
+// leaves the dialog open when the server refuses.
+describe("Quotation detail closure actions (issue #656)", () => {
+  function typeReason(value: string) {
+    const field = document.querySelector<HTMLTextAreaElement>(
+      'textarea[aria-label="Close reason"]'
+    );
+    if (field === null) throw new Error("the close reason textarea is not rendered");
+    const setter = Object.getOwnPropertyDescriptor(
+      HTMLTextAreaElement.prototype,
+      "value"
+    )?.set;
+    setter?.call(field, value);
+    act(() => {
+      field.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+  }
+
+  function clickButton(label: string) {
+    const element = Array.from(document.querySelectorAll("button")).find(
+      (candidate) =>
+        candidate.getAttribute("aria-label") === label ||
+        candidate.textContent?.trim() === label
+    );
+    if (element === undefined) throw new Error(`no button labelled "${label}"`);
+    act(() => element.click());
+  }
+
+  it("closes through the dialog and keeps the displayed revision", async () => {
+    mocks.getCatalogue.mockResolvedValue([IDR_ENTRY]);
+    mocks.getOccupancy.mockResolvedValue({
+      ActivePO: null,
+      AllBought: false,
+      Closed: false,
+    });
+    mocks.getRevision.mockResolvedValue(
+      makeQuotation({ RevisionNumber: 0, AvailableRevisions: [1, 0] })
+    );
+    const onClose = vi.fn(async () =>
+      makeQuotation({
+        RevisionNumber: 1,
+        AvailableRevisions: [1, 0],
+        Closed: true,
+        ClosedAt: "2026-11-20T03:04:05Z",
+        ClosedByName: "Ada Admin",
+        ClosedReason: "customer cancelled the remainder",
+      })
+    );
+
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    act(() => {
+      root.render(
+        <ToastProvider>
+          <QuotationDetailPage
+            quotationID={1}
+            revision={0}
+            onBack={noop}
+            onEdit={noop}
+            onCreatePurchaseOrder={async () => {}}
+            onOpenPurchaseOrder={noop}
+            currency={IDR_ENTRY}
+            isAdmin
+            onCloseQuotation={onClose}
+            onReopenQuotation={async () => makeQuotation()}
+          />
+        </ToastProvider>
+      );
+    });
+    await flush();
+    await flush();
+
+    clickButton("Close quotation");
+    expect(document.querySelector('[role="dialog"]')).not.toBeNull();
+    typeReason("customer cancelled the remainder");
+    clickButton("Confirm close quotation");
+    await flush();
+    await flush();
+
+    expect(onClose).toHaveBeenCalledWith(1, "customer cancelled the remainder");
+    expect(document.querySelector('[role="dialog"]')).toBeNull();
+    expect(container.textContent).toContain("Closed");
+    expect(container.textContent).toContain("customer cancelled the remainder");
+    // The revision on screen did not jump to the latest one the response
+    // carried: only the quotation-level closure fields were merged.
+    expect(container.textContent).toContain("Edit revision 00");
+    expect(container.textContent).not.toContain("Edit revision 01");
+
+    act(() => root.unmount());
+  });
+
+  it("keeps the dialog and the reason when the server refuses", async () => {
+    mocks.getCatalogue.mockResolvedValue([IDR_ENTRY]);
+    mocks.getOccupancy.mockResolvedValue({
+      ActivePO: null,
+      AllBought: false,
+      Closed: false,
+    });
+    mocks.getRevision.mockResolvedValue(makeQuotation());
+    const onClose = vi.fn(async () => {
+      throw new Error("This quotation is already closed.");
+    });
+
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    act(() => {
+      root.render(
+        <ToastProvider>
+          <QuotationDetailPage
+            quotationID={1}
+            revision={0}
+            onBack={noop}
+            onEdit={noop}
+            onCreatePurchaseOrder={async () => {}}
+            onOpenPurchaseOrder={noop}
+            currency={IDR_ENTRY}
+            isAdmin
+            onCloseQuotation={onClose}
+            onReopenQuotation={async () => makeQuotation()}
+          />
+        </ToastProvider>
+      );
+    });
+    await flush();
+    await flush();
+
+    clickButton("Close quotation");
+    typeReason("customer cancelled");
+    clickButton("Confirm close quotation");
+    await flush();
+    await flush();
+
+    expect(document.querySelector('[role="dialog"]')).not.toBeNull();
+    expect(
+      document.querySelector<HTMLTextAreaElement>(
+        'textarea[aria-label="Close reason"]'
+      )?.value
+    ).toBe("customer cancelled");
+    expect(document.body.textContent).toContain("This quotation is already closed.");
 
     act(() => root.unmount());
   });

@@ -117,6 +117,12 @@ func NewServer(database *store.Store, service *auth.Service, templates *backend.
 	server.echo.GET("/v1/quotations/next-sequence", server.nextSequence, server.requireSession)
 	server.echo.GET("/v1/quotations/:id", server.detailEndpoint, server.requireSession)
 	server.echo.GET("/v1/quotations/:id/revisions", server.revisionsEndpoint, server.requireSession)
+	// #656: closing and reopening a quotation is an admin decision, so the
+	// route gate and the store's in-transaction role check both apply.
+	server.echo.POST("/v1/quotations/:id/close", server.closeQuotation,
+		server.requireSession, server.requireAdminWithCode("quotation_close_forbidden"))
+	server.echo.POST("/v1/quotations/:id/reopen", server.reopenQuotation,
+		server.requireSession, server.requireAdminWithCode("quotation_close_forbidden"))
 	// PO source selector (issue #467): issued Quotations, their issued
 	// revisions, and the confirm-time revalidation both PO entry paths share.
 	server.echo.GET("/v1/po-sources", server.listPOSources, server.requireSession)

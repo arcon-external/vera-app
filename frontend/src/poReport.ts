@@ -57,7 +57,8 @@ export interface PurchaseOrderReportPipeline {
 /**
  * Realized commercial variance (#653). It is a comparison, not revenue: open
  * Unsold is mirrored for the screen but excluded from the net. Closed loss is
- * the zero placeholder until #656 implements quotation closure.
+ * the unbought remainder of an explicitly closed quotation (#656); it is
+ * subtracted from the net, and reopening the quotation restores Unsold.
  */
 export interface PurchaseOrderReportVariance {
   quantityExtraIncomeAmountMinor: number;

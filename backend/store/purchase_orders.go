@@ -461,6 +461,12 @@ func (s *Store) CreatePurchaseOrderDraft(ctx context.Context, input PurchaseOrde
 	if err != nil {
 		return PurchaseOrder{}, err
 	}
+	// #656: a closed quotation keeps its remainder as Closed Loss, so it cannot
+	// be ordered again. The check runs under the quotation lock, before any leaf
+	// is selected: a stale selector cannot reopen a closed quotation by asking.
+	if availability.Closed {
+		return PurchaseOrder{}, ErrQuotationClosed
+	}
 	if availability.AllBought {
 		return PurchaseOrder{}, ErrQuotationFullyBought
 	}

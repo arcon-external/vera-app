@@ -50,6 +50,13 @@ type POSourceQuotationDTO struct {
 	SavedPOCount         int
 	DraftPOCount         int
 	LegacyHeaderDiscount bool
+	// Closure and expiry (#656). A closed row is visible but cannot start a
+	// new purchase order; an expired-unclosed row keeps its Unsold remainder.
+	Closed          bool
+	ClosedAt        *string
+	ClosedReason    string
+	ValidUntil      *string
+	ExpiredUnclosed bool
 }
 
 // POSourcePageDTO is one page of the selector's first step.
@@ -97,6 +104,13 @@ type POSourceOccupancyDTO struct {
 	SavedPOCount         int
 	DraftPOCount         int
 	LegacyHeaderDiscount bool
+	// Closure and expiry (#656). ClosedByName is the detail page's "who".
+	Closed          bool
+	ClosedAt        *string
+	ClosedReason    string
+	ClosedByName    string
+	ValidUntil      *string
+	ExpiredUnclosed bool
 }
 
 // POSourceAvailabilityItemDTO is one remaining quotation leaf. The price is
@@ -128,7 +142,14 @@ type POSourceAvailabilityDTO struct {
 	LegacyHeaderDiscount bool
 	SavedPOCount         int
 	DraftPOCount         int
-	Items                []POSourceAvailabilityItemDTO
+	// Closure and expiry (#656). A closed revision's remaining leaves are
+	// Closed Loss; the workspace disables ordering rather than hiding them.
+	Closed          bool
+	ClosedAt        *string
+	ClosedReason    string
+	ValidUntil      *string
+	ExpiredUnclosed bool
+	Items           []POSourceAvailabilityItemDTO
 }
 
 // POSourceValidationDTO answers the confirm-time revalidation. A false Valid
@@ -185,6 +206,11 @@ func (q *Quotation) ListPOSourceQuotations(query POSourceQuery) (POSourcePageDTO
 			SavedPOCount:         row.SavedPOCount,
 			DraftPOCount:         row.DraftPOCount,
 			LegacyHeaderDiscount: row.LegacyHeaderDiscount,
+			Closed:               row.Closed,
+			ClosedAt:             row.ClosedAt,
+			ClosedReason:         row.ClosedReason,
+			ValidUntil:           row.ValidUntil,
+			ExpiredUnclosed:      row.ExpiredUnclosed,
 		}
 		if row.ActivePO != nil {
 			dto.ActivePO = &POSourceActivePODTO{
@@ -283,6 +309,12 @@ func (q *Quotation) GetPOSourceOccupancy(quotationID int64) (POSourceOccupancyDT
 		SavedPOCount:         response.SavedPOCount,
 		DraftPOCount:         response.DraftPOCount,
 		LegacyHeaderDiscount: response.LegacyHeaderDiscount,
+		Closed:               response.Closed,
+		ClosedAt:             response.ClosedAt,
+		ClosedReason:         response.ClosedReason,
+		ClosedByName:         response.ClosedByName,
+		ValidUntil:           response.ValidUntil,
+		ExpiredUnclosed:      response.ExpiredUnclosed,
 	}
 	if response.ActivePO != nil {
 		dto.ActivePO = &POSourceActivePODTO{
@@ -340,6 +372,11 @@ func (q *Quotation) GetQuotationAvailability(quotationID int64, revision int16) 
 		LegacyHeaderDiscount: response.LegacyHeaderDiscount,
 		SavedPOCount:         response.SavedPOCount,
 		DraftPOCount:         response.DraftPOCount,
+		Closed:               response.Closed,
+		ClosedAt:             response.ClosedAt,
+		ClosedReason:         response.ClosedReason,
+		ValidUntil:           response.ValidUntil,
+		ExpiredUnclosed:      response.ExpiredUnclosed,
 		Items:                items,
 	}, nil
 }

@@ -40,7 +40,7 @@ func TestListQuotationsMapsContract(t *testing.T) {
 			"quotations": []apicontract.QuotationSummaryRow{
 				{ID: 3, QuoteNumber: "15020003", RevisionNumber: 2, CustomerName: "Acme",
 					Subject: "Test", CreatedAt: "2026-09-12T00:00:00Z",
-					GrandTotal: 261000, DisplayGrand: "261.000"},
+					GrandTotal: 261000, DisplayGrand: "261.000", Closed: true},
 			},
 		})
 	})
@@ -60,6 +60,9 @@ func TestListQuotationsMapsContract(t *testing.T) {
 	if row.DisplayGrand != "261.000" || row.GrandTotal != 261000 {
 		t.Errorf("row totals = %d/%q; want 261000/261.000", row.GrandTotal, row.DisplayGrand)
 	}
+	if !row.Closed {
+		t.Error("archive row did not map Closed; the badge would never render")
+	}
 }
 
 func TestListQuotationsRequiresSignIn(t *testing.T) {
@@ -72,6 +75,8 @@ func TestListQuotationsRequiresSignIn(t *testing.T) {
 }
 
 func TestGetQuotationMapsDetail(t *testing.T) {
+	closedAt := "2026-11-20T03:04:05Z"
+	validUntil := "2026-12-01"
 	stubAPIClient(t, func(writer http.ResponseWriter, request *http.Request) {
 		_ = json.NewEncoder(writer).Encode(apicontract.QuotationDetail{
 			ID: 5, QuoteNumber: "15020005", Revision: 1,
@@ -91,6 +96,11 @@ func TestGetQuotationMapsDetail(t *testing.T) {
 			DisplayMarginalizedGrand: "270.000",
 			DisplayTax:               "0",
 			DisplayNett:              "45.000",
+			Closed:                   true,
+			ClosedAt:                 &closedAt,
+			ClosedReason:             "customer cancelled the remainder",
+			ClosedByName:             "Closure Admin",
+			ValidUntil:               &validUntil,
 			Items: []apicontract.QuotationItemRow{
 				{ItemNo: 1, Description: "Line", Qty: 1, UoM: "Lot",
 					OriginalUnitPrice: 225000, MarginalizedUnitPrice: 270000,
@@ -122,6 +132,12 @@ func TestGetQuotationMapsDetail(t *testing.T) {
 	}
 	if !strings.Contains(detail.HTMLSnapshot, "Quotation") {
 		t.Error("HTML snapshot missing")
+	}
+	if !detail.Closed || detail.ClosedAt == nil || *detail.ClosedAt != closedAt ||
+		detail.ClosedReason != "customer cancelled the remainder" ||
+		detail.ClosedByName != "Closure Admin" ||
+		detail.ValidUntil == nil || *detail.ValidUntil != validUntil {
+		t.Errorf("closure mapping = %+v; want the stored close and its expiry", detail)
 	}
 }
 
