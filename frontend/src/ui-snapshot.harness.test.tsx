@@ -391,6 +391,34 @@ const PO_EDITOR_INITIAL = initialPurchaseOrderEditorState(
   PO_EDITOR_ORDER,
   PO_EDITOR_USD
 );
+// #654: one aggregate line over the plain line and the split package. The
+// header's derived total is the sum of all three child rows and its derived
+// unit price divides that by the display quantity of 2; the children keep their
+// depth and their own discounts. This is a presentation state, not a money
+// change: the line values below the header are the same order as above.
+const PO_AGGREGATE_ORDER: PurchaseOrderDTO = {
+  ...PO_EDITOR_ORDER,
+  Items: PO_EDITOR_ORDER.Items.map((item) => ({
+    ...item,
+    AggregateGroupID: 1,
+  })),
+  AggregateGroups: [
+    {
+      ID: 1,
+      DisplayOrder: 1,
+      Title: "Combined items",
+      OrderedQuantityScaled: 20000,
+      OrderedUoM: "Lot",
+      ShowChildrenToCustomer: false,
+      TotalMinor: 351863,
+      DisplayUnitPriceMinor: 175932,
+    },
+  ],
+};
+const PO_AGGREGATE_STATE = initialPurchaseOrderEditorState(
+  PO_AGGREGATE_ORDER,
+  PO_EDITOR_USD
+);
 const PO_EDITOR_CALCULATION = calculatePurchaseOrder(
   PO_EDITOR_INITIAL,
   PO_EDITOR_USD
@@ -3149,6 +3177,28 @@ const CASES: SnapshotCase[] = [
     element: (
       <PurchaseOrderEditorView
         state={PO_EDITOR_INITIAL}
+        dispatch={() => undefined}
+        currency={PO_EDITOR_USD}
+        uomOptions={PO_EDITOR_UOM_OPTIONS}
+        incotermOptions={INCOTERM_OPTIONS}
+        onSave={() => undefined}
+        onCancel={() => undefined}
+        onFinalSave={() => undefined}
+        finalSaving={false}
+      />
+    ),
+  },
+  {
+    // #654: the aggregate presentation. The header card carries the derived
+    // total and unit price, the display quantity/unit and the print toggle;
+    // the three child rows below it are the same order as the normal editor,
+    // with their split package and row discounts intact. At 360 this is the
+    // case that says whether the header fields reflow instead of overflowing.
+    name: "PurchaseOrderAggregateEditor",
+    cropToHeading: "Line items",
+    element: (
+      <PurchaseOrderEditorView
+        state={PO_AGGREGATE_STATE}
         dispatch={() => undefined}
         currency={PO_EDITOR_USD}
         uomOptions={PO_EDITOR_UOM_OPTIONS}
