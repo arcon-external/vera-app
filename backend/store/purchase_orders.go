@@ -1016,6 +1016,11 @@ func (s *Store) UpdatePurchaseOrderDraft(ctx context.Context, input PurchaseOrde
 	if err := validatePurchaseOrderUpdateInput(input); err != nil {
 		return PurchaseOrder{}, err
 	}
+	// #654: the submitted placement is checked before the transaction opens, so
+	// a malformed group can never touch a line, an allocation or a snapshot.
+	if err := validatePurchaseOrderAggregatePlacement(input.AggregateGroups, input.Items); err != nil {
+		return PurchaseOrder{}, err
+	}
 
 	pool, err := s.poolOrError()
 	if err != nil {
@@ -1046,6 +1051,12 @@ func (s *Store) UpdatePurchaseOrderDraft(ctx context.Context, input PurchaseOrde
 	}
 	if lock.LiveQuotationID != peekedQuotationID {
 		return PurchaseOrder{}, ErrPurchaseOrderVersionConflict
+	}
+	// #654: a grouped record cannot be opened by a client that does not know
+	// groups. Refuse before the overwrite snapshot or any other write.
+	if err := refuseLegacyAggregateOverwrite(
+		ctx, tx, schema, org.ID, input.ID, input.AggregateGroups); err != nil {
+		return PurchaseOrder{}, err
 	}
 	// #496: a never-linked or formerly-linked draft still saves its own
 	// PO-owned values. Only the paths that need the frozen revision (review,
@@ -1098,6 +1109,10 @@ func (s *Store) UpdatePurchaseOrderDraft(ctx context.Context, input PurchaseOrde
 	}
 	kept, removed, err := replacePurchaseOrderItems(ctx, tx, schema, org.ID, input.ID, lines)
 	if err != nil {
+		return PurchaseOrder{}, err
+	}
+	if err := replacePurchaseOrderItemGroups(
+		ctx, tx, schema, org.ID, input.ID, input.AggregateGroups, kept); err != nil {
 		return PurchaseOrder{}, err
 	}
 	// #651: a draft save rewrites its allocations so the advisory "in drafts"
@@ -1975,6 +1990,41 @@ func purchaseOrderLineValuesEqual(stored, entered PurchaseOrderItem) bool {
 	return true
 }
 
+// refuseLegacyAggregateOverwrite refuses a submission that cannot express the
+// record's aggregate presentation. A nil group slice means the client predates
+// #654; if the stored record carries any group, saving would let that client
+// rewrite a grouped record it cannot see, and the customer-facing layout would
+// change silently (a replaced row loses its membership; a removal shrinks the
+// group). The named update prompt is the only safe answer.
+//
+// An empty non-nil slice is the deliberate ungroup and is not refused. An
+// ungrouped record stays editable by a legacy client, so the compatibility
+// window still covers every record an old client could have created.
+func refuseLegacyAggregateOverwrite(
+	ctx context.Context,
+	q purchaseOrderQuerier,
+	schema, orgID string,
+	orderID int64,
+	groups []PurchaseOrderAggregateGroupInput,
+) error {
+	if groups != nil {
+		return nil
+	}
+	var grouped bool
+	if err := q.QueryRow(ctx, fmt.Sprintf(`
+		SELECT EXISTS (
+			SELECT 1 FROM %s.purchase_order_item_groups
+			WHERE purchase_order_id = $1 AND org_id = $2
+		)`, schema), orderID, orgID).Scan(&grouped); err != nil {
+		return fmt.Errorf("check purchase order %d aggregate groups: %w", orderID, err)
+	}
+	if !grouped {
+		return nil
+	}
+	return fmt.Errorf("%w: this purchase order uses aggregate lines saved by a newer Vera; update Vera to edit it",
+		ErrPurchaseOrderClientOutdated)
+}
+
 func getPurchaseOrder(ctx context.Context, q purchaseOrderQuerier, schema, orgID string, id int64) (PurchaseOrder, error) {
 	var order PurchaseOrder
 	var poDate, requestedDelivery pgtype.Date
@@ -2133,6 +2183,7 @@ func getPurchaseOrder(ctx context.Context, q purchaseOrderQuerier, schema, orgID
 		       poi.unit_price_minor, poi.discount_enabled, poi.discount_percent,
 		       poi.gross_minor, poi.discount_minor, poi.net_minor, poi.client_key,
 		       poi.group_key, poi.parent_description, poi.description_lines,
+		       poi.aggregate_group_id,
 		       EXISTS (
 		           SELECT 1 FROM %s.purchase_order_allocations a
 		           WHERE a.purchase_order_item_id = poi.id
@@ -2156,16 +2207,18 @@ func getPurchaseOrder(ctx context.Context, q purchaseOrderQuerier, schema, orgID
 		var item PurchaseOrderItem
 		var itemNo, subNo pgtype.Int4
 		var clientKey pgtype.Text
+		var aggregateGroupID pgtype.Int8
 		var descriptionLines []byte
 		if err := rows.Scan(&item.ID, &item.LineNumber, &item.Description, &itemNo,
 			&subNo, &item.QuantityScaled, &item.UoM, &item.UnitPriceMinor,
 			&item.DiscountEnabled, &item.DiscountPercent, &item.GrossMinor,
 			&item.DiscountMinor, &item.NetMinor, &clientKey, &item.GroupKey,
-			&item.ParentDescription, &descriptionLines, &item.hasAllocation,
-			&item.quotedUnitPriceMinor); err != nil {
+			&item.ParentDescription, &descriptionLines, &aggregateGroupID,
+			&item.hasAllocation, &item.quotedUnitPriceMinor); err != nil {
 			return PurchaseOrder{}, fmt.Errorf("scan purchase order line: %w", err)
 		}
 		item.DescriptionLines = decodeDescriptionLines(descriptionLines)
+		item.AggregateGroupID = aggregateGroupID.Int64
 		if clientKey.Valid {
 			item.ClientKey = clientKey.String
 		}
@@ -2185,6 +2238,11 @@ func getPurchaseOrder(ctx context.Context, q purchaseOrderQuerier, schema, orgID
 	if err := attachPurchaseOrderLineBaselines(ctx, q, schema, orgID, &order); err != nil {
 		return PurchaseOrder{}, err
 	}
+	groups, err := loadPurchaseOrderItemGroups(ctx, q, schema, orgID, order.ID)
+	if err != nil {
+		return PurchaseOrder{}, err
+	}
+	order.AggregateGroups = groups
 	return order, nil
 }
 

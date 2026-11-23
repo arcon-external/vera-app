@@ -139,6 +139,11 @@ func (s *Store) RepairPurchaseOrderSource(ctx context.Context, input PurchaseOrd
 	if err := validateSavedPurchaseOrderUpdateInput(input.PurchaseOrderUpdate, false); err != nil {
 		return PurchaseOrder{}, err
 	}
+	// #654: the placement is checked before the repair transaction opens, so a
+	// malformed group can never reach the correction snapshot.
+	if err := validatePurchaseOrderAggregatePlacement(input.AggregateGroups, input.Items); err != nil {
+		return PurchaseOrder{}, err
+	}
 
 	pool, err := s.poolOrError()
 	if err != nil {
@@ -182,6 +187,12 @@ func (s *Store) RepairPurchaseOrderSource(ctx context.Context, input PurchaseOrd
 	}
 	if lock.LiveQuotationID != peekedQuotationID {
 		return PurchaseOrder{}, ErrPurchaseOrderVersionConflict
+	}
+	// #654: a grouped record cannot be repaired by a client that cannot express
+	// groups; refused before the correction snapshot, which is itself a write.
+	if err := refuseLegacyAggregateOverwrite(
+		ctx, tx, schema, org.ID, input.ID, input.AggregateGroups); err != nil {
+		return PurchaseOrder{}, err
 	}
 	stored, err := getPurchaseOrder(ctx, tx, schema, org.ID, input.ID)
 	if err != nil {
@@ -342,6 +353,10 @@ func (s *Store) RepairPurchaseOrderSource(ctx context.Context, input PurchaseOrd
 	}
 	kept, removed, err := replacePurchaseOrderItems(ctx, tx, schema, org.ID, input.ID, lines)
 	if err != nil {
+		return PurchaseOrder{}, err
+	}
+	if err := replacePurchaseOrderItemGroups(
+		ctx, tx, schema, org.ID, input.ID, input.AggregateGroups, kept); err != nil {
 		return PurchaseOrder{}, err
 	}
 	// #651: the moved source owns the allocation picture now. The old

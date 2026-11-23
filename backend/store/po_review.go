@@ -544,6 +544,12 @@ func (s *Store) FinalizePurchaseOrder(ctx context.Context, input PurchaseOrderFi
 	if err := requirePurchaseOrderSource(lock); err != nil {
 		return PurchaseOrder{}, err
 	}
+	// #654: the final save cannot silently ungroup a record saved by a newer
+	// client. Refuse before the overwrite snapshot or any other write.
+	if err := refuseLegacyAggregateOverwrite(
+		ctx, tx, schema, org.ID, input.ID, input.AggregateGroups); err != nil {
+		return PurchaseOrder{}, err
+	}
 	quotationID = lock.QuotationID
 	sourceRevision = lock.SourceRevision
 	customerID = lock.CustomerID
@@ -614,6 +620,9 @@ func (s *Store) FinalizePurchaseOrder(ctx context.Context, input PurchaseOrderFi
 		input.Items[index].LineNumber = index + 1
 	}
 	if err := validateSavedPurchaseOrderUpdateInput(input.PurchaseOrderUpdate, true); err != nil {
+		return PurchaseOrder{}, err
+	}
+	if err := validatePurchaseOrderAggregatePlacement(input.AggregateGroups, input.Items); err != nil {
 		return PurchaseOrder{}, err
 	}
 	if err := validatePurchaseOrderReferences(ctx, tx, schema, quotationID, sourceRevision, input.Items); err != nil {
@@ -746,6 +755,10 @@ func (s *Store) FinalizePurchaseOrder(ctx context.Context, input PurchaseOrderFi
 	}
 	kept, _, err := replacePurchaseOrderItems(ctx, tx, schema, org.ID, input.ID, lines)
 	if err != nil {
+		return PurchaseOrder{}, err
+	}
+	if err := replacePurchaseOrderItemGroups(
+		ctx, tx, schema, org.ID, input.ID, input.AggregateGroups, kept); err != nil {
 		return PurchaseOrder{}, err
 	}
 	if err := replacePurchaseOrderAllocations(ctx, tx, schema, org.ID, input.ID, source, kept, false); err != nil {
