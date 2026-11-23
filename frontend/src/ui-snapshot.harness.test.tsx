@@ -41,12 +41,14 @@ import { DocumentHomePage } from "./components/DocumentHomePage";
 import { AppShell } from "./components/AppShell";
 import { AdminDashboard } from "./components/AdminDashboard";
 import { PurchaseOrderReportsView } from "./components/PurchaseOrderReportsPage";
+import { PurchaseOrderFulfillmentCardView } from "./components/PurchaseOrderFulfillmentCard";
 import { PurchaseOrderReportPickerView } from "./components/PurchaseOrderReportPicker";
 import {
   normalizePurchaseOrderReport,
   type PurchaseOrderReportData,
   type PurchaseOrderReportMetrics,
 } from "./poReport";
+import type { PurchaseOrderFulfillmentPage } from "./poFulfillment";
 import {
   purchaseOrderReportExtraExpenseFixture,
   purchaseOrderReportFixture,
@@ -1657,6 +1659,168 @@ const REPORT_CATALOGUE: CurrencyInfo[] = [
   },
 ];
 
+// Issue #657: the Fulfillment drill-down's settled page. It is the view's own
+// shape, not the server type, because the harness renders the presentational
+// View. The facts are chosen to exercise every block a reader must judge at
+// both widths: an open quotation with a grouped depth-1 child and a depth-3
+// child under one title, a closed quotation whose remainder is Closed Loss and
+// whose Unsold is exactly zero, a standalone extra expense line, saved PO
+// contributions on every priced leaf, and one price loss beside one price
+// extra so the variance column is not a single sample.
+const FULFILLMENT_SNAPSHOT_PAGE: PurchaseOrderFulfillmentPage = {
+  asOf: "2026-11-19",
+  filter: {
+    currency: "IDR",
+    status: "all",
+    search: "",
+    page: 1,
+    pageSize: 25,
+  },
+  quotations: [
+    {
+      quotationId: 7,
+      quoteNumber: "1502260007",
+      customerName: "PT. Infineon Technologies Batam",
+      currency: "IDR",
+      latestRevision: 2,
+      issuedAt: "2026-10-20",
+      validUntil: "2026-11-19",
+      status: "open",
+      items: [
+        {
+          quotationItemNo: 1,
+          quotationSubNo: null,
+          label: "1",
+          description: "WIP rack fabrication and delivery",
+          groupTitle: "Delivered package",
+          removed: false,
+          quotedQuantityScaled: 50000,
+          boughtQuantityScaled: 30000,
+          unsoldQuantityScaled: 20000,
+          overBoughtQuantityScaled: 0,
+          realizedAmountMinor: 600000,
+          realizedMarginMinor: 300000,
+          unsoldAmountMinor: 400000,
+          unsoldMarginMinor: 200000,
+          quantityExtraIncomeAmountMinor: 0,
+          quantityExtraIncomeMarginMinor: 0,
+          priceExtraIncomeMinor: 0,
+          priceLossMinor: 50000,
+          closedLossAmountMinor: 0,
+          closedLossMarginMinor: 0,
+          purchaseOrders: [
+            {
+              id: 11,
+              poNumber: "PO-657-OPEN-1",
+              state: "saved",
+              receivedDate: "2026-10-05",
+              allocatedQuantityScaled: 20000,
+            },
+            {
+              id: 12,
+              poNumber: "PO-657-OPEN-2",
+              state: "saved",
+              receivedDate: "2026-10-18",
+              allocatedQuantityScaled: 10000,
+            },
+          ],
+        },
+        {
+          quotationItemNo: 2,
+          quotationSubNo: 3,
+          label: "2.3",
+          description: "Depth-3 control panel assembly",
+          groupTitle: "Delivered package",
+          removed: false,
+          quotedQuantityScaled: 30000,
+          boughtQuantityScaled: 10000,
+          unsoldQuantityScaled: 20000,
+          overBoughtQuantityScaled: 0,
+          realizedAmountMinor: 200000,
+          realizedMarginMinor: 100000,
+          unsoldAmountMinor: 400000,
+          unsoldMarginMinor: 200000,
+          quantityExtraIncomeAmountMinor: 0,
+          quantityExtraIncomeMarginMinor: 0,
+          priceExtraIncomeMinor: 25000,
+          priceLossMinor: 0,
+          closedLossAmountMinor: 0,
+          closedLossMarginMinor: 0,
+          purchaseOrders: [
+            {
+              id: 13,
+              poNumber: "PO-657-OPEN-3",
+              state: "saved",
+              receivedDate: "2026-10-22",
+              allocatedQuantityScaled: 10000,
+            },
+          ],
+        },
+      ],
+      extraExpenses: [
+        {
+          purchaseOrderId: 11,
+          poNumber: "PO-657-OPEN-1",
+          lineNumber: 3,
+          description: "Freight surcharge",
+          quantityScaled: 10000,
+          uom: "Lot",
+          amountMinor: 1000000,
+          groupTitle: "",
+        },
+      ],
+    },
+    {
+      quotationId: 8,
+      quoteNumber: "1502260008",
+      customerName: "PT. Datalec Global Solution",
+      currency: "IDR",
+      latestRevision: 0,
+      issuedAt: "2026-09-15",
+      validUntil: "2026-10-15",
+      status: "closed",
+      items: [
+        {
+          quotationItemNo: 1,
+          quotationSubNo: null,
+          label: "1",
+          description: "Cooling package, remaining scope closed",
+          groupTitle: "",
+          removed: false,
+          quotedQuantityScaled: 50000,
+          boughtQuantityScaled: 30000,
+          unsoldQuantityScaled: 0,
+          overBoughtQuantityScaled: 0,
+          realizedAmountMinor: 600000,
+          realizedMarginMinor: 300000,
+          unsoldAmountMinor: 0,
+          unsoldMarginMinor: 0,
+          quantityExtraIncomeAmountMinor: 0,
+          quantityExtraIncomeMarginMinor: 0,
+          priceExtraIncomeMinor: 0,
+          priceLossMinor: 0,
+          closedLossAmountMinor: 400000,
+          closedLossMarginMinor: 200000,
+          purchaseOrders: [
+            {
+              id: 14,
+              poNumber: "PO-657-CLOSED",
+              state: "saved",
+              receivedDate: "2026-09-28",
+              allocatedQuantityScaled: 30000,
+            },
+          ],
+        },
+      ],
+      extraExpenses: [],
+    },
+  ],
+  page: 1,
+  pageSize: 25,
+  total: 2,
+  totalPages: 1,
+};
+
 function reportChartFilters(
   report: PurchaseOrderReportData,
   period: ReportFilterState["period"] = null
@@ -2384,6 +2548,39 @@ const CASES: SnapshotCase[] = [
           onNext: () => undefined,
           onRetryMonth: () => undefined,
         }}
+      />
+    ),
+  },
+  {
+    // #657: the Fulfillment drill-down with a settled page, rendered through
+    // the presentational View because renderToString runs no effects. The 360
+    // read shows the stacked per-item layout: every quantity and value is in
+    // the card, no horizontal table. The 1280 read shows the fixed-column
+    // table with both quotations, the group heading above its two children,
+    // the standalone extra and the closed loss.
+    //
+    // What this case cannot show: loading, error and empty states, status and
+    // search interactions, paging, and the epoch-driven refresh (all covered by
+    // the card and page DOM suites). The closed quotation sits below the 900px
+    // fold at 360; the 1280 read is the evidence for it.
+    name: "ReportsFulfillment",
+    element: (
+      <PurchaseOrderFulfillmentCardView
+        page={FULFILLMENT_SNAPSHOT_PAGE}
+        currency="IDR"
+        catalogue={REPORT_CATALOGUE}
+        status="all"
+        searchDraft=""
+        pageNumber={1}
+        loading={false}
+        error=""
+        onStatusChange={() => undefined}
+        onSearchDraftChange={() => undefined}
+        onSearchSubmit={() => undefined}
+        onClearFilters={() => undefined}
+        onPreviousPage={() => undefined}
+        onNextPage={() => undefined}
+        onRetry={() => undefined}
       />
     ),
   },

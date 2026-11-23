@@ -289,6 +289,93 @@ describe("PurchaseOrderFulfillmentCard", () => {
         .length
     ).toBe(2);
     expect(text()).toContain("Delivered package");
+
+    // #657 layout fix: the same page has a stacked narrow representation. It
+    // carries every figure without a table, and its group title sits above both
+    // children. The table wrapper is hidden below md; the stacked block is
+    // hidden at md and up.
+    const narrow = card().querySelector<HTMLElement>(
+      "[data-fulfillment-narrow]"
+    );
+    if (narrow === null) throw new Error("no narrow fulfillment layout");
+    expect(narrow.className).toContain("md:hidden");
+    expect(
+      card().querySelector("[data-fulfillment-table]")?.parentElement?.className
+    ).toContain("hidden md:block");
+    expect(card().querySelector(".overflow-x-auto")).toBeNull();
+
+    const narrowItems = narrow.querySelectorAll<HTMLElement>(
+      "[data-fulfillment-narrow-item]"
+    );
+    expect(narrowItems).toHaveLength(2);
+    expect(
+      narrow.querySelector("[data-fulfillment-narrow-group-title]")?.textContent
+    ).toBe("Delivered package");
+    const firstNarrow = narrowItems[0];
+    for (const [name, value] of [
+      ["quoted", "5"],
+      ["bought", "3"],
+      ["unsold", "2"],
+      ["over-bought", "0"],
+    ]) {
+      expect(
+        firstNarrow.querySelector(
+          `[data-fulfillment-narrow-quantity="${name}"]`
+        )?.textContent
+      ).toBe(value);
+    }
+    expect(
+      firstNarrow.querySelector(
+        '[data-fulfillment-narrow-money="realized-amount"]'
+      )?.textContent
+    ).toBe("Rp60.000");
+    expect(firstNarrow.textContent).toContain("10 Mar 2026");
+  });
+
+  it("gives every quotation table the same fixed column model and compact PO dates", async () => {
+    const base = page();
+    const secondQuotation = {
+      ...base.quotations[0],
+      quotationId: 8,
+      quoteNumber: "1502260008",
+      status: "open",
+      items: [item({ quotationItemNo: 2, label: "2" })],
+    };
+    const twoQuotations = page({
+      quotations: [base.quotations[0], secondQuotation],
+    });
+    await render({ load: vi.fn(async () => twoQuotations) });
+
+    const tables = Array.from(
+      card().querySelectorAll<HTMLTableElement>("[data-fulfillment-table]")
+    );
+    expect(tables).toHaveLength(2);
+    const widths = [
+      "5%",
+      "16%",
+      "6%",
+      "6%",
+      "6%",
+      "6%",
+      "12%",
+      "12%",
+      "13%",
+      "18%",
+    ];
+    for (const table of tables) {
+      expect(table.className).toContain("table-fixed");
+      expect(table.className).toContain("w-full");
+      const columns = Array.from(
+        table.querySelectorAll<HTMLTableColElement>("colgroup col")
+      );
+      expect(columns.map((column) => column.style.width)).toEqual(widths);
+    }
+
+    // The saved-PO date is the compact readable form, so it fits the fixed
+    // cell and never relies on a clipped raw ISO string.
+    const tableText = tables[0].textContent ?? "";
+    expect(tableText).toContain("10 Mar 2026");
+    expect(tableText).not.toContain("2026-03-10");
   });
 
   it("marks a removed leaf and shows zero quoted on it", async () => {
