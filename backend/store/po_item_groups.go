@@ -41,10 +41,12 @@ var (
 	// aggregates. It is a 422 at the API boundary.
 	ErrPurchaseOrderAggregateInvalid = errors.New("purchase order aggregate line is invalid")
 	// ErrPurchaseOrderClientOutdated refuses a legacy save that would silently
-	// ungroup a record it cannot represent. The compatibility contract is the
-	// nil-versus-empty distinction on the submitted group slice: nil means the
-	// client does not know about groups at all.
-	ErrPurchaseOrderClientOutdated = errors.New("purchase order client cannot edit aggregate lines")
+	// rewrite a record it cannot represent: an aggregate group it cannot
+	// express (the compatibility contract is the nil-versus-empty distinction on
+	// the submitted group slice), or an extra line submitted without a line kind,
+	// which would move the pass-through amount to uncosted. The API maps it to a
+	// 409 the client answers with the named update prompt.
+	ErrPurchaseOrderClientOutdated = errors.New("purchase order client cannot represent newer purchase order lines")
 )
 
 // PurchaseOrderAggregateGroup is one PO-only presentation group. TotalMinor and
@@ -78,6 +80,23 @@ func (input PurchaseOrderAggregateGroupInput) normalize() PurchaseOrderAggregate
 	input.Title = strings.TrimSpace(input.Title)
 	input.OrderedUoM = strings.TrimSpace(input.OrderedUoM)
 	return input
+}
+
+// purchaseOrderDisplayGroupKey is the display-group key of one line, mirrored
+// from the client's displayGroupKeyOf (frontend/src/poAggregate.ts): a stored
+// group key wins; a pre-migration row that still names a quotation sub-item
+// belongs to its item under the `q:<item>` key migration 048 backfills; a plain
+// line has no key. The server has to read the same key, or the client's
+// split-package rule cannot be enforced on a record whose rows carry no stored
+// key.
+func purchaseOrderDisplayGroupKey(item PurchaseOrderItem) string {
+	if item.GroupKey != "" {
+		return item.GroupKey
+	}
+	if item.QuotationItemNo != nil && item.QuotationSubNo != nil {
+		return fmt.Sprintf("q:%d", *item.QuotationItemNo)
+	}
+	return ""
 }
 
 // validatePurchaseOrderAggregatePlacement checks the submitted group set and
@@ -129,16 +148,16 @@ func validatePurchaseOrderAggregatePlacement(
 	for index, item := range items {
 		position := index + 1
 		groupIndex := item.AggregateGroupIndex
-		if item.GroupKey != "" {
+		if groupKey := purchaseOrderDisplayGroupKey(item); groupKey != "" {
 			// A split display group (#573) is one package: every row of it must
 			// sit in the same aggregate, or the customer would see half a
 			// package inside a group and half outside.
-			if first, seen := displayGroupIndex[item.GroupKey]; seen && first != groupIndex {
+			if first, seen := displayGroupIndex[groupKey]; seen && first != groupIndex {
 				return fmt.Errorf(
 					"%w: line %d splits display group %q between aggregate group %d and %d",
-					ErrPurchaseOrderAggregateInvalid, position, item.GroupKey, first, groupIndex)
+					ErrPurchaseOrderAggregateInvalid, position, groupKey, first, groupIndex)
 			}
-			displayGroupIndex[item.GroupKey] = groupIndex
+			displayGroupIndex[groupKey] = groupIndex
 		}
 		if groupIndex < 0 || groupIndex > len(groups) {
 			return fmt.Errorf("%w: line %d names aggregate group %d; the request carries %d groups",

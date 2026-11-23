@@ -1625,9 +1625,11 @@ func normalizePurchaseOrderLineKind(kind string) (string, error) {
 // calculatePurchaseOrderLines runs the exact calculator (po_calc.go) over the
 // entered rows and returns those rows with their stored money figures filled,
 // alongside the header totals. The inputs are mutated in place-ish (a new slice
-// is returned) so the caller can persist exactly what was calculated; nothing
-// here recalculates on read. The line kind is normalized here because every
-// writer persists this returned slice.
+// is returned) so the caller can persist exactly what was calculated. The line
+// kind is validated here but left exactly as submitted: the line writer is the
+// one place that resolves the compatibility empty string, and erasing it here
+// would lose the distinction between a client that cannot express an extra line
+// and a newer one that deliberately reclassifies it (#648).
 func calculatePurchaseOrderLines(items []PurchaseOrderItem, _ int16, _ int64, _ string, ppnBps int16) ([]PurchaseOrderItem, PurchaseOrderCalc, error) {
 	input := PurchaseOrderCalcInput{
 		Lines:  make([]PurchaseOrderCalcLine, len(items)),
@@ -1658,13 +1660,20 @@ func calculatePurchaseOrderLines(items []PurchaseOrderItem, _ int16, _ int64, _ 
 				ErrPurchaseOrderLineKindInvalid, index+1)
 		}
 		calculated := calculation.Lines[index]
-		item.LineKind = kind
 		item.GrossMinor = calculated.GrossMinor
 		item.DiscountMinor = calculated.DiscountMinor
 		item.NetMinor = calculated.NetMinor
 		lines[index] = item
 	}
 	return lines, calculation, nil
+}
+
+// purchaseOrderStoredLine is one live line as the shared writer read it, with
+// the durable alias it was stored under. The alias is part of identity: it
+// survives a save that has not learned the row's new id yet.
+type purchaseOrderStoredLine struct {
+	item      PurchaseOrderItem
+	clientKey string
 }
 
 // replacePurchaseOrderItems stores the submitted lines as the purchase
@@ -1704,7 +1713,13 @@ func replacePurchaseOrderItems(ctx context.Context, tx pgx.Tx, schema, orgID str
 	// The column is NOT NULL, and an INSERT that names it with '' bypasses the
 	// database default. Resolve the compatibility meaning once, before any row
 	// is touched, so every writer stores an explicit kind.
+	//
+	// #648: the empty string also has to stay distinguishable from an explicit
+	// quotation, because only the newer client may reclassify an extra line.
+	// Capture that before normalization erases it.
+	legacyKind := make([]bool, len(items))
 	for index := range items {
+		legacyKind[index] = items[index].LineKind == ""
 		kind, kindErr := normalizePurchaseOrderLineKind(items[index].LineKind)
 		if kindErr != nil {
 			return nil, nil, fmt.Errorf("%w: line %d", kindErr, index+1)
@@ -1723,10 +1738,6 @@ func replacePurchaseOrderItems(ctx context.Context, tx pgx.Tx, schema, orgID str
 	if parentOrg != orgID {
 		return nil, nil, ErrPurchaseOrderNotFound
 	}
-	type storedLine struct {
-		item      PurchaseOrderItem
-		clientKey string
-	}
 	rows, err := tx.Query(ctx, fmt.Sprintf(`
 		SELECT id, COALESCE(client_key, ''), description, quotation_item_no,
 		       quotation_sub_no, quantity_scaled, uom, unit_price_minor,
@@ -1738,9 +1749,9 @@ func replacePurchaseOrderItems(ctx context.Context, tx pgx.Tx, schema, orgID str
 	if err != nil {
 		return nil, nil, fmt.Errorf("load purchase order lines: %w", err)
 	}
-	existing := make([]storedLine, 0, len(items)+2)
+	existing := make([]purchaseOrderStoredLine, 0, len(items)+2)
 	for rows.Next() {
-		var line storedLine
+		var line purchaseOrderStoredLine
 		var itemNo, subNo pgtype.Int4
 		var descriptionLines []byte
 		if err := rows.Scan(&line.item.ID, &line.clientKey, &line.item.Description,
@@ -1885,6 +1896,14 @@ func replacePurchaseOrderItems(ctx context.Context, tx pgx.Tx, schema, orgID str
 		if !claimed[index] {
 			removed = append(removed, line.item.ID)
 		}
+	}
+	// #648: a submitted empty kind cannot express "extra". If such a line keeps
+	// a stored extra row, writing the normalized quotation value would move the
+	// amount from Extra Expense to Uncosted without the client knowing, so the
+	// save is refused before any line is deleted or rewritten. An explicit kind
+	// -- quotation included -- is the newer client speaking and is allowed.
+	if err := refuseLegacyExtraReclassification(items, legacyKind, existing, claimed, resolved); err != nil {
+		return nil, nil, err
 	}
 	if len(removed) > 0 {
 		if _, err := tx.Exec(ctx, fmt.Sprintf(`
@@ -2052,6 +2071,51 @@ func resolvedClaim(resolved []int, index, match int) int {
 		}
 	}
 	return index
+}
+
+// refuseLegacyExtraReclassification refuses a save from a client that predates
+// #655 (an empty submitted kind) when it would keep a stored extra line under
+// the normalized quotation kind. The amount would move from Extra Expense to
+// Uncosted for a line the client cannot see as different, so the same
+// names-the-line 409 as a legacy aggregate overwrite is the safe answer.
+//
+// A resolved match covers the row id an older editor still sends and the
+// durable client alias. When the payload carries neither, the writer would
+// insert a new row and delete the stored one -- the same silent
+// reclassification by another route -- so an unclaimed row with the same
+// entered values, kind aside, is refused too.
+func refuseLegacyExtraReclassification(
+	items []PurchaseOrderItem,
+	legacyKind []bool,
+	existing []purchaseOrderStoredLine,
+	claimed []bool,
+	resolved []int,
+) error {
+	for index, item := range items {
+		if !legacyKind[index] {
+			continue
+		}
+		match := resolved[index]
+		if match < 0 {
+			for candidate, line := range existing {
+				if claimed[candidate] {
+					continue
+				}
+				stored := line.item
+				stored.LineKind = item.LineKind
+				if purchaseOrderLineValuesEqual(stored, item) {
+					match = candidate
+					break
+				}
+			}
+		}
+		if match >= 0 && existing[match].item.LineKind == PurchaseOrderLineKindExtra {
+			return fmt.Errorf(
+				"%w: line %d keeps an extra line this client cannot represent; update Vera to edit it",
+				ErrPurchaseOrderClientOutdated, index+1)
+		}
+	}
+	return nil
 }
 
 // purchaseOrderLineValuesEqual compares the entered line values, not the
