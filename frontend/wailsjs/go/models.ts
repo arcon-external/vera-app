@@ -2364,6 +2364,8 @@ export namespace backend {
 	    GroupKey: string;
 	    ParentDescription: string;
 	    DescriptionLines: string[];
+	    QuotedUnitPriceMinor?: number;
+	    RemainingQuantityScaled?: number;
 
 	    static createFrom(source: any = {}) {
 	        return new PurchaseOrderItemDTO(source);
@@ -2388,6 +2390,8 @@ export namespace backend {
 	        this.GroupKey = source["GroupKey"];
 	        this.ParentDescription = source["ParentDescription"];
 	        this.DescriptionLines = source["DescriptionLines"];
+	        this.QuotedUnitPriceMinor = source["QuotedUnitPriceMinor"];
+	        this.RemainingQuantityScaled = source["RemainingQuantityScaled"];
 	    }
 	}
 	export class PurchaseOrderDTO {
@@ -2716,6 +2720,7 @@ export namespace backend {
 	    DiscountPercent: number;
 	    ParentDescription: string;
 	    DescriptionLines: string[];
+	    QuotedUnitPriceMinor: number;
 
 	    static createFrom(source: any = {}) {
 	        return new PurchaseOrderSourceLineDTO(source);
@@ -2734,6 +2739,7 @@ export namespace backend {
 	        this.DiscountPercent = source["DiscountPercent"];
 	        this.ParentDescription = source["ParentDescription"];
 	        this.DescriptionLines = source["DescriptionLines"];
+	        this.QuotedUnitPriceMinor = source["QuotedUnitPriceMinor"];
 	    }
 	}
 	export class PurchaseOrderSourceDTO {
@@ -4074,6 +4080,50 @@ export namespace poreport {
 	        this.currency = source["currency"];
 	    }
 	}
+	export class PipelineSummary {
+	    unsoldAmountMinor: number;
+	    unsoldMarginMinor: number;
+
+	    static createFrom(source: any = {}) {
+	        return new PipelineSummary(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.unsoldAmountMinor = source["unsoldAmountMinor"];
+	        this.unsoldMarginMinor = source["unsoldMarginMinor"];
+	    }
+	}
+	export class VarianceSummary {
+	    quantityExtraIncomeAmountMinor: number;
+	    quantityExtraIncomeMarginMinor: number;
+	    unsoldAmountMinor: number;
+	    unsoldMarginMinor: number;
+	    closedLossAmountMinor: number;
+	    closedLossMarginMinor: number;
+	    priceExtraIncomeMinor: number;
+	    priceLossMinor: number;
+	    netRealizedVarianceAmountMinor: number;
+	    netRealizedVarianceMarginMinor: number;
+
+	    static createFrom(source: any = {}) {
+	        return new VarianceSummary(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.quantityExtraIncomeAmountMinor = source["quantityExtraIncomeAmountMinor"];
+	        this.quantityExtraIncomeMarginMinor = source["quantityExtraIncomeMarginMinor"];
+	        this.unsoldAmountMinor = source["unsoldAmountMinor"];
+	        this.unsoldMarginMinor = source["unsoldMarginMinor"];
+	        this.closedLossAmountMinor = source["closedLossAmountMinor"];
+	        this.closedLossMarginMinor = source["closedLossMarginMinor"];
+	        this.priceExtraIncomeMinor = source["priceExtraIncomeMinor"];
+	        this.priceLossMinor = source["priceLossMinor"];
+	        this.netRealizedVarianceAmountMinor = source["netRealizedVarianceAmountMinor"];
+	        this.netRealizedVarianceMarginMinor = source["netRealizedVarianceMarginMinor"];
+	    }
+	}
 	export class Report {
 	    generatedAt: string;
 	    asOf: string;
@@ -4081,6 +4131,8 @@ export namespace poreport {
 	    company: Company;
 	    population: Population;
 	    totals: Metrics;
+	    pipeline: PipelineSummary;
+	    variance: VarianceSummary;
 	    periods: Period[];
 	    categories: Category[];
 	    categorySeries: CategorySeries[];
@@ -4101,6 +4153,8 @@ export namespace poreport {
 	        this.company = this.convertValues(source["company"], Company);
 	        this.population = this.convertValues(source["population"], Population);
 	        this.totals = this.convertValues(source["totals"], Metrics);
+	        this.pipeline = this.convertValues(source["pipeline"], PipelineSummary);
+	        this.variance = this.convertValues(source["variance"], VarianceSummary);
 	        this.periods = this.convertValues(source["periods"], Period);
 	        this.categories = this.convertValues(source["categories"], Category);
 	        this.categorySeries = this.convertValues(source["categorySeries"], CategorySeries);

@@ -38,6 +38,7 @@ import {
   newPurchaseOrderLineKey,
   PURCHASE_ORDER_BUSINESS_CATEGORY_OPTIONS,
   purchaseOrderEditorReducer,
+  sourceStateOf,
   type PurchaseOrderBusinessCategory,
   type PurchaseOrderDTO,
   type PurchaseOrderEditorAction,
@@ -50,6 +51,7 @@ import {
   draftLinkCurrencyRemedy,
   planDraftLink,
 } from "../poDraftLink";
+import type { POSourceAvailability } from "../poSelector";
 import {
   InlineQuoteField,
   InlineQuoteSelect,
@@ -135,6 +137,8 @@ export interface PurchaseOrderEditorViewProps {
   /** Exact quotation values for the inline field bars and ghost items. */
   quoteSource?: ReconciliationSourceValues | null;
   quoteLines?: PurchaseOrderSourceLineDTO[] | null;
+  /** #653: the current bought state, used for remaining-quantity badges. */
+  availability?: POSourceAvailability | null;
   /** Safe deferred linking for #497; it never replaces or creates a record. */
   onLinkQuotation?: () => void;
   onSave: () => void;
@@ -213,6 +217,15 @@ export interface PurchaseOrderEditorPageProps {
   incotermOptions: { value: string; label: string }[];
   /** #497: the shared selector confirmed an exact pair; link it inline. */
   onLinkQuotation?: () => void;
+  /**
+   * #653: reads the current bought state for this draft's source, so ghost
+   * lines use the remaining quantity and the inline badges compare against the
+   * current answer. Optional for standalone harnesses.
+   */
+  loadAvailability?: (
+    quotationId: number,
+    revision: number
+  ) => Promise<POSourceAvailability>;
   /**
    * Reports the stored record. `corrected` is true when this save went through
    * the correction flow, including a draft that was transitioned into one after
@@ -615,6 +628,7 @@ export function PurchaseOrderEditorView({
   incotermOptions,
   quoteSource = null,
   quoteLines = null,
+  availability = null,
   onLinkQuotation,
   onSave,
   onCancel,
@@ -675,8 +689,8 @@ export function PurchaseOrderEditorView({
   const [ghostRejected, setGhostRejected] = useState<Set<number>>(new Set());
 
   const sourceItems = useMemo(
-    () => groupSourceItems(quoteLines ?? []),
-    [quoteLines]
+    () => groupSourceItems(quoteLines ?? [], availability),
+    [quoteLines, availability]
   );
   const ghostAttachments = useMemo(() => {
     const attached: { item: SourceItem; groupKey: string; lineKey: number }[] = [];
@@ -1910,6 +1924,7 @@ export function PurchaseOrderEditorPage({
   uomOptions,
   incotermOptions,
   onLinkQuotation,
+  loadAvailability,
   pendingLinkTarget = null,
   onLinkTargetHandled,
   onLinked,
@@ -1956,6 +1971,40 @@ export function PurchaseOrderEditorPage({
   const [conflict, setConflict] = useState<PurchaseOrderConflictDTO | null>(null);
   // Which write the warning belongs to: Overwrite resumes the same one.
   const [pendingWrite, setPendingWrite] = useState<"save" | "finalize">("save");
+
+  // #653: the current bought state for this draft's pinned source. It is
+  // advisory: a failed read leaves the badges to the server DTO's own frozen
+  // baseline/remaining values rather than blocking the editor.
+  const [availability, setAvailability] = useState<POSourceAvailability | null>(
+    null
+  );
+  useEffect(() => {
+    if (
+      loadAvailability === undefined ||
+      order.QuotationID < 1 ||
+      sourceStateOf(order) !== "live"
+    ) {
+      setAvailability(null);
+      return;
+    }
+    let active = true;
+    void loadAvailability(order.QuotationID, order.SourceRevision)
+      .then((value) => {
+        if (active) setAvailability(value);
+      })
+      .catch(() => {
+        if (active) setAvailability(null);
+      });
+    return () => {
+      active = false;
+    };
+  }, [
+    loadAvailability,
+    order.ID,
+    order.QuotationID,
+    order.SourceRevision,
+    order.SourceState,
+  ]);
 
   // #497: the link runs immediately. The exact source is previewed only to
   // learn what is available; every current PO value is kept, so the editor can
@@ -3141,6 +3190,7 @@ export function PurchaseOrderEditorPage({
           incotermOptions={incotermOptions}
           quoteSource={compareSource}
           quoteLines={compareLines}
+          availability={availability}
           onLinkQuotation={onLinkQuotation}
           onSave={() => void save(state.version, false)}
           onCancel={onCancel}

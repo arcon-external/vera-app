@@ -162,6 +162,8 @@ func (s *Server) getPurchaseOrderReport(context echo.Context) error {
 			SourceMissingPoCount: snapshot.SourceMissingPoCount,
 		},
 		Totals:            snapshot.Totals,
+		Pipeline:          snapshot.Pipeline,
+		Variance:          snapshot.Variance,
 		Periods:           snapshot.Periods,
 		Categories:        snapshot.Categories,
 		CategorySeries:    snapshot.CategorySeries,

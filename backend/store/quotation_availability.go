@@ -210,7 +210,7 @@ func getQuotationAvailability(
 			DraftQuantityScaled:      pair.draft,
 			RemainingQuantityScaled:  remaining,
 			OverBoughtQuantityScaled: overBought,
-			QuotedUnitPriceMinor:     line.quotedUnitPriceMinor,
+			QuotedUnitPriceMinor:     line.QuotedUnitPriceMinor,
 		})
 		if remaining > 0 {
 			availability.AllBought = false

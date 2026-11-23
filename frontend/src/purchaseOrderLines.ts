@@ -116,6 +116,8 @@ function subItemFromLine(
     discountEnabled: line.discountEnabled,
     discountPercent: line.discountPercent,
     bullets: line.descriptionLines,
+    quotedUnitPriceMinor: line.quotedUnitPriceMinor ?? null,
+    remainingQuantityScaled: line.remainingQuantityScaled ?? null,
   };
 }
 
@@ -145,6 +147,8 @@ export function editorItemsFromGroups(
         discountPercent: line.discountPercent,
         subItems: [],
         showSubPrices: true,
+        quotedUnitPriceMinor: line.quotedUnitPriceMinor ?? null,
+        remainingQuantityScaled: line.remainingQuantityScaled ?? null,
       };
     }
     const first = group.lines[0];

@@ -423,6 +423,10 @@ describe("PurchaseOrderReportOverview (issue #644)", () => {
     expect(view.querySelector("details")).toBeNull();
     expect(visibleText(view)).not.toContain("PO amount");
     expect(view.querySelector("[data-report-overview-updating]")).toBeNull();
+    // #653 NB1: Pipeline is period/category independent, so the two cards
+    // stay visible even when the selected Actual period has no saved POs.
+    expect(view.querySelector("[data-report-pipeline-card]")).not.toBeNull();
+    expect(view.querySelector("[data-report-variance-card]")).not.toBeNull();
     expect(reportMock).not.toHaveBeenCalled();
   });
 
@@ -590,6 +594,38 @@ describe("PurchaseOrderReportOverview (issue #644)", () => {
     expect(kpiValue("PO amount")).toBe("Rp9.007.199.254.740.991");
     expect(kpiValue("PO margin %")).toBe("0.00%");
     expect(reportMock).not.toHaveBeenCalled();
+  });
+
+  it("keeps Pipeline and Realized Variance in separate cards, never inside Actual (#653)", async () => {
+    await render();
+    const actual = overview().querySelector<HTMLElement>(
+      "[data-report-overview-actual]"
+    );
+    expect(actual?.textContent).not.toContain("Pipeline");
+    expect(actual?.textContent).not.toContain("Realized Variance");
+
+    const pipeline = overview().querySelector<HTMLElement>(
+      "[data-report-pipeline-card]"
+    );
+    expect(pipeline).not.toBeNull();
+    expect(pipeline?.textContent).toContain("Pipeline — Unsold");
+    expect(pipeline?.textContent).toContain(
+      "Unsold is not a loss and is not added to Actual."
+    );
+    expect(pipeline?.textContent).toContain("Rp42.000.000");
+
+    const variance = overview().querySelector<HTMLElement>(
+      "[data-report-variance-card]"
+    );
+    expect(variance).not.toBeNull();
+    expect(variance?.textContent).toContain("Realized Variance");
+    expect(variance?.textContent).toContain("Quantity extra income");
+    expect(variance?.textContent).toContain("Price extra income");
+    expect(variance?.textContent).toContain("Price loss");
+    expect(variance?.textContent).toContain("−Rp3.500.000");
+    expect(variance?.textContent).toContain("Closed loss");
+    expect(variance?.textContent).toContain("Net realized variance");
+    expect(variance?.textContent).toContain("Rp4.000.000");
   });
 
   it("keeps a signed KPI loss and a null percentage instead of inventing zero", async () => {

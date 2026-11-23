@@ -38,6 +38,22 @@ function reportFixture(): poreport.Report {
       marginBps: 0,
       coverageBps: 6667,
     },
+    pipeline: {
+      unsoldAmountMinor: 0,
+      unsoldMarginMinor: 0,
+    },
+    variance: {
+      quantityExtraIncomeAmountMinor: 0,
+      quantityExtraIncomeMarginMinor: 0,
+      unsoldAmountMinor: 0,
+      unsoldMarginMinor: 0,
+      closedLossAmountMinor: 0,
+      closedLossMarginMinor: 0,
+      priceExtraIncomeMinor: 0,
+      priceLossMinor: 0,
+      netRealizedVarianceAmountMinor: 0,
+      netRealizedVarianceMarginMinor: 0,
+    },
     periods: [
       {
         periodStart: "2026-03-01",

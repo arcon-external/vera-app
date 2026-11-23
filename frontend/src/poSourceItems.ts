@@ -1,4 +1,5 @@
 import type { PurchaseOrderSourceLineDTO } from "./poFinalize";
+import type { POSourceAvailability } from "./poSelector";
 import {
   formatQuantityScaled,
   formatUnitPriceMinor,
@@ -17,6 +18,10 @@ export interface SourceSubItem {
   uom: string;
   quantityScaled: number;
   unitPriceMinor: number;
+  /** The row-discounted quotation baseline for this leaf (#653). */
+  quotedUnitPriceMinor: number;
+  /** The quantity still orderable, or null when no availability read exists. */
+  remainingQuantityScaled: number | null;
   discountEnabled: boolean;
   discountPercent: number;
   descriptionLines: string[];
@@ -29,6 +34,10 @@ export interface SourceItem {
   uom: string;
   quantityScaled: number;
   unitPriceMinor: number;
+  /** The row-discounted quotation baseline for this leaf (#653). */
+  quotedUnitPriceMinor: number;
+  /** The quantity still orderable, or null when no availability read exists. */
+  remainingQuantityScaled: number | null;
   discountEnabled: boolean;
   discountPercent: number;
   descriptionLines: string[];
@@ -45,10 +54,29 @@ function subTotal(sub: SourceSubItem): number {
  * Groups the frozen source lines into one item per quotation item number.
  * Priced parts stay inside the item; a plain line is an item of one.
  */
-export function groupSourceItems(lines: PurchaseOrderSourceLineDTO[]): SourceItem[] {
+export function groupSourceItems(
+  lines: PurchaseOrderSourceLineDTO[],
+  availability?: POSourceAvailability | null
+): SourceItem[] {
+  const availabilityByLeaf = new Map<
+    string,
+    { remaining: number; quoted: number }
+  >();
+  for (const item of availability?.items ?? []) {
+    availabilityByLeaf.set(
+      `${item.quotationItemNo}.${item.quotationSubNo ?? ""}`,
+      {
+        remaining: item.remainingQuantityScaled,
+        quoted: item.quotedUnitPriceMinor,
+      }
+    );
+  }
+  const leaf = (itemNo: number, subNo: number | null) =>
+    availabilityByLeaf.get(`${itemNo}.${subNo ?? ""}`);
   const byItem = new Map<number, SourceItem>();
   const order: number[] = [];
   for (const line of lines) {
+    const server = leaf(line.QuotationItemNo, line.QuotationSubNo ?? null);
     const existing = byItem.get(line.QuotationItemNo);
     if (line.QuotationSubNo === null || line.QuotationSubNo === undefined) {
       if (existing === undefined) order.push(line.QuotationItemNo);
@@ -59,6 +87,9 @@ export function groupSourceItems(lines: PurchaseOrderSourceLineDTO[]): SourceIte
         uom: line.UoM,
         quantityScaled: line.QuantityScaled,
         unitPriceMinor: line.UnitPriceMinor,
+        quotedUnitPriceMinor:
+          server?.quoted ?? line.QuotedUnitPriceMinor ?? line.UnitPriceMinor,
+        remainingQuantityScaled: server?.remaining ?? line.QuantityScaled,
         discountEnabled: line.DiscountEnabled,
         discountPercent: line.DiscountPercent,
         descriptionLines: [...(line.DescriptionLines ?? [])],
@@ -75,6 +106,8 @@ export function groupSourceItems(lines: PurchaseOrderSourceLineDTO[]): SourceIte
         uom: line.UoM,
         quantityScaled: 10_000,
         unitPriceMinor: 0,
+        quotedUnitPriceMinor: 0,
+        remainingQuantityScaled: null,
         discountEnabled: false,
         discountPercent: 0,
         descriptionLines: [],
@@ -91,6 +124,9 @@ export function groupSourceItems(lines: PurchaseOrderSourceLineDTO[]): SourceIte
       uom: line.UoM,
       quantityScaled: line.QuantityScaled,
       unitPriceMinor: line.UnitPriceMinor,
+      quotedUnitPriceMinor:
+        server?.quoted ?? line.QuotedUnitPriceMinor ?? line.UnitPriceMinor,
+      remainingQuantityScaled: server?.remaining ?? line.QuantityScaled,
       discountEnabled: line.DiscountEnabled,
       discountPercent: line.DiscountPercent,
       descriptionLines: [...(line.DescriptionLines ?? [])],
@@ -116,13 +152,11 @@ function lineMatchesSub(
   if (line.description.trim() !== sub.description.trim()) return false;
   if (line.uom !== sub.uom) return false;
   const quantity = parseQuantityScaled(line.quantity);
-  if (quantity === null || quantity !== sub.quantityScaled) return false;
+  const wantedQuantity = sub.remainingQuantityScaled ?? sub.quantityScaled;
+  if (quantity === null || quantity !== wantedQuantity) return false;
   const price = parseUnitPriceMinor(currency, line.unitPrice);
-  if (price === null || price !== sub.unitPriceMinor) return false;
-  if (line.discountEnabled !== sub.discountEnabled) return false;
-  if (line.discountEnabled && Number.parseInt(line.discountPercent, 10) !== sub.discountPercent) {
-    return false;
-  }
+  if (price === null || price !== sub.quotedUnitPriceMinor) return false;
+  if (line.discountEnabled) return false;
   const bullets = line.descriptionLines;
   if (bullets.length !== sub.descriptionLines.length) return false;
   return bullets.every((value, index) => value === sub.descriptionLines[index]);
@@ -134,7 +168,10 @@ function subDescriptionItemNo(sub: SourceSubItem): number {
 
 /**
  * True when the purchase order already carries exactly this quotation item:
- * every priced part is present with the same values and description lines.
+ * every priced part is present with the same quantity, negotiated price and
+ * description lines. A changed value reopens the ghost, because the order no
+ * longer follows this quotation item exactly; #653's inline badges explain the
+ * difference while the ghost is still on screen.
  */
 export function sourceItemApplied(
   item: SourceItem,
@@ -155,12 +192,11 @@ export function sourceItemApplied(
   if (line.description.trim() !== item.description.trim()) return false;
   if (line.uom !== item.uom) return false;
   const quantity = parseQuantityScaled(line.quantity);
+  const wantedQuantity = item.remainingQuantityScaled ?? item.quantityScaled;
   const price = parseUnitPriceMinor(currency, line.unitPrice);
-  if (quantity !== item.quantityScaled || price !== item.unitPriceMinor) return false;
-  if (line.discountEnabled !== item.discountEnabled) return false;
-  if (line.discountEnabled && Number.parseInt(line.discountPercent, 10) !== item.discountPercent) {
-    return false;
-  }
+  if (quantity === null || quantity !== wantedQuantity) return false;
+  if (price === null || price !== item.quotedUnitPriceMinor) return false;
+  if (line.discountEnabled) return false;
   if (line.descriptionLines.length !== item.descriptionLines.length) return false;
   return line.descriptionLines.every(
     (value, index) => value === item.descriptionLines[index]
@@ -177,37 +213,55 @@ export function linesFromSourceItem(
   startKey: number
 ): PurchaseOrderLine[] {
   if (item.subItems.length > 0) {
-    return item.subItems.map((sub, index) => ({
-      key: startKey + index,
-      clientKey: newClientKey(),
-      description: sub.description,
-      quantity: formatQuantityScaled(sub.quantityScaled),
-      uom: sub.uom,
-      unitPrice: formatUnitPriceMinor(currency, sub.unitPriceMinor),
-      discountEnabled: sub.discountEnabled,
-      discountPercent: String(sub.discountPercent),
-      quotationItemNo: item.itemNo,
-      quotationSubNo: sub.subNo,
-      groupKey: `q:${item.itemNo}`,
-      parentDescription: item.description,
-      descriptionLines: [...sub.descriptionLines],
-    }));
+    return item.subItems.map((sub, index) => {
+      const quantityScaled =
+        sub.remainingQuantityScaled !== null && sub.remainingQuantityScaled > 0
+          ? sub.remainingQuantityScaled
+          : sub.quantityScaled;
+      return {
+        key: startKey + index,
+        clientKey: newClientKey(),
+        description: sub.description,
+        quantity: formatQuantityScaled(quantityScaled),
+        uom: sub.uom,
+        unitPrice: formatUnitPriceMinor(currency, sub.quotedUnitPriceMinor),
+        discountEnabled: false,
+        discountPercent: "0",
+        quotationItemNo: item.itemNo,
+        quotationSubNo: sub.subNo,
+        groupKey: `q:${item.itemNo}`,
+        parentDescription: item.description,
+        descriptionLines: [...sub.descriptionLines],
+        quotedUnitPriceMinor: sub.quotedUnitPriceMinor,
+        remainingQuantityScaled:
+          sub.remainingQuantityScaled !== null
+            ? quantityScaled
+            : null,
+      };
+    });
   }
+  const quantityScaled =
+    item.remainingQuantityScaled !== null && item.remainingQuantityScaled > 0
+      ? item.remainingQuantityScaled
+      : item.quantityScaled;
   return [
     {
       key: startKey,
       clientKey: newClientKey(),
       description: item.description,
-      quantity: formatQuantityScaled(item.quantityScaled),
+      quantity: formatQuantityScaled(quantityScaled),
       uom: item.uom,
-      unitPrice: formatUnitPriceMinor(currency, item.unitPriceMinor),
-      discountEnabled: item.discountEnabled,
-      discountPercent: String(item.discountPercent),
+      unitPrice: formatUnitPriceMinor(currency, item.quotedUnitPriceMinor),
+      discountEnabled: false,
+      discountPercent: "0",
       quotationItemNo: item.itemNo,
       quotationSubNo: null,
       groupKey: "",
       parentDescription: "",
       descriptionLines: [...item.descriptionLines],
+      quotedUnitPriceMinor: item.quotedUnitPriceMinor,
+      remainingQuantityScaled:
+        item.remainingQuantityScaled !== null ? quantityScaled : null,
     },
   ];
 }

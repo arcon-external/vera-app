@@ -236,3 +236,45 @@ func TestPOSourceListCarriesBoughtStateBadges(t *testing.T) {
 		t.Errorf("draft row badges = %+v; want partial with one advisory draft", row)
 	}
 }
+
+// TestPurchaseOrderDraftExposesTheQuotedBaselineWithoutSupplierCost pins the
+// #653 workspace shape: each source-backed PO line carries the frozen
+// row-discounted quotation price and the quantity still orderable, and neither
+// field is a supplier cost (Story 42).
+func TestPurchaseOrderDraftExposesTheQuotedBaselineWithoutSupplierCost(t *testing.T) {
+	server, token := testQuotationServer(t, "vera_api_po_baseline")
+	quotationID, _ := exportForSelector(t, server, token, quotationInput())
+
+	code, body := createPODraft(t, server, token, quotationID, 0, nil)
+	if code != http.StatusCreated {
+		t.Fatalf("create = %d (%v); want 201", code, body)
+	}
+	draft := decodePurchaseOrder(t, body)
+	if len(draft.Items) != 2 {
+		t.Fatalf("lines = %d; want 2", len(draft.Items))
+	}
+	first, second := draft.Items[0], draft.Items[1]
+	// The broad fixture has 2 x 120000 at a 10% row discount, and 1 x 50000 at
+	// the same discount. The baseline is what the customer agreed to.
+	if first.QuotedUnitPriceMinor == nil || *first.QuotedUnitPriceMinor != 108_000 ||
+		first.RemainingQuantityScaled == nil || *first.RemainingQuantityScaled != 20_000 {
+		t.Errorf("line 1 baseline/remaining = %v/%v; want 108000/20000",
+			first.QuotedUnitPriceMinor, first.RemainingQuantityScaled)
+	}
+	if second.QuotedUnitPriceMinor == nil || *second.QuotedUnitPriceMinor != 45_000 ||
+		second.RemainingQuantityScaled == nil || *second.RemainingQuantityScaled != 10_000 {
+		t.Errorf("line 2 baseline/remaining = %v/%v; want 45000/10000",
+			second.QuotedUnitPriceMinor, second.RemainingQuantityScaled)
+	}
+
+	raw, err := json.Marshal(body)
+	if err != nil {
+		t.Fatalf("marshal PO draft: %v", err)
+	}
+	lower := strings.ToLower(string(raw))
+	for _, forbidden := range []string{"costunit", "costminor", "cost_unit", "marginminor", "pph"} {
+		if strings.Contains(lower, forbidden) {
+			t.Errorf("PO workspace leaked %q: %s", forbidden, raw)
+		}
+	}
+}

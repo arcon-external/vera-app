@@ -713,20 +713,27 @@ func TestPurchaseOrderReportFiltersCategoriesUnassignedAndFacets(t *testing.T) {
 }
 
 // TestPurchaseOrderReportKeepsLossesDiscountsAndPPNOutOfTheFigures proves three
-// independently locked rules: a discount can make PO margin negative, PPN is
-// excluded from amount, costed, capital and margin, and the signed figures stay
-// signed rather than clamping at zero.
+// independently locked rules: a negotiated price below cost can make PO margin
+// negative, PPN is excluded from amount, costed, capital and margin, and the
+// signed figures stay signed rather than clamping at zero.
 func TestPurchaseOrderReportKeepsLossesDiscountsAndPPNOutOfTheFigures(t *testing.T) {
 	database := openTestSchema(t, "vera_po_report_loss_ppn")
 	ctx := poContext(t, database)
 	user := poTestUser(t, database)
 	loss := seedReportQuotation(t, database, 2, "PT. Buyer", "Loss source", "IDR", "NonFTZ",
 		[]reportQuotationLine{{
-			Description: "Discounted line", UoM: "Pc", Qty: 1, Cost: 100, Sell: 120,
-			DiscountEnabled: true, DiscountPercent: 50,
+			Description: "Negotiated below cost", UoM: "Pc", Qty: 1, Cost: 100, Sell: 120,
 		}})
+	// #653: the variance is the negotiated price against the quotation, not a
+	// hidden row discount. A PO at 60 against a 120 quote and a 100 cost is a
+	// real price loss of 60 and a margin of -40.
 	saved := finalizeReportPO(t, database, ctx, user, loss, "PO-REPORT-LOSS", "2026-03-10",
-		PurchaseOrderBusinessCategoryFm, nil)
+		PurchaseOrderBusinessCategoryFm, func(input *PurchaseOrderFinalize) {
+			input.Items[0].UnitPriceMinor = 60
+			input.Decisions = []PurchaseOrderDecision{{
+				Key: "line:1:unitPrice", Choice: PurchaseOrderChoicePO,
+			}}
+		})
 	if saved.PpnMinor <= 0 {
 		t.Fatalf("fixture PPN = %d; want a NonFTZ goods order to charge PPN", saved.PpnMinor)
 	}
@@ -825,6 +832,23 @@ func TestPurchaseOrderReportUsesSubItemCostWithoutFanout(t *testing.T) {
 	}
 	if report.Totals.MarginMinor != 700 {
 		t.Errorf("margin = %d; want 1000 - 300 = 700", report.Totals.MarginMinor)
+	}
+	// #653: the package's priced parts are the variance leaves. Buying two of
+	// each part leaves nothing Unsold and earns one extra unit of each part:
+	// 300 + 200 at the quoted baseline, less 100 + 50 of frozen cost.
+	if report.Pipeline.UnsoldAmountMinor != 0 || report.Pipeline.UnsoldMarginMinor != 0 {
+		t.Errorf("package pipeline = %d/%d; want 0/0",
+			report.Pipeline.UnsoldAmountMinor, report.Pipeline.UnsoldMarginMinor)
+	}
+	if report.Variance.QuantityExtraIncomeAmountMinor != 500 ||
+		report.Variance.QuantityExtraIncomeMarginMinor != 350 {
+		t.Errorf("package quantity extra = %d/%d; want 500/350",
+			report.Variance.QuantityExtraIncomeAmountMinor,
+			report.Variance.QuantityExtraIncomeMarginMinor)
+	}
+	if report.Variance.PriceLossMinor != 0 || report.Variance.PriceExtraIncomeMinor != 0 {
+		t.Errorf("package price variance = loss %d / extra %d; want 0/0",
+			report.Variance.PriceLossMinor, report.Variance.PriceExtraIncomeMinor)
 	}
 }
 

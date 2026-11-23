@@ -43,6 +43,13 @@ export interface PurchaseOrderDTOItem {
   GroupKey?: string;
   ParentDescription?: string;
   DescriptionLines?: string[];
+  /**
+   * #653: the frozen row-discounted quotation baseline and the quantity still
+   * orderable on this leaf. Workspace-only customer-facing values, never
+   * supplier cost; absent on payloads from an older server.
+   */
+  QuotedUnitPriceMinor?: number | null;
+  RemainingQuantityScaled?: number | null;
 }
 
 /** The printed source figures the quotation revision carried (issue #470). */
@@ -241,6 +248,13 @@ export interface PurchaseOrderLine {
   parentDescription: string;
   /** Description bullets on a plain line, or sub-sub lines on a sub-item. */
   descriptionLines: string[];
+  /**
+   * #653: the quotation baseline this negotiated line is compared against and
+   * the quantity still orderable. Null means the server did not know (a blank
+   * or former-source draft), so no variance badge is invented.
+   */
+  quotedUnitPriceMinor?: number | null;
+  remainingQuantityScaled?: number | null;
 }
 
 /** Editable header fields. The customer snapshot and source are read-only. */
@@ -413,6 +427,78 @@ export function parseQuantityScaled(raw: string): number | null {
     return null;
   }
   return scaled;
+}
+
+/** One inline variance badge on a purchase-order line (#653). */
+export interface PurchaseOrderVarianceBadge {
+  kind: "unsold" | "quantityExtra" | "priceLoss" | "priceExtra";
+  tone: "neutral" | "positive" | "danger";
+  label: string;
+}
+
+/**
+ * The inline badges a PO line earns against its quotation baseline. The
+ * function is pure and takes scaled quantities and minor-unit prices, so the
+ * parent line, a package part and a unit test all use one rule.
+ *
+ * Unsold is never a loss: a quantity below the remaining quotation quantity is
+ * neutral. A quantity above it is extra income. A negotiated price below the
+ * baseline is a price loss; above it is price extra income. No supplier cost
+ * is an input or an output (Story 42).
+ */
+export function purchaseOrderVarianceBadges(input: {
+  quantityScaled: number;
+  unitPriceMinor: number | null;
+  quotedUnitPriceMinor?: number | null;
+  remainingQuantityScaled?: number | null;
+}, currency: CurrencyInfo): PurchaseOrderVarianceBadge[] {
+  const badges: PurchaseOrderVarianceBadge[] = [];
+  const remaining = input.remainingQuantityScaled;
+  if (
+    typeof remaining === "number" &&
+    Number.isFinite(remaining) &&
+    remaining >= 0 &&
+    Number.isFinite(input.quantityScaled) &&
+    input.quantityScaled > 0
+  ) {
+    if (input.quantityScaled < remaining) {
+      badges.push({
+        kind: "unsold",
+        tone: "neutral",
+        label: `${formatQuantityScaled(remaining - input.quantityScaled)} remaining (Unsold)`,
+      });
+    } else if (input.quantityScaled > remaining) {
+      badges.push({
+        kind: "quantityExtra",
+        tone: "positive",
+        label: `+${formatQuantityScaled(input.quantityScaled - remaining)} over quoted (Extra income)`,
+      });
+    }
+  }
+  const baseline = input.quotedUnitPriceMinor;
+  if (
+    typeof baseline === "number" &&
+    Number.isFinite(baseline) &&
+    baseline >= 0 &&
+    typeof input.unitPriceMinor === "number" &&
+    Number.isFinite(input.unitPriceMinor)
+  ) {
+    const difference = input.unitPriceMinor - baseline;
+    if (difference < 0) {
+      badges.push({
+        kind: "priceLoss",
+        tone: "danger",
+        label: `−${formatMoney(currency, -difference)}/unit vs quoted (Price loss)`,
+      });
+    } else if (difference > 0) {
+      badges.push({
+        kind: "priceExtra",
+        tone: "positive",
+        label: `+${formatMoney(currency, difference)}/unit vs quoted (Price extra income)`,
+      });
+    }
+  }
+  return badges;
 }
 
 /** Renders a scaled quantity as the shortest decimal with at most 4 places. */
@@ -992,6 +1078,8 @@ export function initialPurchaseOrderEditorState(
     groupKey: item.GroupKey ?? "",
     parentDescription: item.ParentDescription ?? "",
     descriptionLines: item.DescriptionLines ?? [],
+    quotedUnitPriceMinor: item.QuotedUnitPriceMinor ?? null,
+    remainingQuantityScaled: item.RemainingQuantityScaled ?? null,
   }));
   const state: PurchaseOrderEditorState = {
     orderId: order.ID,

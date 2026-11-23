@@ -217,21 +217,70 @@ describe("ItemEditor purchase-order mode (#573)", () => {
     ],
   };
 
-  it("hides margin but keeps sub-items and sub-sub lines", () => {
+  it("hides margin and discount but keeps sub-items and sub-sub lines", () => {
     const html = render({ items: [split], mode: "purchase-order", currency: USD });
     expect(html).not.toContain(">Margin<");
     expect(html).toContain("Sub-items: priced individually; the line totals their sum");
     expect(html).toContain("Add sub-sub-item");
     expect(html).toContain("IP54 enclosure");
     expect(html).toContain("Two technicians");
-    expect(html).toContain("Enable a discount for sub-item 1 of line 1");
-    expect(html).toContain("Discount percentage for sub-item 1 of line 1");
+    // #653: the PO has no discount column or input at either depth, and the
+    // negotiated price is labelled as a price rather than a supplier cost.
+    expect(html).not.toContain(">Discount<");
+    expect(html).not.toContain(">Unit cost<");
+    expect(html).toContain(">Unit price<");
+    expect(html).not.toContain("Enable a discount for sub-item 1 of line 1");
+    expect(html).not.toContain("Discount percentage for sub-item 1 of line 1");
+    expect(html).not.toContain('aria-label="Enable a discount for line 1"');
   });
 
-  it("keeps margin in quotation mode", () => {
+  it("hides the Discount column and labels the price for a plain PO row", () => {
+    const html = render({
+      items: [{ ...ITEM, unitPrice: "1000" }],
+      mode: "purchase-order",
+      currency: USD,
+    });
+    expect(html).not.toContain(">Discount<");
+    expect(html).not.toContain(">Unit cost<");
+    expect(html).toContain(">Unit price<");
+    expect(html).not.toContain('aria-label="Enable a discount for line 1"');
+  });
+
+  it("shows Unsold, extra-income and price-variance badges in PO mode", () => {
+    const item: EditorItem = {
+      ...ITEM,
+      qty: "3",
+      unitPrice: "9000",
+      quotedUnitPriceMinor: 10000,
+      remainingQuantityScaled: 50000,
+      discountEnabled: false,
+      discountPercent: "0",
+    };
+    const html = render({ items: [item], mode: "purchase-order", currency: USD });
+    expect(html).toContain('data-variance-badge="unsold"');
+    expect(html).toContain("2 remaining (Unsold)");
+    expect(html).toContain('data-variance-badge="priceLoss"');
+    expect(html).toContain("vs quoted (Price loss)");
+    expect(html).not.toContain('aria-label="Enable a discount for line 1"');
+
+    const over: EditorItem = {
+      ...item,
+      qty: "7",
+      unitPrice: "11000",
+    };
+    const extra = render({ items: [over], mode: "purchase-order", currency: USD });
+    expect(extra).toContain('data-variance-badge="quantityExtra"');
+    expect(extra).toContain("+2 over quoted (Extra income)");
+    expect(extra).toContain('data-variance-badge="priceExtra"');
+    expect(extra).toContain("vs quoted (Price extra income)");
+  });
+
+  it("keeps margin, Unit cost and Discount in quotation mode", () => {
     const html = render({ items: [{ ...ITEM, unitPrice: "1000" }] });
     expect(html).toContain(">Margin<");
     expect(html).toContain("Enable profit margin for line 1");
+    expect(html).toContain(">Unit cost<");
+    expect(html).toContain(">Discount<");
   });
 
   it("multiplies a decimal PO quantity exactly", () => {

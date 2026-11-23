@@ -45,6 +45,33 @@ export interface PurchaseOrderReportMetrics {
   coverageBps: number | null;
 }
 
+/**
+ * Open Unsold remaining on still-orderable quotations (#653). It is never
+ * added to Actual and is not a loss.
+ */
+export interface PurchaseOrderReportPipeline {
+  unsoldAmountMinor: number;
+  unsoldMarginMinor: number;
+}
+
+/**
+ * Realized commercial variance (#653). It is a comparison, not revenue: open
+ * Unsold is mirrored for the screen but excluded from the net. Closed loss is
+ * the zero placeholder until #656 implements quotation closure.
+ */
+export interface PurchaseOrderReportVariance {
+  quantityExtraIncomeAmountMinor: number;
+  quantityExtraIncomeMarginMinor: number;
+  unsoldAmountMinor: number;
+  unsoldMarginMinor: number;
+  closedLossAmountMinor: number;
+  closedLossMarginMinor: number;
+  priceExtraIncomeMinor: number;
+  priceLossMinor: number;
+  netRealizedVarianceAmountMinor: number;
+  netRealizedVarianceMarginMinor: number;
+}
+
 export interface PurchaseOrderReportPeriod extends PurchaseOrderReportMetrics {
   periodStart: string;
   partial: boolean;
@@ -205,6 +232,10 @@ export interface PurchaseOrderReportData {
   company: PurchaseOrderReportCompany;
   population: PurchaseOrderReportPopulation;
   totals: PurchaseOrderReportMetrics;
+  /** Open Unsold, never added to Actual (#653). */
+  pipeline: PurchaseOrderReportPipeline;
+  /** Realized variance, never added to Actual (#653). */
+  variance: PurchaseOrderReportVariance;
   periods: PurchaseOrderReportPeriod[];
   categories: PurchaseOrderReportCategory[];
   categorySeries: PurchaseOrderReportCategorySeries[];
@@ -480,6 +511,26 @@ export function normalizePurchaseOrderReport(input: poreport.Report): PurchaseOr
       sourceMissingPoCount: input.population.sourceMissingPoCount,
     },
     totals: normalizeMetrics(input.totals),
+    pipeline: {
+      unsoldAmountMinor: input.pipeline?.unsoldAmountMinor ?? 0,
+      unsoldMarginMinor: input.pipeline?.unsoldMarginMinor ?? 0,
+    },
+    variance: {
+      quantityExtraIncomeAmountMinor:
+        input.variance?.quantityExtraIncomeAmountMinor ?? 0,
+      quantityExtraIncomeMarginMinor:
+        input.variance?.quantityExtraIncomeMarginMinor ?? 0,
+      unsoldAmountMinor: input.variance?.unsoldAmountMinor ?? 0,
+      unsoldMarginMinor: input.variance?.unsoldMarginMinor ?? 0,
+      closedLossAmountMinor: input.variance?.closedLossAmountMinor ?? 0,
+      closedLossMarginMinor: input.variance?.closedLossMarginMinor ?? 0,
+      priceExtraIncomeMinor: input.variance?.priceExtraIncomeMinor ?? 0,
+      priceLossMinor: input.variance?.priceLossMinor ?? 0,
+      netRealizedVarianceAmountMinor:
+        input.variance?.netRealizedVarianceAmountMinor ?? 0,
+      netRealizedVarianceMarginMinor:
+        input.variance?.netRealizedVarianceMarginMinor ?? 0,
+    },
     periods: input.periods.map(normalizePeriod),
     categories: input.categories.map(normalizeCategory),
     categorySeries: input.categorySeries.map(normalizeCategorySeries),

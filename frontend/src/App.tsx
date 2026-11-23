@@ -3282,6 +3282,7 @@ function App() {
             setPOSelectorRepairID(null);
             setPOSelectorOpen(true);
           }}
+          loadAvailability={loadPOSourceAvailability}
           pendingLinkTarget={pendingLinkTarget}
           onLinkTargetHandled={() => setPendingLinkTarget(null)}
           onLinked={(updated) => {

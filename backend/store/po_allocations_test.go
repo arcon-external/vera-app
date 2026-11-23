@@ -506,3 +506,57 @@ func TestCorrectionSnapshotsAndRewritesAllocationsAtomically(t *testing.T) {
 			reloaded.Items[0].QuantityScaled)
 	}
 }
+
+// TestFinalizeAndCorrectionStoreActualRevenueAgainstTheBaseline pins #653's
+// allocation contract: the negotiated revenue moves with the PO, while the
+// frozen row-discounted quotation baseline does not. The badge/report can then
+// compute the price variance from stored facts instead of re-pricing history.
+func TestFinalizeAndCorrectionStoreActualRevenueAgainstTheBaseline(t *testing.T) {
+	database := openTestSchema(t, "vera_po_alloc_revenue_baseline")
+	quotation := seedPOQuotation(t, database, "PT. Baseline Buyer", "Baseline revenue")
+	user := poTestUser(t, database)
+	ctx := poContext(t, database)
+
+	draft, err := database.CreatePurchaseOrderDraft(ctx, PurchaseOrderCreate{
+		QuotationID:    quotation.ID,
+		RevisionNumber: quotation.RevisionNumber,
+		CreatedBy:      user.ID,
+	})
+	if err != nil {
+		t.Fatalf("create draft: %v", err)
+	}
+	input := finalizeInput(draft, user, "PO-653-BASELINE")
+	input.Items[0].QuantityScaled = 2 * QuantityScale
+	input.Items[0].UnitPriceMinor = 550
+	input.Decisions = []PurchaseOrderDecision{
+		{Key: "line:1:quantity", Choice: PurchaseOrderChoicePO},
+		{Key: "line:1:unitPrice", Choice: PurchaseOrderChoicePO},
+	}
+	saved, err := database.FinalizePurchaseOrder(ctx, input)
+	if err != nil {
+		t.Fatalf("finalize: %v", err)
+	}
+
+	allocations := readAllocations(t, database, ctx, saved.ID)
+	first := allocations["1.0"]
+	if first.QuantityScaled != 2*QuantityScale || first.RevenueMinor != 1_100 ||
+		first.QuotedUnitPriceMinor != 600 {
+		t.Fatalf("finalized allocation = qty %d / revenue %d / baseline %d; want 20000/1100/600",
+			first.QuantityScaled, first.RevenueMinor, first.QuotedUnitPriceMinor)
+	}
+
+	correction := correctionInput(saved, user, "Renegotiate one unit", saved.Version)
+	correction.Items[0].QuantityScaled = QuantityScale
+	correction.Items[0].UnitPriceMinor = 500
+	corrected, err := database.CorrectPurchaseOrder(ctx, correction)
+	if err != nil {
+		t.Fatalf("correct: %v", err)
+	}
+	allocations = readAllocations(t, database, ctx, corrected.ID)
+	first = allocations["1.0"]
+	if first.QuantityScaled != QuantityScale || first.RevenueMinor != 500 ||
+		first.QuotedUnitPriceMinor != 600 {
+		t.Errorf("corrected allocation = qty %d / revenue %d / baseline %d; want 10000/500/600",
+			first.QuantityScaled, first.RevenueMinor, first.QuotedUnitPriceMinor)
+	}
+}
