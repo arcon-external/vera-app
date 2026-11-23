@@ -599,6 +599,7 @@ function newEditorLine(key: number, uom: string): PurchaseOrderLine {
     groupKey: "",
     parentDescription: "",
     descriptionLines: [],
+    aggregateKey: null,
   };
 }
 

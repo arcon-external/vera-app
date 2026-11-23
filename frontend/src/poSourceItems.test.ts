@@ -51,6 +51,7 @@ function poLine(overrides: Partial<PurchaseOrderLine> = {}): PurchaseOrderLine {
     groupKey: "",
     parentDescription: "",
     descriptionLines: [],
+    aggregateKey: null,
     ...overrides,
   };
 }
@@ -146,5 +147,30 @@ describe("linesFromSourceItem", () => {
     });
     expect(rows[1]).toMatchObject({ key: 11, quotationSubNo: 2 });
     expect(rows[1].clientKey).not.toBe(rows[0].clientKey);
+  });
+});
+
+// Issue #654: a ghost materialized straight into an aggregate must arrive with
+// its membership already set, so the following save does not ungroup it.
+describe("aggregate membership for fresh source lines (#654)", () => {
+  it("defaults a materialized item to ungrouped", () => {
+    const item = groupSourceItems([line({ QuotationItemNo: 1 })])[0];
+    const rows = linesFromSourceItem(item, IDR, 10);
+    expect(rows.map((row) => row.aggregateKey)).toEqual([null]);
+  });
+
+  it("sets the caller's aggregate key on a single fresh line", () => {
+    const item = groupSourceItems([line({ QuotationItemNo: 1 })])[0];
+    const rows = linesFromSourceItem(item, IDR, 10, 9);
+    expect(rows.map((row) => row.aggregateKey)).toEqual([9]);
+  });
+
+  it("sets it on every part of a materialized package", () => {
+    const item = groupSourceItems([
+      line({ QuotationItemNo: 2, QuotationSubNo: 1, LineLabel: "2.1", ParentDescription: "Mounting package", Description: "A" }),
+      line({ QuotationItemNo: 2, QuotationSubNo: 2, LineLabel: "2.2", ParentDescription: "Mounting package", Description: "B" }),
+    ])[0];
+    const rows = linesFromSourceItem(item, IDR, 10, 9);
+    expect(rows.map((row) => row.aggregateKey)).toEqual([9, 9]);
   });
 });

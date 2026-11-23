@@ -12,6 +12,7 @@
 
 import { formatMoney, type CurrencyInfo } from "./format";
 import type { EditorItem, EditorSubItem } from "./components/ItemEditor";
+import { displayGroupKeyOf } from "./poAggregate";
 import { parseUnitPriceMinor, type PurchaseOrderLine } from "./purchaseOrder";
 
 /** One display group: a plain line, or a split line and its sub-items. */
@@ -30,13 +31,13 @@ export interface PurchaseOrderLineGroup {
  * a row with a quotation sub-number is still a priced part of its item, so it
  * groups under the source item number. The migration backfills the same key,
  * which makes the fallback a compatibility path rather than a second rule.
+ *
+ * The rule itself lives in poAggregate.ts, because an aggregate wraps whole
+ * display groups and must apply the identical key; this is the display
+ * module's name for it, kept so existing callers keep their import.
  */
 export function effectiveGroupKey(line: PurchaseOrderLine): string {
-  if (line.groupKey !== "") return line.groupKey;
-  if (line.quotationSubNo !== null && line.quotationItemNo !== null) {
-    return `q:${line.quotationItemNo}`;
-  }
-  return "";
+  return displayGroupKeyOf(line);
 }
 
 /** The title shown above a split line, with an honest fallback. */
@@ -317,6 +318,9 @@ export function splitPlainLine(
     ...newLine,
     groupKey,
     parentDescription: title,
+    // #654: a new part of an aggregate's package belongs to the same
+    // aggregate as the row it was split from, never to none of them.
+    aggregateKey: parent.aggregateKey,
   };
   const out = [...lines];
   out[at] = grouped;
@@ -341,6 +345,8 @@ export function addSubLine(
     ...newLine,
     groupKey,
     parentDescription,
+    // #654: an extra part joins the package's aggregate with it.
+    aggregateKey: lines[last].aggregateKey,
   });
   return out;
 }

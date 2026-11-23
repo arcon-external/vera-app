@@ -164,6 +164,7 @@ describe("PO reconciliation shared contract (ticket 01)", () => {
         groupKey: "",
         parentDescription: "",
         descriptionLines: [],
+        aggregateKey: null,
       }));
       const got = comparePurchaseOrder(state, source, USD);
       const want = tc.Want.Differences
@@ -215,6 +216,7 @@ describe("PO reconciliation shared contract (ticket 01)", () => {
         unitPrice: formatUnitPriceMinor(USD, line.UnitPriceMinor),
         discountEnabled: line.DiscountEnabled, discountPercent: String(line.DiscountPercent),
         groupKey: "", parentDescription: "", descriptionLines: [],
+        aggregateKey: null,
       }));
       const got = calculatePurchaseOrder(state, USD);
       expect(got.error).toBeNull();

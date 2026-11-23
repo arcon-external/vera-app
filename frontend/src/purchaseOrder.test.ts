@@ -627,6 +627,7 @@ describe("PO explained calculation (issue #470)", () => {
         groupKey: "",
         parentDescription: "",
         descriptionLines: [],
+        aggregateKey: null,
       })),
     };
   }
@@ -1401,5 +1402,236 @@ describe("retained draft version (#584)", () => {
 
   it("uses the editor state when nothing is retained", () => {
     expect(latestPersistedVersion(41, 4, null)).toBe(4);
+  });
+});
+
+// Issue #654: one customer-facing aggregate line may wrap existing PO display
+// groups. The aggregate is presentation only; the payload carries its headers
+// as positions, never the editor's local keys, so a save that rekeys the groups
+// cannot mark the editor dirty.
+function groupedOrder(overrides: Partial<PurchaseOrderDTO> = {}): PurchaseOrderDTO {
+  return order({
+    AggregateGroups: [
+      {
+        ID: 41,
+        DisplayOrder: 1,
+        Title: "Combined items",
+        OrderedQuantityScaled: 20000,
+        OrderedUoM: "Lot",
+        ShowChildrenToCustomer: true,
+        TotalMinor: 281363,
+        DisplayUnitPriceMinor: 140682,
+      },
+    ],
+    Items: [
+      {
+        QuotationItemNo: 1,
+        QuotationSubNo: null,
+        LineNumber: 1,
+        Description: "Widget",
+        QuantityScaled: 25000,
+        UoM: "Pc",
+        UnitPriceMinor: 125050,
+        DiscountEnabled: true,
+        DiscountPercent: 10,
+        GrossMinor: 312625,
+        DiscountMinor: 31262,
+        NetMinor: 281363,
+        AggregateGroupID: 41,
+      },
+      {
+        QuotationItemNo: 2,
+        QuotationSubNo: null,
+        LineNumber: 2,
+        Description: "Mounting",
+        QuantityScaled: 10000,
+        UoM: "Unit",
+        UnitPriceMinor: 42000,
+        DiscountEnabled: false,
+        DiscountPercent: 0,
+        GrossMinor: 42000,
+        DiscountMinor: 0,
+        NetMinor: 42000,
+        AggregateGroupID: 0,
+      },
+    ],
+    ...overrides,
+  });
+}
+
+describe("aggregate header state and payload (#654)", () => {
+  it("maps DTO groups and each line's membership to editor keys", () => {
+    const dto = groupedOrder();
+    dto.AggregateGroups = [
+      dto.AggregateGroups![0],
+      {
+        ID: 42,
+        DisplayOrder: 2,
+        Title: "Second",
+        OrderedQuantityScaled: 10000,
+        OrderedUoM: "Lot",
+        ShowChildrenToCustomer: false,
+        TotalMinor: 42000,
+        DisplayUnitPriceMinor: 42000,
+      },
+    ];
+    dto.Items[1].AggregateGroupID = 42;
+    const state = initialPurchaseOrderEditorState(dto, USD);
+    expect(state.aggregateGroups.map((group) => [group.key, group.persistedId, group.title])).toEqual([
+      [0, 41, "Combined items"],
+      [1, 42, "Second"],
+    ]);
+    expect(state.aggregateGroups[0].orderedQuantity).toBe("2");
+    expect(state.lines.map((line) => line.aggregateKey)).toEqual([0, 1]);
+    expect(state.nextAggregateKey).toBe(2);
+  });
+
+  it("treats zero, null and an unknown group id as ungrouped, never as a guess", () => {
+    const dto = groupedOrder();
+    dto.Items[0].AggregateGroupID = 0;
+    dto.Items[1].AggregateGroupID = 999;
+    const state = initialPurchaseOrderEditorState(dto, USD);
+    expect(state.lines.map((line) => line.aggregateKey)).toEqual([null, null]);
+  });
+
+  it("always sends AggregateGroups, with each line's 1-based group position", () => {
+    const state = initial(groupedOrder());
+    const payload = buildPurchaseOrderUpdate(state, USD);
+    expect(payload.error).toBeNull();
+    expect(payload.input!.AggregateGroups).toEqual([
+      {
+        Title: "Combined items",
+        OrderedQuantityScaled: 20000,
+        OrderedUoM: "Lot",
+        ShowChildrenToCustomer: true,
+      },
+    ]);
+    expect(payload.input!.Items.map((item) => item.AggregateGroupIndex ?? 0)).toEqual([1, 0]);
+  });
+
+  it("sends an empty array for an order with no aggregates", () => {
+    const payload = buildPurchaseOrderUpdate(initial(), USD);
+    expect(payload.error).toBeNull();
+    expect(payload.input!.AggregateGroups).toEqual([]);
+    expect(payload.input!.Items.every((item) => (item.AggregateGroupIndex ?? 0) === 0)).toBe(true);
+  });
+
+  it("names an invalid aggregate layout before any line is built", () => {
+    const state = initial(groupedOrder());
+    state.aggregateGroups[0].title = " ";
+    const payload = buildPurchaseOrderUpdate(state, USD);
+    expect(payload.input).toBeNull();
+    expect(payload.error).toBe("Aggregate 1: title is required.");
+  });
+
+  it("marks an aggregate edit dirty and a reverted value clean", () => {
+    const state = initial(groupedOrder());
+    expect(isPurchaseOrderDirty(state)).toBe(false);
+    const changed = purchaseOrderEditorReducer(state, {
+      type: "aggregateChanged",
+      key: 0,
+      patch: { title: "Renamed" },
+    });
+    expect(isPurchaseOrderDirty(changed)).toBe(true);
+    const reverted = purchaseOrderEditorReducer(changed, {
+      type: "aggregateChanged",
+      key: 0,
+      patch: { title: "Combined items" },
+    });
+    expect(isPurchaseOrderDirty(reverted)).toBe(false);
+  });
+
+  it("stays clean after a save that rekeys the groups", () => {
+    const state = initial(groupedOrder());
+    // Simulate a session that has already rekeyed the group (an ungroup and a
+    // fresh group in the same session), so the old key is not the loaded one.
+    state.aggregateGroups = [{ ...state.aggregateGroups[0], key: 7 }];
+    state.nextAggregateKey = 8;
+    state.lines = state.lines.map((line) =>
+      line.aggregateKey === 0 ? { ...line, aggregateKey: 7 } : line
+    );
+    const saved = purchaseOrderEditorReducer(state, {
+      type: "saveSucceeded",
+      order: groupedOrder(),
+      currency: USD,
+    });
+    expect(saved.aggregateGroups[0].key).toBe(0);
+    expect(isPurchaseOrderDirty(saved)).toBe(false);
+    expect(saved.nextAggregateKey).toBe(8);
+  });
+
+  it("records and edits a header through the reducer", () => {
+    const state = initial();
+    const added = purchaseOrderEditorReducer(state, {
+      type: "aggregateAdded",
+      group: {
+        key: 9,
+        title: "Combined items",
+        orderedQuantity: "1",
+        orderedUoM: "Lot",
+        showChildrenToCustomer: false,
+      },
+      lineKeys: [state.lines[0].key],
+    });
+    expect(added.aggregateGroups.map((group) => group.key)).toEqual([9]);
+    expect(added.lines[0].aggregateKey).toBe(9);
+    expect(added.lines[1].aggregateKey).toBeNull();
+    expect(added.nextAggregateKey).toBe(10);
+
+    const edited = purchaseOrderEditorReducer(added, {
+      type: "aggregateChanged",
+      key: 9,
+      patch: { orderedQuantity: "2.5", showChildrenToCustomer: true },
+    });
+    expect(edited.aggregateGroups[0].orderedQuantity).toBe("2.5");
+    expect(edited.aggregateGroups[0].showChildrenToCustomer).toBe(true);
+
+    const ungrouped = purchaseOrderEditorReducer(edited, { type: "aggregateUngrouped", key: 9 });
+    expect(ungrouped.aggregateGroups).toEqual([]);
+    expect(ungrouped.lines.map((line) => line.aggregateKey)).toEqual([null, null]);
+  });
+
+  it("prunes a header when its last child is removed", () => {
+    const state = initial(groupedOrder());
+    const removed = purchaseOrderEditorReducer(state, {
+      type: "lineRemoved",
+      key: state.lines[0].key,
+    });
+    expect(removed.aggregateGroups).toEqual([]);
+    expect(removed.lines).toHaveLength(1);
+  });
+
+  it("prunes on demand after a multi-line replacement", () => {
+    const state = initial(groupedOrder());
+    const replaced = purchaseOrderEditorReducer(state, {
+      type: "linesReplaced",
+      lines: state.lines.map((line) => ({ ...line, aggregateKey: null })),
+    });
+    const pruned = purchaseOrderEditorReducer(replaced, { type: "aggregatePruned" });
+    expect(pruned.aggregateGroups).toEqual([]);
+  });
+
+  it("creates new lines ungrouped", () => {
+    const state = initial();
+    const added = purchaseOrderEditorReducer(state, { type: "lineAdded", uom: "Pc" });
+    expect(added.lines.at(-1)!.aggregateKey).toBeNull();
+    const fromSource = purchaseOrderEditorReducer(state, {
+      type: "lineAddedFromSource",
+      uom: "Pc",
+      quotationItemNo: 4,
+      quotationSubNo: null,
+    });
+    expect(fromSource.lines.at(-1)!.aggregateKey).toBeNull();
+  });
+
+  it("names an aggregate layout problem in the readiness gate", () => {
+    const state = initial(groupedOrder());
+    state.aggregateGroups[0].orderedUoM = "";
+    expect(listValidationBlockers(state, USD)).toContainEqual({
+      key: "aggregate:layout",
+      label: "Aggregate lines",
+      message: "Aggregate 1: unit label is required.",
+      fieldLabel: "Aggregate lines",
+    });
   });
 });
