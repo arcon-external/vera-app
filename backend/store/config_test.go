@@ -72,6 +72,66 @@ func TestLoadConfigRejectsUnsafeSchema(t *testing.T) {
 	}
 }
 
+// Issue #658: VERA_PO_ALLOCATIONS_STRICT is the one switch that flips the
+// allocation cutover. Its zero value must stay compatibility mode, so every
+// store a test builds with Config{DSN, Schema} behaves like today's server.
+func TestLoadConfigParsesStrictPOAllocations(t *testing.T) {
+	for _, testCase := range []struct {
+		value string
+		want  bool
+	}{
+		{"", false},
+		{"false", false},
+		{"0", false},
+		{"true", true},
+		{"1", true},
+		{"TRUE", true},
+		{" True ", true},
+	} {
+		t.Run("value="+testCase.value, func(t *testing.T) {
+			config, err := LoadConfig(func(key string) string {
+				switch key {
+				case "VERA_POSTGRES_DSN":
+					return "postgres://vera:secret@example.test:5432/quotes?sslmode=require"
+				case "VERA_PO_ALLOCATIONS_STRICT":
+					return testCase.value
+				}
+				return ""
+			})
+			if err != nil {
+				t.Fatalf("LoadConfig failed for %q: %v", testCase.value, err)
+			}
+			if config.StrictPOAllocations != testCase.want {
+				t.Errorf("StrictPOAllocations = %v for %q; want %v",
+					config.StrictPOAllocations, testCase.value, testCase.want)
+			}
+		})
+	}
+}
+
+// A typo in the cutover flag must stop the server, not silently leave it in
+// compatibility mode while the operator believes strict is on.
+func TestLoadConfigRefusesAnUnknownStrictPOAllocationsValue(t *testing.T) {
+	_, err := LoadConfig(func(key string) string {
+		switch key {
+		case "VERA_POSTGRES_DSN":
+			return "postgres://localhost/quotes"
+		case "VERA_PO_ALLOCATIONS_STRICT":
+			return "yes"
+		}
+		return ""
+	})
+	if err == nil {
+		t.Fatal("LoadConfig accepted an unknown VERA_PO_ALLOCATIONS_STRICT value")
+	}
+	if !strings.Contains(err.Error(), "VERA_PO_ALLOCATIONS_STRICT") {
+		t.Errorf("error = %q; want it to name the variable", err)
+	}
+	if !strings.Contains(err.Error(), `"yes"`) {
+		t.Errorf("error = %q; want it to name the refused value", err)
+	}
+}
+
 func containsSecret(value, secret string) bool {
 	return len(secret) > 0 && len(value) >= len(secret) && strings.Contains(value, secret)
 }

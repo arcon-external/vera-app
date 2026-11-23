@@ -399,6 +399,11 @@ func (s *Store) CorrectPurchaseOrder(ctx context.Context, input PurchaseOrderCor
 	if err != nil {
 		return PurchaseOrder{}, err
 	}
+	// #658: a correction of a pre-cutover record keeps its historical free line
+	// and row discount; anything new or changed is refused before the snapshot.
+	if err := s.enforceStrictPurchaseOrderSave(ctx, tx, org.ID, input.ID, input.PurchaseOrderUpdate); err != nil {
+		return PurchaseOrder{}, err
+	}
 	source, err := loadPurchaseOrderSourceDetail(ctx, tx, schema, lock.QuotationID, lock.SourceRevision)
 	if err != nil {
 		return PurchaseOrder{}, err

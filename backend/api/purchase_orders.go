@@ -535,6 +535,21 @@ func purchaseOrderError(context echo.Context, err error) error {
 			"error": err.Error(),
 			"code":  "po_line_kind_invalid",
 		})
+	case errors.Is(err, store.ErrPurchaseOrderBlankDraftRetired):
+		return context.JSON(http.StatusConflict, map[string]string{
+			"error": err.Error(),
+			"code":  "po_blank_draft_retired",
+		})
+	case errors.Is(err, store.ErrPurchaseOrderFreeLineRetired):
+		return context.JSON(http.StatusUnprocessableEntity, map[string]string{
+			"error": err.Error(),
+			"code":  "po_free_line_retired",
+		})
+	case errors.Is(err, store.ErrPurchaseOrderDiscountForbidden):
+		return context.JSON(http.StatusUnprocessableEntity, map[string]string{
+			"error": err.Error(),
+			"code":  "po_discount_forbidden",
+		})
 	case errors.Is(err, store.ErrPurchaseOrderBadReference):
 		return context.JSON(http.StatusUnprocessableEntity, map[string]string{"error": err.Error()})
 	case errors.Is(err, store.ErrPurchaseOrderBusinessCategoryRequired):

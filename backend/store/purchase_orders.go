@@ -143,6 +143,20 @@ var (
 	// the refusal leaves it editable. The wording is shared by both writes, so
 	// it never names one button.
 	ErrPurchaseOrderBusinessCategoryRequired = errors.New("a business category is required to save a purchase order")
+	// ErrPurchaseOrderBlankDraftRetired is the #658 strict cutover: a purchase
+	// order starts from a quotation, so the source-less blank draft is gone.
+	// It is a compatibility retirement, not a validation error: an old desktop
+	// that still offers the entry receives the message to update.
+	ErrPurchaseOrderBlankDraftRetired = errors.New("starting a purchase order without a quotation has been retired; create it from a quotation")
+	// ErrPurchaseOrderFreeLineRetired is the #658 strict cutover: a quotation
+	// line must name the leaf it bought. A pass-through charge is an explicit
+	// extra line (#655), never a quotation-kind line with no reference.
+	ErrPurchaseOrderFreeLineRetired = errors.New("a purchase order line must name a quotation item; add an extra line for a pass-through charge")
+	// ErrPurchaseOrderDiscountForbidden is the #658 strict cutover: the
+	// quotation's row price is the price, so a new row discount or any header
+	// discount/adjustment is refused. Historical records keep their stored
+	// values and stay correctable.
+	ErrPurchaseOrderDiscountForbidden = errors.New("purchase order discounts are retired; the quotation's price is the price")
 )
 
 // PurchaseOrderDecision is one explicit difference-review choice for a review
@@ -656,6 +670,11 @@ func (s *Store) CreatePurchaseOrderBlankDraft(ctx context.Context, input Purchas
 	if err != nil {
 		return PurchaseOrder{}, err
 	}
+	// #658: the source-less draft is the entry strict mode retires. The refusal
+	// is before any read or write, so it costs one row nothing.
+	if s.config.StrictPOAllocations {
+		return PurchaseOrder{}, ErrPurchaseOrderBlankDraftRetired
+	}
 	if input.CreatedBy < 1 {
 		return PurchaseOrder{}, fmt.Errorf("%w: the creator is required", ErrPurchaseOrderInvalid)
 	}
@@ -1081,6 +1100,13 @@ func (s *Store) UpdatePurchaseOrderDraft(ctx context.Context, input PurchaseOrde
 	// groups. Refuse before the overwrite snapshot or any other write.
 	if err := refuseLegacyAggregateOverwrite(
 		ctx, tx, schema, org.ID, input.ID, input.AggregateGroups); err != nil {
+		return PurchaseOrder{}, err
+	}
+	// #658: strict mode refuses a new free line, a changed reference and any
+	// new discount before the overwrite snapshot or the line rewrite. It is a
+	// read-only check under the lock, and it runs after the #654 refusal so an
+	// old client still sees the update-Vera answer it already had.
+	if err := s.enforceStrictPurchaseOrderSave(ctx, tx, org.ID, input.ID, input); err != nil {
 		return PurchaseOrder{}, err
 	}
 	// #496: a never-linked or formerly-linked draft still saves its own

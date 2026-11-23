@@ -203,6 +203,11 @@ func (s *Store) RepairPurchaseOrderSource(ctx context.Context, input PurchaseOrd
 	if input.BusinessCategory == "" {
 		input.BusinessCategory = stored.BusinessCategory
 	}
+	// #658: a repair is a save of the stored lines, so the cutover gates apply
+	// to it as well; a historical free line passes only unchanged.
+	if err := s.enforceStrictPurchaseOrderSave(ctx, tx, org.ID, input.ID, input.PurchaseOrderUpdate); err != nil {
+		return PurchaseOrder{}, err
+	}
 
 	source, err := loadPurchaseOrderSourceDetail(ctx, tx, schema,
 		input.QuotationID, input.RevisionNumber)

@@ -550,6 +550,12 @@ func (s *Store) FinalizePurchaseOrder(ctx context.Context, input PurchaseOrderFi
 		ctx, tx, schema, org.ID, input.ID, input.AggregateGroups); err != nil {
 		return PurchaseOrder{}, err
 	}
+	// #658: the cutover gates run before the source load, the availability read
+	// and the overwrite snapshot. A stored legacy line passes only because it is
+	// unchanged; a new one is refused.
+	if err := s.enforceStrictPurchaseOrderSave(ctx, tx, org.ID, input.ID, input.PurchaseOrderUpdate); err != nil {
+		return PurchaseOrder{}, err
+	}
 	quotationID = lock.QuotationID
 	sourceRevision = lock.SourceRevision
 	customerID = lock.CustomerID
