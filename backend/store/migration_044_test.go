@@ -820,10 +820,11 @@ func po518RetainedJSON(t *testing.T, ctx context.Context, database *Store, poID 
 func TestMigration044Genuine043Upgrade(t *testing.T) {
 	database := po518Unmigrated(t, "vera_po_518_upgrade")
 	po518ApplyThrough(t, database, 43)
-	// The current store read path uses the additive columns from 045-050.
-	// Apply those without 044 so 044 remains the migration this test
-	// exercises.
-	for _, version := range []int{45, 46, 47, 48, 49, 50} {
+	// The current store read and write paths use the additive columns from
+	// 045-052: the report index, and the allocation table every quotation-backed
+	// draft now writes. Apply those without 044 so 044 remains the migration
+	// this test exercises.
+	for _, version := range []int{45, 46, 47, 48, 49, 50, 51, 52} {
 		po518ApplyOnly(t, database, version)
 	}
 	ctx := poContext(t, database)

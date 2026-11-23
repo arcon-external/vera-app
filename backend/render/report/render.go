@@ -257,7 +257,7 @@ func (r *reportRenderer) drawKPIs() {
 		}
 	}
 	if r.snapshot.Population.SourceMissingPoCount > 0 {
-		line := fmt.Sprintf("%d purchase order(s) in this range have a deleted source quotation; their amount is uncosted.",
+		line := fmt.Sprintf("%d purchase order(s) in this range have no live source link; unresolved cost is shown as uncosted.",
 			r.snapshot.Population.SourceMissingPoCount)
 		for _, text := range r.faces.wrap(line, 7.2, contentWidth, false) {
 			c.ensure(10)

@@ -424,6 +424,8 @@ func (s *Store) CreatePurchaseOrderDraft(ctx context.Context, input PurchaseOrde
 	if err != nil {
 		return PurchaseOrder{}, err
 	}
+	// The allocation writer needs the frozen source lines alongside the header.
+	source.Lines = lines
 	ppnBps, err := PurchaseOrderPPNBps(
 		source.TaxZone, source.TaxType, source.ServiceCategory, source.TaxCategory)
 	if err != nil {
@@ -484,6 +486,9 @@ func (s *Store) CreatePurchaseOrderDraft(ctx context.Context, input PurchaseOrde
 
 	kept, _, err := replacePurchaseOrderItems(ctx, tx, schema, org.ID, id, items)
 	if err != nil {
+		return PurchaseOrder{}, err
+	}
+	if err := replacePurchaseOrderAllocations(ctx, tx, schema, org.ID, id, source, kept); err != nil {
 		return PurchaseOrder{}, err
 	}
 	sessionID, err := createReconciliationSessionTx(ctx, tx, schema, org.ID, id,
@@ -1092,14 +1097,16 @@ func quotationPaymentTerms(days int16) string {
 }
 
 type purchaseOrderSourceSub struct {
-	Description     string
-	UoM             string
-	Quantity        int64
-	UnitPriceMinor  int64
-	SubNo           int
-	DiscountPercent int16
-	DiscountEnabled bool
-	Details         []string
+	Description          string
+	UoM                  string
+	Quantity             int64
+	UnitPriceMinor       int64
+	QuotedUnitPriceMinor int64
+	CostUnitMinor        int64
+	SubNo                int
+	DiscountPercent      int16
+	DiscountEnabled      bool
+	Details              []string
 }
 
 // loadPurchaseOrderSourceLines turns the customer-facing composition of one
@@ -1112,7 +1119,7 @@ type purchaseOrderSourceSub struct {
 func loadPurchaseOrderSourceLines(ctx context.Context, q purchaseOrderQuerier, schema string, revisionID int64) ([]PurchaseOrderSourceLine, error) {
 	rows, err := q.Query(ctx, fmt.Sprintf(`
 		SELECT id, item_no, description, qty, uom, list_unit_price, show_sub_prices,
-		       discount_enabled, discount_percent
+		       discount_enabled, discount_percent, marginalized_unit_price, unit_price
 		FROM %s.quotation_revision_items
 		WHERE revision_id = $1
 		ORDER BY item_no`, schema), revisionID)
@@ -1122,26 +1129,35 @@ func loadPurchaseOrderSourceLines(ctx context.Context, q purchaseOrderQuerier, s
 	defer rows.Close()
 
 	type sourceItem struct {
-		Description     string
-		UoM             string
-		ID              int64
-		ItemNo          int
-		Quantity        int64
-		UnitPriceMinor  int64
-		DiscountPercent int16
-		ShowSubPrices   bool
-		DiscountEnabled bool
+		Description           string
+		UoM                   string
+		ID                    int64
+		ItemNo                int
+		Quantity              int64
+		UnitPriceMinor        int64
+		MarginalizedUnitPrice int64
+		CostUnitMinor         int64
+		DiscountPercent       int16
+		ShowSubPrices         bool
+		DiscountEnabled       bool
 	}
 	var items []sourceItem
 	for rows.Next() {
 		var item sourceItem
 		if err := rows.Scan(&item.ID, &item.ItemNo, &item.Description, &item.Quantity,
 			&item.UoM, &item.UnitPriceMinor, &item.ShowSubPrices,
-			&item.DiscountEnabled, &item.DiscountPercent); err != nil {
+			&item.DiscountEnabled, &item.DiscountPercent,
+			&item.MarginalizedUnitPrice, &item.CostUnitMinor); err != nil {
 			return nil, fmt.Errorf("scan purchase order source item: %w", err)
 		}
 		if err := checkSourceUnitPrice(item.UnitPriceMinor); err != nil {
 			return nil, fmt.Errorf("source item %d: %w", item.ItemNo, err)
+		}
+		if err := checkSourceUnitPrice(item.MarginalizedUnitPrice); err != nil {
+			return nil, fmt.Errorf("source item %d discounted price: %w", item.ItemNo, err)
+		}
+		if err := checkSourceUnitPrice(item.CostUnitMinor); err != nil {
+			return nil, fmt.Errorf("source item %d cost: %w", item.ItemNo, err)
 		}
 		items = append(items, item)
 	}
@@ -1151,7 +1167,8 @@ func loadPurchaseOrderSourceLines(ctx context.Context, q purchaseOrderQuerier, s
 
 	subRows, err := q.Query(ctx, fmt.Sprintf(`
 		SELECT s.revision_item_id, s.sub_no, s.description, s.qty, s.uom,
-		       s.list_unit_price, s.discount_enabled, s.discount_percent
+		       s.list_unit_price, s.discount_enabled, s.discount_percent,
+		       s.unit_price, s.unit_cost
 		FROM %s.quotation_revision_sub_items s
 		JOIN %s.quotation_revision_items i ON i.id = s.revision_item_id
 		WHERE i.revision_id = $1
@@ -1165,11 +1182,18 @@ func loadPurchaseOrderSourceLines(ctx context.Context, q purchaseOrderQuerier, s
 		var itemID int64
 		var sub purchaseOrderSourceSub
 		if err := subRows.Scan(&itemID, &sub.SubNo, &sub.Description, &sub.Quantity,
-			&sub.UoM, &sub.UnitPriceMinor, &sub.DiscountEnabled, &sub.DiscountPercent); err != nil {
+			&sub.UoM, &sub.UnitPriceMinor, &sub.DiscountEnabled, &sub.DiscountPercent,
+			&sub.QuotedUnitPriceMinor, &sub.CostUnitMinor); err != nil {
 			return nil, fmt.Errorf("scan purchase order source sub-item: %w", err)
 		}
 		if err := checkSourceUnitPrice(sub.UnitPriceMinor); err != nil {
 			return nil, fmt.Errorf("source sub-item %d: %w", sub.SubNo, err)
+		}
+		if err := checkSourceUnitPrice(sub.QuotedUnitPriceMinor); err != nil {
+			return nil, fmt.Errorf("source sub-item %d discounted price: %w", sub.SubNo, err)
+		}
+		if err := checkSourceUnitPrice(sub.CostUnitMinor); err != nil {
+			return nil, fmt.Errorf("source sub-item %d cost: %w", sub.SubNo, err)
 		}
 		subs[itemID] = append(subs[itemID], sub)
 	}
@@ -1224,17 +1248,19 @@ func loadPurchaseOrderSourceLines(ctx context.Context, q purchaseOrderQuerier, s
 				subNo := sub.SubNo
 				parentDescription, _ := splitPurchaseOrderDescription(item.Description)
 				lines = append(lines, PurchaseOrderSourceLine{
-					QuotationItemNo:   item.ItemNo,
-					QuotationSubNo:    &subNo,
-					Description:       sub.Description,
-					QuantityScaled:    quantity,
-					UoM:               sub.UoM,
-					UnitPriceMinor:    sub.UnitPriceMinor,
-					DiscountEnabled:   sub.DiscountEnabled,
-					DiscountPercent:   sub.DiscountPercent,
-					ParentDescription: parentDescription,
-					GroupKey:          fmt.Sprintf("q:%d", item.ItemNo),
-					DescriptionLines:  append([]string(nil), sub.Details...),
+					QuotationItemNo:      item.ItemNo,
+					QuotationSubNo:       &subNo,
+					Description:          sub.Description,
+					QuantityScaled:       quantity,
+					UoM:                  sub.UoM,
+					UnitPriceMinor:       sub.UnitPriceMinor,
+					DiscountEnabled:      sub.DiscountEnabled,
+					DiscountPercent:      sub.DiscountPercent,
+					ParentDescription:    parentDescription,
+					GroupKey:             fmt.Sprintf("q:%d", item.ItemNo),
+					DescriptionLines:     append([]string(nil), sub.Details...),
+					quotedUnitPriceMinor: sub.QuotedUnitPriceMinor,
+					costUnitMinor:        sub.CostUnitMinor,
 				})
 			}
 			continue
@@ -1245,14 +1271,16 @@ func loadPurchaseOrderSourceLines(ctx context.Context, q purchaseOrderQuerier, s
 		}
 		description, descriptionLines := splitPurchaseOrderDescription(item.Description)
 		lines = append(lines, PurchaseOrderSourceLine{
-			QuotationItemNo:  item.ItemNo,
-			Description:      description,
-			QuantityScaled:   quantity,
-			UoM:              item.UoM,
-			UnitPriceMinor:   item.UnitPriceMinor,
-			DiscountEnabled:  item.DiscountEnabled,
-			DiscountPercent:  item.DiscountPercent,
-			DescriptionLines: descriptionLines,
+			QuotationItemNo:      item.ItemNo,
+			Description:          description,
+			QuantityScaled:       quantity,
+			UoM:                  item.UoM,
+			UnitPriceMinor:       item.UnitPriceMinor,
+			DiscountEnabled:      item.DiscountEnabled,
+			DiscountPercent:      item.DiscountPercent,
+			DescriptionLines:     descriptionLines,
+			quotedUnitPriceMinor: item.MarginalizedUnitPrice,
+			costUnitMinor:        item.CostUnitMinor,
 		})
 	}
 	return lines, nil

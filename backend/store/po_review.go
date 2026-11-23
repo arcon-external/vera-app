@@ -60,6 +60,13 @@ type PurchaseOrderSourceLine struct {
 	// DescriptionLines are the part's sub-sub lines, seeded from the frozen
 	// revision. Empty when the part has none.
 	DescriptionLines []string
+	// quotedUnitPriceMinor is the frozen row-discounted quotation baseline.
+	// It is internal to allocation persistence and never mapped to a customer
+	// or workspace DTO.
+	quotedUnitPriceMinor int64
+	// costUnitMinor is the frozen supplier unit cost from the pinned revision.
+	// It is internal to allocation persistence and the report only.
+	costUnitMinor int64
 }
 
 // Label renders the source line as the customer document numbers it: "3" for
@@ -510,10 +517,23 @@ func (s *Store) FinalizePurchaseOrder(ctx context.Context, input PurchaseOrderFi
 	var quotationID, customerID int64
 	var sourceRevision, ppnBps int16
 	var storedReceived time.Time
+	// #650 global lock order: quotation first, then PO. The unlocked peek lets
+	// us acquire the parent lock before lockPurchaseOrderWrite; the version and
+	// link are rechecked after the PO lock.
+	peekedQuotationID, err := peekPurchaseOrderQuotationID(ctx, tx, schema, org.ID, input.ID)
+	if err != nil {
+		return PurchaseOrder{}, err
+	}
+	if err := lockQuotationForAllocation(ctx, tx, schema, peekedQuotationID); err != nil {
+		return PurchaseOrder{}, err
+	}
 	lock, err := lockPurchaseOrderWrite(ctx, tx, schema, org.ID, input.ID,
 		input.ExpectedVersion, PurchaseOrderStateDraft)
 	if err != nil {
 		return PurchaseOrder{}, err
+	}
+	if lock.LiveQuotationID != peekedQuotationID {
+		return PurchaseOrder{}, ErrPurchaseOrderVersionConflict
 	}
 	// #496: a never-linked or formerly-linked draft cannot be finalized. The
 	// refusal happens here, at the server boundary, before any confirmation
@@ -608,9 +628,14 @@ func (s *Store) FinalizePurchaseOrder(ctx context.Context, input PurchaseOrderFi
 		if err != nil {
 			return PurchaseOrder{}, err
 		}
-		if _, err := insertPurchaseOrderCorrection(ctx, tx, schema, stored, org.ID,
+		correctionID, err := insertPurchaseOrderCorrection(ctx, tx, schema, stored, org.ID,
 			PurchaseOrderCorrectionKindDraftOverwrite, PurchaseOrderDraftOverwriteReason,
-			input.UpdatedBy); err != nil {
+			input.UpdatedBy)
+		if err != nil {
+			return PurchaseOrder{}, err
+		}
+		if err := snapshotPurchaseOrderCorrectionAllocations(
+			ctx, tx, schema, correctionID, input.ID); err != nil {
 			return PurchaseOrder{}, err
 		}
 	}
@@ -687,7 +712,11 @@ func (s *Store) FinalizePurchaseOrder(ctx context.Context, input PurchaseOrderFi
 	if tag.RowsAffected() != 1 {
 		return PurchaseOrder{}, ErrPurchaseOrderNotDraft
 	}
-	if _, _, err := replacePurchaseOrderItems(ctx, tx, schema, org.ID, input.ID, lines); err != nil {
+	kept, _, err := replacePurchaseOrderItems(ctx, tx, schema, org.ID, input.ID, lines)
+	if err != nil {
+		return PurchaseOrder{}, err
+	}
+	if err := replacePurchaseOrderAllocations(ctx, tx, schema, org.ID, input.ID, source, kept); err != nil {
 		return PurchaseOrder{}, err
 	}
 

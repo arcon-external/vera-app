@@ -1443,8 +1443,16 @@ func insertDeletionAudits(ctx context.Context, tx pgx.Tx, schema, orgID string, 
 // first, then locks the quotation and every connected PO in a fixed order. Two
 // deletions of one chain therefore serialize before they touch rows; the lock
 // order never diverges, so the pair cannot deadlock.
+//
+// The global row-lock order is quotation, then purchase order. Finalize and
+// correction take the same pair in the same order, so a deletion never forms an
+// AB-BA cycle with them.
 func lockDeletionChain(ctx context.Context, tx pgx.Tx, schema, orgID, targetType string, targetID int64) error {
 	root := fmt.Sprintf("%s:%d", targetType, targetID)
+	// The parent link is read once without a row lock, only to name the chain
+	// for the advisory lock. The link is re-read under the PO row lock below;
+	// a link that moved in between is refused there instead of trusted here.
+	var peekedQuotationID int64
 	if targetType == DeletionTargetPurchaseOrder {
 		var quotationID pgtype.Int8
 		err := tx.QueryRow(ctx, fmt.Sprintf(
@@ -1457,7 +1465,8 @@ func lockDeletionChain(ctx context.Context, tx pgx.Tx, schema, orgID, targetType
 			return fmt.Errorf("resolve deletion chain root: %w", err)
 		}
 		if quotationID.Valid {
-			root = fmt.Sprintf("%s:%d", DeletionTargetQuotation, quotationID.Int64)
+			peekedQuotationID = quotationID.Int64
+			root = fmt.Sprintf("%s:%d", DeletionTargetQuotation, peekedQuotationID)
 		}
 	}
 	if _, err := tx.Exec(ctx,
@@ -1472,6 +1481,19 @@ func lockDeletionChain(ctx context.Context, tx pgx.Tx, schema, orgID, targetType
 	case DeletionTargetQuotation:
 		quotationID = targetID
 	case DeletionTargetPurchaseOrder:
+		// Quotation first, purchase order second. The parent is locked from the
+		// peek; a quotation deleted between the peek and this lock leaves no row
+		// to lock, and the link recheck below reports the change. The PO lock is
+		// never held while waiting for a different quotation.
+		if peekedQuotationID > 0 {
+			var parent int64
+			err := tx.QueryRow(ctx, fmt.Sprintf(
+				"SELECT id FROM %s.quotations WHERE id = $1 FOR UPDATE", schema),
+				peekedQuotationID).Scan(&parent)
+			if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+				return fmt.Errorf("lock deletion quotation %d: %w", peekedQuotationID, err)
+			}
+		}
 		var live pgtype.Int8
 		if err := tx.QueryRow(ctx, fmt.Sprintf(`
 			SELECT quotation_id FROM %s.purchase_orders
@@ -1482,9 +1504,22 @@ func lockDeletionChain(ctx context.Context, tx pgx.Tx, schema, orgID, targetType
 			}
 			return fmt.Errorf("lock deletion purchase order %d: %w", targetID, err)
 		}
+		liveQuotationID := int64(0)
 		if live.Valid {
-			quotationID = live.Int64
+			liveQuotationID = live.Int64
 		}
+		if liveQuotationID != peekedQuotationID {
+			// The PO was relinked, or its source was deleted, while this
+			// transaction waited. Refuse the stale chain rather than lock a
+			// second quotation after the PO; the modal re-previews and retries.
+			return &DeletionChainChangedError{Changes: []DeletionChange{{
+				Field:  "quotation_id",
+				Label:  deletionChangeLabel("quotation_id"),
+				Before: deletionSourceLinkValue(peekedQuotationID),
+				After:  deletionSourceLinkValue(liveQuotationID),
+			}}}
+		}
+		quotationID = liveQuotationID
 	}
 	if quotationID > 0 {
 		var exists int64
@@ -1503,11 +1538,17 @@ func lockDeletionChain(ctx context.Context, tx pgx.Tx, schema, orgID, targetType
 			return fmt.Errorf("lock deletion chain purchase orders: %w", err)
 		}
 	}
-	if targetType == DeletionTargetPurchaseOrder && quotationID == 0 {
-		// The PO row was already locked above; nothing else belongs to it.
-		return nil
-	}
 	return nil
+}
+
+// deletionSourceLinkValue renders a peeked live quotation id for a chain-change
+// entry: an empty value is the source-missing state, matching the fingerprint
+// where a source-missing PO carries no quotation_id segment.
+func deletionSourceLinkValue(quotationID int64) string {
+	if quotationID == 0 {
+		return ""
+	}
+	return strconv.FormatInt(quotationID, 10)
 }
 
 // newDeletionLetters draws ten letters from the challenge alphabet. Rejection
