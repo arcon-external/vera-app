@@ -124,6 +124,9 @@ func TestAPITestHelpersShareOneClone(t *testing.T) {
 // than the helper's bookkeeping: a cleanup that forgot the drop would leave one
 // database per test behind, which is exactly the accumulation #670 measured.
 func TestAPITestDatabaseIsDroppedAfterItsTest(t *testing.T) {
+	if strings.TrimSpace(os.Getenv("VERA_POSTGRES_TEST_DSN")) == "" {
+		t.Skip("set VERA_POSTGRES_TEST_DSN to run API integration tests")
+	}
 	var name string
 	t.Run("inside the test", func(t *testing.T) {
 		name = testDatabase(t, "vera_probe_api_dropped").Name
