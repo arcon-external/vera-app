@@ -143,4 +143,8 @@ LEFT JOIN {{schema}}.quotation_revision_sub_items sub
       AND sub.sub_no = poi.quotation_sub_no
 WHERE po.quotation_id IS NOT NULL
   AND poi.quotation_item_no IS NOT NULL
+-- Deterministic conflict resolution: if a historical PO repeats a source leaf,
+-- the lowest line number keeps the allocation instead of whichever heap row the
+-- scan happened to reach first.
+ORDER BY po.id, poi.line_number
 ON CONFLICT DO NOTHING;

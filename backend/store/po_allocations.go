@@ -39,6 +39,33 @@ func replacePurchaseOrderAllocations(
 	source PurchaseOrderSource,
 	lines []PurchaseOrderItem,
 ) error {
+	// One quotation leaf may appear at most once in a purchase order. The
+	// database enforces it with po_allocations_po_source_uidx (NULLS NOT
+	// DISTINCT, so a null sub-item is one leaf, not many); checking here turns
+	// the raw 23505 into the typed refusal the editor can explain, before any
+	// allocation is cleared.
+	claimed := make(map[string]int, len(lines))
+	for index, item := range lines {
+		if item.QuotationItemNo == nil {
+			continue
+		}
+		lineNumber := item.LineNumber
+		if lineNumber < 1 {
+			lineNumber = index + 1
+		}
+		key := allocationSourceKey(*item.QuotationItemNo, item.QuotationSubNo)
+		if first, taken := claimed[key]; taken {
+			leaf := fmt.Sprintf("quotation item %d", *item.QuotationItemNo)
+			if item.QuotationSubNo != nil {
+				leaf = fmt.Sprintf("quotation item %d sub-item %d",
+					*item.QuotationItemNo, *item.QuotationSubNo)
+			}
+			return fmt.Errorf(
+				"%w: line %d names the same %s as line %d; one quotation leaf may appear once per purchase order",
+				ErrPurchaseOrderInvalid, lineNumber, leaf, first)
+		}
+		claimed[key] = lineNumber
+	}
 	if _, err := tx.Exec(ctx, fmt.Sprintf(
 		`DELETE FROM %s.purchase_order_allocations WHERE purchase_order_id = $1`, schema),
 		orderID); err != nil {

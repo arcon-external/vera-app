@@ -879,12 +879,13 @@ item_alloc_agg AS (
     WHERE a.quotation_id = COALESCE(bp.quotation_id, bp.former_quotation_id)
       AND a.source_revision = COALESCE(bp.source_revision, bp.former_source_revision)
       AND (
-          -- A deleted quotation clears only source_revision_id. The cost
-          -- snapshot is already in the PO's currency and remains the historical
-          -- basis, so a source-missing allocation stays costed.
-          a.source_revision_id IS NULL
+          -- Only a genuinely source-missing PO may bypass the live proof: the
+          -- deletion cleared the revision pointer, and the frozen currency
+          -- snapshot remains its historical basis.
+          (bp.quotation_id IS NULL AND a.source_revision_id IS NULL)
           -- A live source must still agree with the allocation and the PO's
-          -- currency partition; a detached or foreign link is not trusted.
+          -- currency partition; a live PO whose allocation lost its revision
+          -- pointer, or a detached or foreign link, is not trusted.
           OR (
               source.id IS NOT NULL
               AND source.currency = bp.currency
