@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"strconv"
 	"strings"
 	"testing"
@@ -24,17 +23,11 @@ import (
 // the database.
 func closureTestServer(t *testing.T, schema string) (*Server, *store.Store, string) {
 	t.Helper()
-	dsn := strings.TrimSpace(os.Getenv("VERA_POSTGRES_TEST_DSN"))
-	if dsn == "" {
-		t.Skip("set VERA_POSTGRES_TEST_DSN to run API integration tests")
-	}
 	ctx := context.Background()
-	resetTestSchema(t, schema)
-	database, err := store.Open(ctx, store.Config{DSN: dsn, Schema: schema})
-	if err != nil {
-		t.Fatalf("open test database: %v", err)
-	}
-	t.Cleanup(database.Close)
+	// The clone seam shared with every API test since #673. The store opens on
+	// the clone's own database and app schema, so a run can never inherit rows
+	// from a schema that survived an earlier one.
+	database := openTestDatabaseStore(t, schema)
 	templates := &backend.Quotation{}
 	if err := backend.Startup(templates, ctx); err != nil {
 		t.Fatalf("load templates: %v", err)
