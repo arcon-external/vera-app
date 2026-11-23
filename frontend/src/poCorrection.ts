@@ -38,7 +38,27 @@ export interface PurchaseOrderHistoryItem {
   UnitPriceMinor: number;
   DiscountMinor: number;
   NetMinor: number;
+  /**
+   * #654: the snapshot group's display order this line belonged to; absent or
+   * 0 means the line was ungrouped. Group ids churn on every save, so the
+   * snapshot keys membership by the derived display order instead.
+   */
+  AggregateGroupOrder?: number;
 }
+
+/** One aggregate group header frozen into a retained snapshot (#654). */
+export interface PurchaseOrderHistoryGroup {
+  DisplayOrder: number;
+  Title: string;
+  OrderedQuantityScaled: number;
+  OrderedUoM: string;
+  ShowChildrenToCustomer: boolean;
+}
+
+/** One row of a snapshot's Lines table: a group header or a line. */
+export type PurchaseOrderHistoryLineRow =
+  | { kind: "group"; group: PurchaseOrderHistoryGroup }
+  | { kind: "item"; item: PurchaseOrderHistoryItem };
 
 /**
  * The subset of a retained snapshot the history panel needs. The binding
@@ -104,6 +124,44 @@ export interface PurchaseOrderHistoryEntry {
     Decisions?: Array<{ Key: string; Choice: string }>;
   } | null;
   Items: PurchaseOrderHistoryItem[];
+  /**
+   * Present only when a snapshot carried aggregate groups (#654). A snapshot
+   * with no groups sends an empty array; a saved order that predates #654
+   * sends none at all.
+   */
+  Groups?: PurchaseOrderHistoryGroup[];
+}
+
+/**
+ * The Lines table of one snapshot, in display order (#654). A group's title is
+ * emitted immediately above its child rows, matched by the line's
+ * AggregateGroupOrder against the group's DisplayOrder. Group ids are not
+ * stored, so nothing here needs one. Ungrouped lines keep their stored order
+ * and a snapshot without groups becomes one plain row per line, exactly as it
+ * rendered before aggregates existed.
+ */
+export function historyLineRows(
+  entry: Pick<PurchaseOrderHistoryEntry, "Items" | "Groups">
+): PurchaseOrderHistoryLineRow[] {
+  const groups = entry.Groups ?? [];
+  if (groups.length === 0) {
+    return entry.Items.map((item) => ({ kind: "item", item }));
+  }
+  const groupsByOrder = new Map(groups.map((group) => [group.DisplayOrder, group]));
+  const emitted = new Set<number>();
+  const rows: PurchaseOrderHistoryLineRow[] = [];
+  for (const item of entry.Items) {
+    const order = item.AggregateGroupOrder ?? 0;
+    if (order !== 0 && !emitted.has(order)) {
+      const group = groupsByOrder.get(order);
+      if (group !== undefined) {
+        rows.push({ kind: "group", group });
+        emitted.add(order);
+      }
+    }
+    rows.push({ kind: "item", item });
+  }
+  return rows;
 }
 
 /** What a write result means to the editor. */
