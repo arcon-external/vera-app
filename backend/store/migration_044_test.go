@@ -822,12 +822,13 @@ func TestMigration044Genuine043Upgrade(t *testing.T) {
 	po518ApplyThrough(t, database, 43)
 	// The current store read and write paths use the additive columns from
 	// 045-052, 054's aggregate membership (the PO line SELECT now reads
-	// poi.aggregate_group_id) and 056's closure columns (the availability read
-	// selects them): the report index, the allocation table every
-	// quotation-backed draft now writes, the aggregate group layer and the
+	// poi.aggregate_group_id), 055's line kind (the same SELECT reads
+	// poi.line_kind) and 056's closure columns (the availability read selects
+	// them): the report index, the allocation table every quotation-backed
+	// draft now writes, the aggregate group layer, the line kind and the
 	// quotation closure columns. Apply those without 044 so 044 remains the
 	// migration this test exercises.
-	for _, version := range []int{45, 46, 47, 48, 49, 50, 51, 52, 54, 56} {
+	for _, version := range []int{45, 46, 47, 48, 49, 50, 51, 52, 54, 55, 56} {
 		po518ApplyOnly(t, database, version)
 	}
 	ctx := poContext(t, database)

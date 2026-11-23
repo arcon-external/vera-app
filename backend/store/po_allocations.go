@@ -45,6 +45,24 @@ func replacePurchaseOrderAllocations(
 	// false, so the typed refusal is still the rule there.
 	skipDuplicateLeaves bool,
 ) error {
+	// An extra line was never on the quotation: it must never own an allocation.
+	// The submitted kind is checked before the DELETE, so a contradictory line
+	// refuses with a typed error instead of half-clearing the PO and failing the
+	// database's foreign key at commit.
+	for index, item := range lines {
+		if item.LineKind != PurchaseOrderLineKindExtra {
+			continue
+		}
+		if item.QuotationItemNo != nil || item.QuotationSubNo != nil {
+			lineNumber := item.LineNumber
+			if lineNumber < 1 {
+				lineNumber = index + 1
+			}
+			return fmt.Errorf(
+				"%w: line %d is an extra line and cannot own an allocation",
+				ErrPurchaseOrderLineKindInvalid, lineNumber)
+		}
+	}
 	// One quotation leaf may appear at most once in a purchase order. The
 	// database enforces it with po_allocations_po_source_uidx (NULLS NOT
 	// DISTINCT, so a null sub-item is one leaf, not many); checking here turns
@@ -91,9 +109,10 @@ func replacePurchaseOrderAllocations(
 	}
 	for index, item := range lines {
 		if item.QuotationItemNo == nil {
-			// A legacy or free line has no cost identity. The new workspace
-			// writes extra lines explicitly in a later ticket; this ticket
-			// must not invent an allocation for either.
+			// A legacy or free line has no cost identity, and an extra line
+			// (#655) is a pass-through expense by definition. Neither owns an
+			// allocation; the report resolves the extra into its own bucket and
+			// the legacy line into uncosted revenue.
 			continue
 		}
 		lineNumber := item.LineNumber

@@ -119,6 +119,9 @@ type PurchaseOrderCorrectionItem struct {
 	GroupKey          string
 	ParentDescription string
 	DescriptionLines  []string
+	// LineKind is the kind the snapshot line carried: quotation or extra. A
+	// snapshot taken before #655 reads quotation, exactly like its record.
+	LineKind string
 	// AggregateGroupOrder is the display order of the snapshot group this line
 	// belonged to; 0 means the line was ungrouped. Group ids are not stable
 	// across saves, so the snapshot is keyed by the derived display order.
@@ -460,6 +463,16 @@ func validatePurchaseOrderUpdateInput(input PurchaseOrderUpdate) error {
 		return err
 	}
 	for index, item := range input.Items {
+		kind, err := normalizePurchaseOrderLineKind(item.LineKind)
+		if err != nil {
+			return fmt.Errorf("%w: line %d", err, index+1)
+		}
+		if kind == PurchaseOrderLineKindExtra &&
+			(item.QuotationItemNo != nil || item.QuotationSubNo != nil) {
+			return fmt.Errorf(
+				"%w: line %d is an extra line and cannot name a quotation reference",
+				ErrPurchaseOrderLineKindInvalid, index+1)
+		}
 		if item.QuantityScaled <= 0 {
 			return fmt.Errorf("%w: line %d quantity must be positive", ErrPurchaseOrderInvalid, index+1)
 		}
@@ -622,6 +635,17 @@ func basisFromLock(lock purchaseOrderWriteLock) purchaseOrderBasis {
 	}
 }
 
+// snapshotLineKind is the read value written into an immutable snapshot. A row
+// read from the database can only be quotation or extra (its CHECK enforces
+// it); anything else -- a hand-built order in a test or a future caller -- is
+// recorded as the compatibility value rather than failing a history write.
+func snapshotLineKind(kind string) string {
+	if kind == PurchaseOrderLineKindExtra {
+		return PurchaseOrderLineKindExtra
+	}
+	return PurchaseOrderLineKindQuotation
+}
+
 // insertPurchaseOrderCorrection writes one immutable snapshot of the values a
 // write is about to replace, including the attachment version that was active.
 // It runs in the writer's transaction, so a failed write leaves no snapshot.
@@ -733,8 +757,8 @@ func insertPurchaseOrderCorrection(
 				quotation_sub_no, quantity_scaled, uom, unit_price_minor,
 				discount_enabled, discount_percent, gross_minor, discount_minor,
 				net_minor, group_key, parent_description, description_lines,
-				aggregate_group_order
-			) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)`, schema),
+				aggregate_group_order, line_kind
+			) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18)`, schema),
 			correctionID, lineNumber, item.Description, item.QuotationItemNo,
 			item.QuotationSubNo, item.QuantityScaled, item.UoM,
 			item.UnitPriceMinor, item.DiscountEnabled, item.DiscountPercent,
@@ -742,6 +766,7 @@ func insertPurchaseOrderCorrection(
 			item.GroupKey, item.ParentDescription,
 			encodeDescriptionLines(item.DescriptionLines),
 			aggregateGroupOrder,
+			snapshotLineKind(item.LineKind),
 		); err != nil {
 			return 0, fmt.Errorf("store purchase order correction line %d: %w", lineNumber, err)
 		}
@@ -881,7 +906,7 @@ func (s *Store) GetPurchaseOrderHistory(ctx context.Context, id int64) ([]Purcha
 		       quotation_sub_no, quantity_scaled, uom, unit_price_minor,
 		       discount_enabled, discount_percent, gross_minor, discount_minor,
 		       net_minor, group_key, parent_description, description_lines,
-		       aggregate_group_order
+		       aggregate_group_order, line_kind
 		FROM %s.purchase_order_correction_items
 		WHERE correction_id = ANY($1)
 		ORDER BY correction_id, line_number`, schema), ids)
@@ -900,7 +925,8 @@ func (s *Store) GetPurchaseOrderHistory(ctx context.Context, id int64) ([]Purcha
 			&itemNo, &subNo, &item.QuantityScaled, &item.UoM, &item.UnitPriceMinor,
 			&item.DiscountEnabled, &item.DiscountPercent, &item.GrossMinor,
 			&item.DiscountMinor, &item.NetMinor, &item.GroupKey,
-			&item.ParentDescription, &descriptionLines, &groupOrder); err != nil {
+			&item.ParentDescription, &descriptionLines, &groupOrder,
+			&item.LineKind); err != nil {
 			return nil, fmt.Errorf("scan purchase order %d correction line: %w", id, err)
 		}
 		item.DescriptionLines = decodeDescriptionLines(descriptionLines)

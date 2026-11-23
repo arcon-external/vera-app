@@ -152,7 +152,12 @@ func (r *reportRenderer) drawActualChartPanel(title string, periods []poreport.P
 
 		r.drawColumn(amountX, barW, float64(period.AmountMinor), zeroY, valueY, pal.amount)
 		if period.UncostedMinor > 0 && period.AmountMinor > 0 {
-			costed := period.AmountMinor - period.UncostedMinor
+			// The hatch covers the uncosted slice between the costed level and
+			// the top of the amount bar. The costed level is the stored
+			// CostedMinor, not amount-uncosted: since #655 the amount also
+			// includes pass-through extra expense, which has no cost and must
+			// not shrink the hatched (unknown-cost) slice.
+			costed := period.CostedMinor
 			if costed < 0 {
 				costed = 0
 			}
@@ -448,7 +453,9 @@ func (r *reportRenderer) drawCurrentChartPanel(buckets []currentChartBucket) {
 			actual := *bucket.actual
 			r.drawColumn(amountX, barW, float64(actual.AmountMinor), zeroY, valueY, pal.amount)
 			if actual.UncostedMinor > 0 && actual.AmountMinor > 0 {
-				costed := actual.AmountMinor - actual.UncostedMinor
+				// See the period chart: the costed level is the stored figure,
+				// because the amount may include pass-through extra expense.
+				costed := actual.CostedMinor
 				if costed < 0 {
 					costed = 0
 				}

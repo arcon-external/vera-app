@@ -437,6 +437,36 @@ func TestProjectCurrentSuppressesIncompleteCost(t *testing.T) {
 	}
 }
 
+// TestProjectCurrentDayTreatsAnExtraExpenseDayAsFullyCosted is the day-mode
+// counterpart of the history gate: a day whose amount includes a pass-through
+// extra has no missing cost, so it must not suppress the forecast.
+func TestProjectCurrentDayTreatsAnExtraExpenseDayAsFullyCosted(t *testing.T) {
+	t.Parallel()
+
+	days := tenElapsedDays()
+	days[4].AmountMinor += 1_000_000
+	days[4].ExtraExpenseMinor = 1_000_000
+
+	projection := ProjectCurrent(nil, days, dayQuery(), at(2026, 11, 10), false, false)
+	if projection.Mode != ProjectionModeDay || projection.Status != ProjectionStatusAvailable {
+		t.Fatalf("projection = %s/%s/%s; want day/available",
+			projection.Mode, projection.Status, projection.Reason)
+	}
+	if len(projection.Buckets) != 20 {
+		t.Errorf("buckets = %d; want the 20 remaining days", len(projection.Buckets))
+	}
+
+	// The same amount with no extra kind is genuinely uncosted revenue and keeps
+	// the guard working.
+	unpriced := tenElapsedDays()
+	unpriced[4].AmountMinor += 1_000_000
+	blocked := ProjectCurrent(nil, unpriced, dayQuery(), at(2026, 11, 10), false, false)
+	if blocked.Status != ProjectionStatusUnavailable || blocked.Reason != ReasonIncompleteCostBasis {
+		t.Errorf("unpriced day = %s/%s; want unavailable/%s",
+			blocked.Status, blocked.Reason, ReasonIncompleteCostBasis)
+	}
+}
+
 func TestProjectCurrentHistoricalRangeIsModeNone(t *testing.T) {
 	t.Parallel()
 

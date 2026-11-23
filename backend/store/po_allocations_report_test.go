@@ -101,6 +101,23 @@ func TestPurchaseOrderReportResolvesMixedAllocationAndLegacyLines(t *testing.T) 
 	if report.Totals.MarginBps == nil || *report.Totals.MarginBps != 1562 {
 		t.Errorf("margin bps = %v; want 1562", report.Totals.MarginBps)
 	}
+	// #655: migration 055 defaults every pre-existing line to quotation, so a
+	// legacy null-reference row stays uncosted revenue and is never reclassified
+	// as a deliberate extra expense.
+	if report.Totals.ExtraExpenseMinor != 0 {
+		t.Errorf("extra expense = %d; want 0 for legacy null-reference lines",
+			report.Totals.ExtraExpenseMinor)
+	}
+	reloaded, err := database.GetPurchaseOrder(ctx, saved.ID)
+	if err != nil {
+		t.Fatalf("reload the mixed legacy record: %v", err)
+	}
+	for index, item := range reloaded.Items {
+		if item.LineKind != PurchaseOrderLineKindQuotation {
+			t.Errorf("line %d kind = %q; want quotation for a legacy null-reference row",
+				index+1, item.LineKind)
+		}
+	}
 }
 
 func TestPurchaseOrderReportIgnoresAStaleLiveAllocation(t *testing.T) {

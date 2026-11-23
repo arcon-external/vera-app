@@ -34,7 +34,14 @@ func monthTestRatio(t *testing.T, numerator, denominator int64) *int64 {
 
 func monthTestMetrics(t *testing.T, count, amount, costed, capital int64) Metrics {
 	t.Helper()
-	metrics, err := currentMetrics(count, amount, costed, capital)
+	return monthTestMetricsExtra(t, count, amount, 0, costed, capital)
+}
+
+// monthTestMetricsExtra builds a metrics row whose amount includes a
+// pass-through extra expense. Uncosted is derived from the non-extra portion.
+func monthTestMetricsExtra(t *testing.T, count, amount, extra, costed, capital int64) Metrics {
+	t.Helper()
+	metrics, err := currentMetrics(count, amount, costed, capital, extra)
 	if err != nil {
 		t.Fatalf("currentMetrics: %v", err)
 	}
@@ -54,6 +61,16 @@ func monthPeriod(t *testing.T, start string, count, amount, costed, capital int6
 	return Period{
 		PeriodStart: start,
 		Metrics:     monthTestMetrics(t, count, amount, costed, capital),
+	}
+}
+
+// monthPeriodExtra is one supplied day row whose amount includes a pass-through
+// extra expense.
+func monthPeriodExtra(t *testing.T, start string, count, amount, extra, costed, capital int64) Period {
+	t.Helper()
+	return Period{
+		PeriodStart: start,
+		Metrics:     monthTestMetricsExtra(t, count, amount, extra, costed, capital),
 	}
 }
 
@@ -598,11 +615,93 @@ func TestMonthSummaryJSONOmitsAbsentOptionalEvidence(t *testing.T) {
 func equalMonthMetrics(left, right Metrics) bool {
 	if left.PoCount != right.PoCount || left.AmountMinor != right.AmountMinor ||
 		left.CostedMinor != right.CostedMinor || left.UncostedMinor != right.UncostedMinor ||
+		left.ExtraExpenseMinor != right.ExtraExpenseMinor ||
 		left.CapitalMinor != right.CapitalMinor || left.MarginMinor != right.MarginMinor {
 		return false
 	}
 	return sameOptionalInt64(left.MarginBps, right.MarginBps) &&
 		sameOptionalInt64(left.CoverageBps, right.CoverageBps)
+}
+
+// TestBuildMonthSummaryKeepsAnExtraExpenseOutOfUncostedAndCoverage pins the
+// month readout's identity: amount = costed + uncosted + extra, so a
+// pass-through day is neither unknown cost nor coverage the office is missing.
+func TestBuildMonthSummaryKeepsAnExtraExpenseOutOfUncostedAndCoverage(t *testing.T) {
+	asOf := monthTestDate(t, "2026-11-19")
+	query := currentMonthDayQuery()
+	daily := dailySample(t)
+	daily[0].AmountMinor += 1_000_000
+	daily[0].ExtraExpenseMinor = 1_000_000
+	current := ProjectCurrent(nil, daily, query, asOf, false, false)
+	if current.Mode != ProjectionModeDay || current.Status != ProjectionStatusAvailable {
+		t.Fatalf("projection = %s/%s/%s; want day/available",
+			current.Mode, current.Status, current.Reason)
+	}
+
+	summary, err := BuildMonthSummary([]Period{
+		monthPeriodExtra(t, "2026-11-20", 1, 500_000, 500_000, 0, 0),
+	}, daily, current, query, asOf, false)
+	if err != nil {
+		t.Fatalf("BuildMonthSummary: %v", err)
+	}
+	if summary == nil {
+		t.Fatal("monthSummary = nil; want the current month readout")
+	}
+
+	wantActual := monthTestMetricsExtra(t, 3, 5_000_000, 1_000_000, 4_000_000, 2_800_000)
+	if !equalMonthMetrics(summary.Actual, wantActual) {
+		t.Errorf("actual = %+v; want %+v", summary.Actual, wantActual)
+	}
+	if summary.Actual.AmountMinor != summary.Actual.CostedMinor+
+		summary.Actual.UncostedMinor+summary.Actual.ExtraExpenseMinor {
+		t.Errorf("actual identity broken: amount %d != costed %d + uncosted %d + extra %d",
+			summary.Actual.AmountMinor, summary.Actual.CostedMinor,
+			summary.Actual.UncostedMinor, summary.Actual.ExtraExpenseMinor)
+	}
+	if summary.Actual.CoverageBps == nil || *summary.Actual.CoverageBps != 10000 {
+		t.Errorf("actual coverage = %s; want 10000 bps on the non-extra amount",
+			showOptionalInt64(summary.Actual.CoverageBps))
+	}
+
+	// Recorded future-dated evidence carries the same split.
+	if summary.RecordedFuture == nil {
+		t.Fatal("recordedFuture = nil; want the future-dated extra day")
+	}
+	wantRecorded := monthTestMetricsExtra(t, 1, 500_000, 500_000, 0, 0)
+	if !equalMonthMetrics(*summary.RecordedFuture, wantRecorded) {
+		t.Errorf("recordedFuture = %+v; want %+v", *summary.RecordedFuture, wantRecorded)
+	}
+	if summary.RecordedFuture.UncostedMinor != 0 || summary.RecordedFuture.CoverageBps != nil {
+		t.Errorf("recorded extra day = %+v; want no uncosted and null coverage",
+			*summary.RecordedFuture)
+	}
+}
+
+// TestRecordedDifferenceSubtractsExtraExpense covers month mode: the whole-month
+// row includes future-dated extras, and the difference from Actual must keep
+// them in the Extra Expense bucket rather than in uncosted.
+func TestRecordedDifferenceSubtractsExtraExpense(t *testing.T) {
+	raw := monthTestMetricsExtra(t, 1, 1_500_000, 500_000, 1_000_000, 600_000)
+	actual := monthTestMetricsExtra(t, 1, 1_000_000, 0, 1_000_000, 600_000)
+
+	difference, err := recordedDifference(
+		[]Period{{PeriodStart: "2026-11-01", Metrics: raw}},
+		monthTestDate(t, "2026-11-01"), actual)
+	if err != nil {
+		t.Fatalf("recordedDifference: %v", err)
+	}
+	if difference == nil {
+		t.Fatal("recordedDifference = nil; want the future-dated extra day")
+	}
+	if difference.AmountMinor != 500_000 || difference.ExtraExpenseMinor != 500_000 ||
+		difference.CostedMinor != 0 || difference.CapitalMinor != 0 ||
+		difference.UncostedMinor != 0 || difference.MarginMinor != 0 {
+		t.Errorf("difference = %+v; want amount 500.000 all in extra expense", *difference)
+	}
+	if difference.MarginBps != nil || difference.CoverageBps != nil {
+		t.Errorf("difference ratios = %s/%s; want null/null with zero capital and denominator",
+			showOptionalInt64(difference.MarginBps), showOptionalInt64(difference.CoverageBps))
+	}
 }
 
 func equalRemainder(left, right CurrentProjectionRemainder) bool {

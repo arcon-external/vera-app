@@ -42,6 +42,15 @@ const (
 // no locale-dependent decimal string enters the database.
 const QuantityScale int64 = 10000
 
+// The two PO line kinds (#655). A quotation line is backed by the revision leaf
+// it fulfils and owns an allocation; an extra line was never on the quotation,
+// carries no reference and no allocation, and reports as a pass-through Extra
+// Expense with zero margin.
+const (
+	PurchaseOrderLineKindQuotation = "quotation"
+	PurchaseOrderLineKindExtra     = "extra"
+)
+
 // maxPaymentTermsLength bounds the free-text terms to the migration's
 // char_length CHECK. The unit is Unicode characters -- not UTF-8 bytes and not
 // UTF-16 units -- so "500" means the same thing in Postgres, this store and
@@ -89,6 +98,11 @@ var (
 	// ErrPurchaseOrderBadReference refuses a line that names a Quotation item
 	// or sub-item that the frozen source revision does not carry.
 	ErrPurchaseOrderBadReference = errors.New("purchase order line references an unknown quotation item")
+	// ErrPurchaseOrderLineKindInvalid refuses an unknown line kind, or an extra
+	// line that names a quotation reference. An extra line was never on the
+	// quotation, so a reference would make it a bought quotation leaf while it
+	// still declared itself a pass-through expense.
+	ErrPurchaseOrderLineKindInvalid = errors.New("purchase order line kind is invalid")
 	// ErrPurchaseOrderInvalid refuses values the schema may not express
 	// meaningfully (a zero quantity, a negative price, a malformed date).
 	ErrPurchaseOrderInvalid = errors.New("purchase order draft is invalid")
@@ -160,6 +174,11 @@ type PurchaseOrderItem struct {
 	GrossMinor      int64
 	DiscountMinor   int64
 	NetMinor        int64
+	// LineKind is PurchaseOrderLineKindQuotation or PurchaseOrderLineKindExtra.
+	// The empty string is read and written as quotation: a client that predates
+	// #655 sends no kind, and the column is NOT NULL, so the store -- never the
+	// database default -- decides the compatibility meaning.
+	LineKind string
 	// ClientKey is the editor's stable alias for the line (`client:<UUID>`).
 	// Empty for server-created lines and every row written before migration
 	// 042; those rows are addressed by `id:<row>`. The alias is matched on
@@ -1461,6 +1480,7 @@ func (line PurchaseOrderSourceLine) PurchaseOrderItem() PurchaseOrderItem {
 	itemNo := line.QuotationItemNo
 	item := PurchaseOrderItem{
 		QuotationItemNo:   &itemNo,
+		LineKind:          PurchaseOrderLineKindQuotation,
 		Description:       line.Description,
 		QuantityScaled:    line.QuantityScaled,
 		UoM:               line.UoM,
@@ -1560,11 +1580,28 @@ func validatePurchaseOrderReferences(ctx context.Context, q purchaseOrderQuerier
 	return nil
 }
 
+// normalizePurchaseOrderLineKind resolves the submitted kind. An absent kind is
+// the compatibility value quotation: the column is NOT NULL, and an INSERT that
+// named it with an empty string would bypass the database default. Any other
+// value is refused with the typed error the API maps to 422.
+func normalizePurchaseOrderLineKind(kind string) (string, error) {
+	switch kind {
+	case "", PurchaseOrderLineKindQuotation:
+		return PurchaseOrderLineKindQuotation, nil
+	case PurchaseOrderLineKindExtra:
+		return PurchaseOrderLineKindExtra, nil
+	default:
+		return "", fmt.Errorf("%w: %q is not a purchase order line kind",
+			ErrPurchaseOrderLineKindInvalid, kind)
+	}
+}
+
 // calculatePurchaseOrderLines runs the exact calculator (po_calc.go) over the
 // entered rows and returns those rows with their stored money figures filled,
 // alongside the header totals. The inputs are mutated in place-ish (a new slice
 // is returned) so the caller can persist exactly what was calculated; nothing
-// here recalculates on read.
+// here recalculates on read. The line kind is normalized here because every
+// writer persists this returned slice.
 func calculatePurchaseOrderLines(items []PurchaseOrderItem, _ int16, _ int64, _ string, ppnBps int16) ([]PurchaseOrderItem, PurchaseOrderCalc, error) {
 	input := PurchaseOrderCalcInput{
 		Lines:  make([]PurchaseOrderCalcLine, len(items)),
@@ -1584,7 +1621,18 @@ func calculatePurchaseOrderLines(items []PurchaseOrderItem, _ int16, _ int64, _ 
 	}
 	lines := make([]PurchaseOrderItem, len(items))
 	for index, item := range items {
+		kind, err := normalizePurchaseOrderLineKind(item.LineKind)
+		if err != nil {
+			return nil, PurchaseOrderCalc{}, fmt.Errorf("%w: line %d", err, index+1)
+		}
+		if kind == PurchaseOrderLineKindExtra &&
+			(item.QuotationItemNo != nil || item.QuotationSubNo != nil) {
+			return nil, PurchaseOrderCalc{}, fmt.Errorf(
+				"%w: line %d is an extra line and cannot name a quotation reference",
+				ErrPurchaseOrderLineKindInvalid, index+1)
+		}
 		calculated := calculation.Lines[index]
+		item.LineKind = kind
 		item.GrossMinor = calculated.GrossMinor
 		item.DiscountMinor = calculated.DiscountMinor
 		item.NetMinor = calculated.NetMinor
@@ -1627,6 +1675,16 @@ func calculatePurchaseOrderLines(items []PurchaseOrderItem, _ int16, _ int64, _ 
 // (purchase_order_id, line_number) uniqueness is DEFERRABLE (migration 042)
 // so a swap of two display positions commits atomically.
 func replacePurchaseOrderItems(ctx context.Context, tx pgx.Tx, schema, orgID string, orderID int64, items []PurchaseOrderItem) (kept []PurchaseOrderItem, removed []int64, err error) {
+	// The column is NOT NULL, and an INSERT that names it with '' bypasses the
+	// database default. Resolve the compatibility meaning once, before any row
+	// is touched, so every writer stores an explicit kind.
+	for index := range items {
+		kind, kindErr := normalizePurchaseOrderLineKind(items[index].LineKind)
+		if kindErr != nil {
+			return nil, nil, fmt.Errorf("%w: line %d", kindErr, index+1)
+		}
+		items[index].LineKind = kind
+	}
 	var parentOrg string
 	if err := tx.QueryRow(ctx, fmt.Sprintf(
 		`SELECT org_id::text FROM %s.purchase_orders WHERE id = $1`, schema),
@@ -1647,7 +1705,7 @@ func replacePurchaseOrderItems(ctx context.Context, tx pgx.Tx, schema, orgID str
 		SELECT id, COALESCE(client_key, ''), description, quotation_item_no,
 		       quotation_sub_no, quantity_scaled, uom, unit_price_minor,
 		       discount_enabled, discount_percent, group_key,
-		       parent_description, description_lines
+		       parent_description, description_lines, line_kind
 		FROM %s.purchase_order_items
 		WHERE purchase_order_id = $1
 		ORDER BY line_number`, schema), orderID)
@@ -1663,7 +1721,8 @@ func replacePurchaseOrderItems(ctx context.Context, tx pgx.Tx, schema, orgID str
 			&itemNo, &subNo, &line.item.QuantityScaled, &line.item.UoM,
 			&line.item.UnitPriceMinor, &line.item.DiscountEnabled,
 			&line.item.DiscountPercent, &line.item.GroupKey,
-			&line.item.ParentDescription, &descriptionLines); err != nil {
+			&line.item.ParentDescription, &descriptionLines,
+			&line.item.LineKind); err != nil {
 			rows.Close()
 			return nil, nil, fmt.Errorf("scan purchase order line: %w", err)
 		}
@@ -1836,14 +1895,14 @@ func replacePurchaseOrderItems(ctx context.Context, tx pgx.Tx, schema, orgID str
 					discount_percent = $10, gross_minor = $11,
 					discount_minor = $12, net_minor = $13, client_key = $14,
 					group_key = $15, parent_description = $16,
-					description_lines = $17
+					description_lines = $17, line_kind = $18
 				WHERE id = $1`, schema),
 				row.item.ID, lineNumber, item.Description, item.QuotationItemNo,
 				item.QuotationSubNo, item.QuantityScaled, item.UoM, item.UnitPriceMinor,
 				item.DiscountEnabled, item.DiscountPercent, item.GrossMinor,
 				item.DiscountMinor, item.NetMinor, nilIfEmptyString(clientKey),
 				item.GroupKey, item.ParentDescription,
-				encodeDescriptionLines(item.DescriptionLines),
+				encodeDescriptionLines(item.DescriptionLines), item.LineKind,
 			); err != nil {
 				return nil, nil, fmt.Errorf("update purchase order line %d: %w", lineNumber, err)
 			}
@@ -1859,15 +1918,15 @@ func replacePurchaseOrderItems(ctx context.Context, tx pgx.Tx, schema, orgID str
 				quotation_sub_no, quantity_scaled, uom, unit_price_minor,
 				discount_enabled, discount_percent, gross_minor,
 				discount_minor, net_minor, client_key, group_key,
-				parent_description, description_lines
-			) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)
+				parent_description, description_lines, line_kind
+			) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18)
 			RETURNING id`, schema),
 			orderID, lineNumber, item.Description, item.QuotationItemNo,
 			item.QuotationSubNo, item.QuantityScaled, item.UoM, item.UnitPriceMinor,
 			item.DiscountEnabled, item.DiscountPercent, item.GrossMinor,
 			item.DiscountMinor, item.NetMinor, nilIfEmptyString(item.ClientKey),
 			item.GroupKey, item.ParentDescription,
-			encodeDescriptionLines(item.DescriptionLines),
+			encodeDescriptionLines(item.DescriptionLines), item.LineKind,
 		).Scan(&id); err != nil {
 			return nil, nil, fmt.Errorf("insert purchase order line %d: %w", lineNumber, err)
 		}
@@ -1979,6 +2038,15 @@ func purchaseOrderLineValuesEqual(stored, entered PurchaseOrderItem) bool {
 		stored.UnitPriceMinor != entered.UnitPriceMinor ||
 		stored.DiscountEnabled != entered.DiscountEnabled ||
 		stored.DiscountPercent != entered.DiscountPercent {
+		return false
+	}
+	// The kind is part of a line's identity: an extra and a quotation line with
+	// the same wording, quantity and price are different lines. Both sides are
+	// normalized, so a legacy payload without a kind still matches a stored
+	// quotation line instead of churning its row id.
+	storedKind, storedErr := normalizePurchaseOrderLineKind(stored.LineKind)
+	enteredKind, enteredErr := normalizePurchaseOrderLineKind(entered.LineKind)
+	if storedErr != nil || enteredErr != nil || storedKind != enteredKind {
 		return false
 	}
 	if (stored.QuotationItemNo == nil) != (entered.QuotationItemNo == nil) {
@@ -2189,7 +2257,7 @@ func getPurchaseOrder(ctx context.Context, q purchaseOrderQuerier, schema, orgID
 		       poi.unit_price_minor, poi.discount_enabled, poi.discount_percent,
 		       poi.gross_minor, poi.discount_minor, poi.net_minor, poi.client_key,
 		       poi.group_key, poi.parent_description, poi.description_lines,
-		       poi.aggregate_group_id,
+		       poi.aggregate_group_id, poi.line_kind,
 		       EXISTS (
 		           SELECT 1 FROM %s.purchase_order_allocations a
 		           WHERE a.purchase_order_item_id = poi.id
@@ -2220,7 +2288,7 @@ func getPurchaseOrder(ctx context.Context, q purchaseOrderQuerier, schema, orgID
 			&item.DiscountEnabled, &item.DiscountPercent, &item.GrossMinor,
 			&item.DiscountMinor, &item.NetMinor, &clientKey, &item.GroupKey,
 			&item.ParentDescription, &descriptionLines, &aggregateGroupID,
-			&item.hasAllocation, &item.quotedUnitPriceMinor); err != nil {
+			&item.LineKind, &item.hasAllocation, &item.quotedUnitPriceMinor); err != nil {
 			return PurchaseOrder{}, fmt.Errorf("scan purchase order line: %w", err)
 		}
 		item.DescriptionLines = decodeDescriptionLines(descriptionLines)

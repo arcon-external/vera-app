@@ -129,19 +129,24 @@ type Query struct {
 }
 
 // Metrics are one period, category or whole-report set of figures. Amount is
-// the sell total excluding PPN. Costed is the amount on lines whose exact source
-// cost resolved, Capital is the pinned source cost at the ordered quantity, and
-// Uncosted is amount-costed. Margin is costed-capital and is signed. MarginBps
-// and CoverageBps are null, never zero, when their denominator is zero.
+// the sell total excluding PPN and includes extra expense lines. Costed is the
+// amount on lines whose exact source cost resolved, Capital is the pinned source
+// cost at the ordered quantity, and Uncosted is amount - costed - extra: money
+// that should have a quotation cost but does not. ExtraExpense is the
+// pass-through amount of deliberate extra lines (#655); it has no cost and no
+// margin, and it is subtracted from the coverage denominator. Margin is
+// costed-capital and is signed. MarginBps and CoverageBps are null, never zero,
+// when their denominator is zero.
 type Metrics struct {
-	PoCount       int64  `json:"poCount"`
-	AmountMinor   int64  `json:"amountMinor"`
-	CostedMinor   int64  `json:"costedMinor"`
-	UncostedMinor int64  `json:"uncostedMinor"`
-	CapitalMinor  int64  `json:"capitalMinor"`
-	MarginMinor   int64  `json:"marginMinor"`
-	MarginBps     *int64 `json:"marginBps"`
-	CoverageBps   *int64 `json:"coverageBps"`
+	PoCount           int64  `json:"poCount"`
+	AmountMinor       int64  `json:"amountMinor"`
+	CostedMinor       int64  `json:"costedMinor"`
+	UncostedMinor     int64  `json:"uncostedMinor"`
+	ExtraExpenseMinor int64  `json:"extraExpenseMinor"`
+	CapitalMinor      int64  `json:"capitalMinor"`
+	MarginMinor       int64  `json:"marginMinor"`
+	MarginBps         *int64 `json:"marginBps"`
+	CoverageBps       *int64 `json:"coverageBps"`
 }
 
 // Company is the issuer snapshot the report was generated under.

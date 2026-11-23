@@ -32,10 +32,18 @@ import (
 //
 //	amount    = subtotal_minor - discount_minor + adjustment_minor  (ex PPN)
 //	costed    = SUM(net_minor) of lines whose exact source cost resolved
+//	extra     = SUM(net_minor) of explicit extra expense lines
 //	capital   = round_half_away(SUM(cost_unit * quantity_scaled) / 10000)
 //	            rounded once per PO, left unrounded across a PO's lines
 //	margin    = costed - capital                                   (signed)
-//	uncosted  = amount - costed
+//	uncosted  = amount - costed - extra
+//	coverage  = costed / (amount - extra)
+//
+// An extra line (#655) is a pass-through: its amount is real revenue, but it has
+// no supplier cost and no margin, so it is neither costed nor uncosted. It is
+// reported in its own Extra Expense bucket and subtracted from the coverage
+// denominator. A record whose only line is an extra therefore has a zero
+// denominator and null coverage, never 0% or 100% profit.
 //
 // Capital's division happens after the lines are summed, so two half-unit
 // lines round together rather than becoming zeros separately. The per-PO
@@ -242,7 +250,11 @@ func (s *Store) ReportPurchaseOrders(ctx context.Context, query poreport.Query, 
 	if err != nil {
 		return PurchaseOrderReportSnapshot{}, err
 	}
-	totals, err := reportMetrics(totalsRow.PoCount, amount, costed, capital)
+	extra, err := reportExactNumber(totalsRow.ExtraExpenseMinor, "total extra expense")
+	if err != nil {
+		return PurchaseOrderReportSnapshot{}, err
+	}
+	totals, err := reportMetrics(totalsRow.PoCount, amount, costed, capital, extra)
 	if err != nil {
 		return PurchaseOrderReportSnapshot{}, fmt.Errorf("total metrics: %w", err)
 	}
@@ -310,25 +322,28 @@ type reportTotalsJSON struct {
 	PoCount                 int64       `json:"poCount"`
 	AmountMinor             json.Number `json:"amountMinor"`
 	CostedMinor             json.Number `json:"costedMinor"`
+	ExtraExpenseMinor       json.Number `json:"extraExpenseMinor"`
 	CapitalMinor            json.Number `json:"capitalMinor"`
 	SourceMissingPoCount    int64       `json:"sourceMissingPoCount"`
 	LegacyAdjustmentPoCount int64       `json:"legacyAdjustmentPoCount"`
 }
 
 type reportBucketJSON struct {
-	PeriodStart  string      `json:"periodStart"`
-	PoCount      int64       `json:"poCount"`
-	AmountMinor  json.Number `json:"amountMinor"`
-	CostedMinor  json.Number `json:"costedMinor"`
-	CapitalMinor json.Number `json:"capitalMinor"`
+	PeriodStart       string      `json:"periodStart"`
+	PoCount           int64       `json:"poCount"`
+	AmountMinor       json.Number `json:"amountMinor"`
+	CostedMinor       json.Number `json:"costedMinor"`
+	ExtraExpenseMinor json.Number `json:"extraExpenseMinor"`
+	CapitalMinor      json.Number `json:"capitalMinor"`
 }
 
 type reportCategoryJSON struct {
-	BusinessCategory string      `json:"businessCategory"`
-	PoCount          int64       `json:"poCount"`
-	AmountMinor      json.Number `json:"amountMinor"`
-	CostedMinor      json.Number `json:"costedMinor"`
-	CapitalMinor     json.Number `json:"capitalMinor"`
+	BusinessCategory  string      `json:"businessCategory"`
+	PoCount           int64       `json:"poCount"`
+	AmountMinor       json.Number `json:"amountMinor"`
+	CostedMinor       json.Number `json:"costedMinor"`
+	ExtraExpenseMinor json.Number `json:"extraExpenseMinor"`
+	CapitalMinor      json.Number `json:"capitalMinor"`
 }
 
 type reportCategoryPeriodJSON struct {
@@ -339,11 +354,12 @@ type reportCategoryPeriodJSON struct {
 }
 
 type reportHistoryJSON struct {
-	MonthStart   string      `json:"monthStart"`
-	PoCount      int64       `json:"poCount"`
-	AmountMinor  json.Number `json:"amountMinor"`
-	CostedMinor  json.Number `json:"costedMinor"`
-	CapitalMinor json.Number `json:"capitalMinor"`
+	MonthStart        string      `json:"monthStart"`
+	PoCount           int64       `json:"poCount"`
+	AmountMinor       json.Number `json:"amountMinor"`
+	CostedMinor       json.Number `json:"costedMinor"`
+	ExtraExpenseMinor json.Number `json:"extraExpenseMinor"`
+	CapitalMinor      json.Number `json:"capitalMinor"`
 }
 
 // reportExactNumber reads one JSON numeric aggregate as an int64 that a
@@ -400,19 +416,23 @@ func reportOptionalExact(value json.Number, field string) (int64, error) {
 	return reportExactNumber(value, field)
 }
 
-func reportMetrics(poCount, amount, costed, capital int64) (poreport.Metrics, error) {
+func reportMetrics(poCount, amount, costed, capital, extra int64) (poreport.Metrics, error) {
 	for name, value := range map[string]int64{
-		"po count": poCount,
-		"amount":   amount,
-		"costed":   costed,
-		"capital":  capital,
+		"po count":      poCount,
+		"amount":        amount,
+		"costed":        costed,
+		"capital":       capital,
+		"extra expense": extra,
 	} {
 		if err := poreport.CheckExact(value); err != nil {
 			return poreport.Metrics{}, fmt.Errorf("%s: %w", name, err)
 		}
 	}
 	margin := costed - capital
-	uncosted := amount - costed
+	// An extra line is a pass-through charge, not an unknown cost: it leaves
+	// uncosted and the coverage denominator, so a record whose only line is an
+	// extra reads 0% uncovered rather than 100% profit.
+	uncosted := amount - costed - extra
 	if err := poreport.CheckExact(margin); err != nil {
 		return poreport.Metrics{}, fmt.Errorf("margin: %w", err)
 	}
@@ -423,19 +443,20 @@ func reportMetrics(poCount, amount, costed, capital int64) (poreport.Metrics, er
 	if err != nil {
 		return poreport.Metrics{}, fmt.Errorf("margin percentage: %w", err)
 	}
-	coverageBps, err := poreport.RatioBps(costed, amount)
+	coverageBps, err := poreport.RatioBps(costed, amount-extra)
 	if err != nil {
 		return poreport.Metrics{}, fmt.Errorf("coverage percentage: %w", err)
 	}
 	return poreport.Metrics{
-		PoCount:       poCount,
-		AmountMinor:   amount,
-		CostedMinor:   costed,
-		UncostedMinor: uncosted,
-		CapitalMinor:  capital,
-		MarginMinor:   margin,
-		MarginBps:     marginBps,
-		CoverageBps:   coverageBps,
+		PoCount:           poCount,
+		AmountMinor:       amount,
+		CostedMinor:       costed,
+		UncostedMinor:     uncosted,
+		ExtraExpenseMinor: extra,
+		CapitalMinor:      capital,
+		MarginMinor:       margin,
+		MarginBps:         marginBps,
+		CoverageBps:       coverageBps,
 	}, nil
 }
 
@@ -472,7 +493,11 @@ func reportPeriods(raw []byte, from, to, asOf time.Time, bucket string) ([]porep
 		if err != nil {
 			return nil, err
 		}
-		metrics, err := reportMetrics(row.PoCount, amount, costed, capital)
+		extra, err := reportOptionalExact(row.ExtraExpenseMinor, "period "+start.Format(time.DateOnly)+" extra expense")
+		if err != nil {
+			return nil, err
+		}
+		metrics, err := reportMetrics(row.PoCount, amount, costed, capital, extra)
 		if err != nil {
 			return nil, fmt.Errorf("period %s: %w", start.Format(time.DateOnly), err)
 		}
@@ -519,7 +544,11 @@ func reportCategories(raw []byte, filter string) ([]poreport.Category, error) {
 		if err != nil {
 			return nil, err
 		}
-		metrics, err := reportMetrics(row.PoCount, amount, costed, capital)
+		extra, err := reportOptionalExact(row.ExtraExpenseMinor, "category "+code+" extra expense")
+		if err != nil {
+			return nil, err
+		}
+		metrics, err := reportMetrics(row.PoCount, amount, costed, capital, extra)
 		if err != nil {
 			return nil, fmt.Errorf("category %s: %w", code, err)
 		}
@@ -682,8 +711,14 @@ func reportHistory(raw []byte, historyTo, asOf time.Time) (reportHistorySample, 
 		if err != nil {
 			return reportHistorySample{basis: basis, outOfRange: true}, nil
 		}
+		extra, err := reportOptionalExact(row.ExtraExpenseMinor, "history "+key+" extra expense")
+		if err != nil {
+			return reportHistorySample{basis: basis, outOfRange: true}, nil
+		}
 		uncosted, err := reportExactBigInt(
-			new(big.Int).Sub(big.NewInt(amount), big.NewInt(costed)),
+			new(big.Int).Sub(
+				new(big.Int).Sub(big.NewInt(amount), big.NewInt(costed)),
+				big.NewInt(extra)),
 			"history "+key+" uncosted amount")
 		if err != nil {
 			return reportHistorySample{basis: basis, outOfRange: true}, nil
@@ -691,11 +726,12 @@ func reportHistory(raw []byte, historyTo, asOf time.Time) (reportHistorySample, 
 		history = append(history, poreport.HistoryMonth{
 			MonthStart: key,
 			Metrics: poreport.Metrics{
-				PoCount:       row.PoCount,
-				AmountMinor:   amount,
-				CostedMinor:   costed,
-				UncostedMinor: uncosted,
-				CapitalMinor:  capital,
+				PoCount:           row.PoCount,
+				AmountMinor:       amount,
+				CostedMinor:       costed,
+				UncostedMinor:     uncosted,
+				ExtraExpenseMinor: extra,
+				CapitalMinor:      capital,
 			},
 		})
 	}
@@ -711,11 +747,12 @@ type reportDailySample struct {
 }
 
 type reportDailyJSON struct {
-	Date         string      `json:"date"`
-	PoCount      int64       `json:"poCount"`
-	AmountMinor  json.Number `json:"amountMinor"`
-	CostedMinor  json.Number `json:"costedMinor"`
-	CapitalMinor json.Number `json:"capitalMinor"`
+	Date              string      `json:"date"`
+	PoCount           int64       `json:"poCount"`
+	AmountMinor       json.Number `json:"amountMinor"`
+	CostedMinor       json.Number `json:"costedMinor"`
+	ExtraExpenseMinor json.Number `json:"extraExpenseMinor"`
+	CapitalMinor      json.Number `json:"capitalMinor"`
 }
 
 // reportDaily decodes the current month's daily rows. Days with no orders are
@@ -757,8 +794,14 @@ func reportDaily(raw []byte, asOf time.Time) (reportDailySample, error) {
 		if err != nil {
 			return reportDailySample{outOfRange: true}, nil
 		}
+		extra, err := reportExactNumber(row.ExtraExpenseMinor, "daily "+row.Date+" extra expense")
+		if err != nil {
+			return reportDailySample{outOfRange: true}, nil
+		}
 		uncosted, err := reportExactBigInt(
-			new(big.Int).Sub(big.NewInt(amount), big.NewInt(costed)),
+			new(big.Int).Sub(
+				new(big.Int).Sub(big.NewInt(amount), big.NewInt(costed)),
+				big.NewInt(extra)),
 			"daily "+row.Date+" uncosted amount")
 		if err != nil {
 			return reportDailySample{outOfRange: true}, nil
@@ -766,11 +809,12 @@ func reportDaily(raw []byte, asOf time.Time) (reportDailySample, error) {
 		days = append(days, poreport.HistoryDay{
 			Date: row.Date,
 			Metrics: poreport.Metrics{
-				PoCount:       row.PoCount,
-				AmountMinor:   amount,
-				CostedMinor:   costed,
-				UncostedMinor: uncosted,
-				CapitalMinor:  capital,
+				PoCount:           row.PoCount,
+				AmountMinor:       amount,
+				CostedMinor:       costed,
+				UncostedMinor:     uncosted,
+				ExtraExpenseMinor: extra,
+				CapitalMinor:      capital,
 			},
 		})
 	}
@@ -1168,18 +1212,26 @@ item_alloc_agg AS (
 ),
 item_metrics AS (
     -- Resolve each item independently so a mixed historical PO keeps the cost
-    -- of allocated lines, matched legacy lines, and uncosted null-ref lines.
+    -- of allocated lines, matched legacy lines, and uncosted null-ref lines. An
+    -- extra line (#655) is a pass-through expense: it contributes neither cost
+    -- nor capital, and its full net is its own Extra Expense bucket.
     SELECT po.id AS po_id,
            CASE
+               WHEN poi.line_kind = 'extra' THEN 0::numeric
                WHEN ia.alloc_count > 0 THEN ia.alloc_costed
                WHEN resolved.cost_unit IS NOT NULL THEN poi.net_minor::numeric
                ELSE 0::numeric
            END AS item_costed,
            CASE
+               WHEN poi.line_kind = 'extra' THEN 0::numeric
                WHEN ia.alloc_count > 0 THEN ia.alloc_capital_scaled
                WHEN resolved.cost_unit IS NOT NULL THEN poi.quantity_scaled::numeric * resolved.cost_unit
                ELSE 0::numeric
-           END AS item_capital_scaled
+           END AS item_capital_scaled,
+           CASE
+               WHEN poi.line_kind = 'extra' THEN poi.net_minor::numeric
+               ELSE 0::numeric
+           END AS item_extra_expense
     FROM base_population po
     JOIN %[1]s.purchase_order_items poi ON poi.purchase_order_id = po.id
     LEFT JOIN item_alloc_agg ia ON ia.purchase_order_item_id = poi.id
@@ -1208,6 +1260,7 @@ po_metrics AS (
            po.business_category,
            po.subtotal_minor::numeric - po.discount_minor + po.adjustment_minor AS amount,
            COALESCE(SUM(im.item_costed), 0) AS costed,
+           COALESCE(SUM(im.item_extra_expense), 0) AS extra_expense,
            ROUND(COALESCE(SUM(im.item_capital_scaled), 0) / 10000) AS capital,
            (po.discount_minor <> 0 OR po.adjustment_minor <> 0) AS legacy_adjustment,
            (po.quotation_id IS NULL) AS source_missing,
@@ -1231,7 +1284,8 @@ actual_rows AS (
                po.received_date
            )::date AS bucket_start,
            CASE WHEN po.business_category = '' THEN 'UNASSIGNED' ELSE po.business_category END AS category,
-           po.amount, po.costed, po.capital, po.source_missing, po.legacy_adjustment
+           po.amount, po.costed, po.extra_expense, po.capital,
+           po.source_missing, po.legacy_adjustment
     FROM po_metrics po
     WHERE po.is_actual
 ),
@@ -1245,6 +1299,7 @@ actual_cube AS (
            COUNT(*) AS po_count,
            SUM(amount) AS amount,
            SUM(costed) AS costed,
+           SUM(extra_expense) AS extra_expense,
            SUM(capital) AS capital,
            COUNT(*) FILTER (WHERE source_missing) AS source_missing_count,
            COUNT(*) FILTER (WHERE legacy_adjustment) AS legacy_adjustment_count,
@@ -1257,6 +1312,7 @@ history_metrics AS (
            COUNT(*) AS po_count,
            SUM(amount) AS amount,
            SUM(costed) AS costed,
+           SUM(extra_expense) AS extra_expense,
            SUM(capital) AS capital
     FROM po_metrics
     WHERE received_date < $6::date
@@ -1269,6 +1325,7 @@ daily_metrics AS (
            COUNT(*) AS po_count,
            SUM(amount) AS amount,
            SUM(costed) AS costed,
+           SUM(extra_expense) AS extra_expense,
            SUM(capital) AS capital
     FROM po_metrics
     WHERE received_date >= date_trunc('month', $8::date)::date
@@ -1290,6 +1347,7 @@ SELECT
         'poCount', po_count,
         'amountMinor', COALESCE(amount, 0),
         'costedMinor', COALESCE(costed, 0),
+        'extraExpenseMinor', COALESCE(extra_expense, 0),
         'capitalMinor', COALESCE(capital, 0),
         'sourceMissingPoCount', source_missing_count,
         'legacyAdjustmentPoCount', legacy_adjustment_count
@@ -1299,6 +1357,7 @@ SELECT
         'poCount', po_count,
         'amountMinor', amount,
         'costedMinor', costed,
+        'extraExpenseMinor', extra_expense,
         'capitalMinor', capital
      ) ORDER BY bucket_start), '[]'::jsonb) FROM actual_cube WHERE grouping = 1),
     (SELECT COALESCE(jsonb_agg(jsonb_build_object(
@@ -1306,6 +1365,7 @@ SELECT
         'poCount', po_count,
         'amountMinor', amount,
         'costedMinor', costed,
+        'extraExpenseMinor', extra_expense,
         'capitalMinor', capital
      ) ORDER BY category), '[]'::jsonb) FROM actual_cube WHERE grouping = 2),
     (SELECT COALESCE(jsonb_agg(jsonb_build_object(
@@ -1319,6 +1379,7 @@ SELECT
         'poCount', po_count,
         'amountMinor', amount,
         'costedMinor', costed,
+        'extraExpenseMinor', extra_expense,
         'capitalMinor', capital
      ) ORDER BY month_start), '[]'::jsonb) FROM history_metrics),
     (SELECT COALESCE(jsonb_agg(jsonb_build_object(
@@ -1326,6 +1387,7 @@ SELECT
         'poCount', po_count,
         'amountMinor', amount,
         'costedMinor', costed,
+        'extraExpenseMinor', extra_expense,
         'capitalMinor', capital
      ) ORDER BY day_start), '[]'::jsonb) FROM daily_metrics),
     (SELECT COALESCE(jsonb_agg(currency ORDER BY currency), '[]'::jsonb) FROM facet_rollup),

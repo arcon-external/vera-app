@@ -215,7 +215,7 @@ func projectCurrentMonth(history []HistoryMonth, daily []HistoryDay, query Query
 	if err != nil {
 		return unavailableCurrent(ProjectionModeMonth, projectionReason(err), MethodCurrentMonth, basis)
 	}
-	actual, err := currentMetrics(day.poCount, day.amount, day.costed, day.capital)
+	actual, err := currentMetrics(day.poCount, day.amount, day.costed, day.capital, day.extra)
 	if err != nil {
 		return unavailableCurrent(ProjectionModeMonth, projectionReason(err), MethodCurrentMonth, basis)
 	}
@@ -297,6 +297,7 @@ type daySample struct {
 	poCount    int64
 	amount     int64
 	costed     int64
+	extra      int64
 	capital    int64
 	amounts    []int64
 	capitals   []int64
@@ -324,6 +325,7 @@ func buildDaySample(daily []HistoryDay, asOfDate time.Time) daySample {
 		current.AmountMinor += entry.AmountMinor
 		current.CostedMinor += entry.CostedMinor
 		current.UncostedMinor += entry.UncostedMinor
+		current.ExtraExpenseMinor += entry.ExtraExpenseMinor
 		current.CapitalMinor += entry.CapitalMinor
 		byDate[entry.Date] = current
 	}
@@ -341,12 +343,16 @@ func buildDaySample(daily []HistoryDay, asOfDate time.Time) daySample {
 		sample.poCount += metrics.PoCount
 		sample.amount += metrics.AmountMinor
 		sample.costed += metrics.CostedMinor
+		sample.extra += metrics.ExtraExpenseMinor
 		sample.capital += metrics.CapitalMinor
-		if metrics.CostedMinor < metrics.AmountMinor || metrics.UncostedMinor > 0 {
+		// An extra expense is pass-through, not missing cost: only the
+		// non-extra amount may carry uncosted money.
+		if metrics.CostedMinor < metrics.AmountMinor-metrics.ExtraExpenseMinor ||
+			metrics.UncostedMinor > 0 {
 			sample.incomplete = true
 		}
 	}
-	for _, value := range []int64{sample.poCount, sample.amount, sample.costed, sample.capital} {
+	for _, value := range []int64{sample.poCount, sample.amount, sample.costed, sample.extra, sample.capital} {
 		if err := CheckExact(value); err != nil {
 			sample.overflow = true
 		}
@@ -412,12 +418,13 @@ func multiplyExact(value int64, factor int) (int64, error) {
 	return exactInt64(new(big.Int).Mul(big.NewInt(value), big.NewInt(int64(factor))))
 }
 
-func currentMetrics(poCount, amount, costed, capital int64) (Metrics, error) {
+func currentMetrics(poCount, amount, costed, capital, extra int64) (Metrics, error) {
 	for name, value := range map[string]int64{
-		"po count": poCount,
-		"amount":   amount,
-		"costed":   costed,
-		"capital":  capital,
+		"po count":      poCount,
+		"amount":        amount,
+		"costed":        costed,
+		"capital":       capital,
+		"extra expense": extra,
 	} {
 		if err := CheckExact(value); err != nil {
 			return Metrics{}, fmt.Errorf("%s: %w", name, err)
@@ -427,7 +434,7 @@ func currentMetrics(poCount, amount, costed, capital int64) (Metrics, error) {
 	if err != nil {
 		return Metrics{}, fmt.Errorf("margin: %w", err)
 	}
-	uncosted, err := subtractExact(amount, costed)
+	uncosted, err := subtractExact(amount-costed, extra)
 	if err != nil {
 		return Metrics{}, fmt.Errorf("uncosted: %w", err)
 	}
@@ -435,19 +442,20 @@ func currentMetrics(poCount, amount, costed, capital int64) (Metrics, error) {
 	if err != nil {
 		return Metrics{}, fmt.Errorf("margin percentage: %w", err)
 	}
-	coverageBps, err := RatioBps(costed, amount)
+	coverageBps, err := RatioBps(costed, amount-extra)
 	if err != nil {
 		return Metrics{}, fmt.Errorf("coverage percentage: %w", err)
 	}
 	return Metrics{
-		PoCount:       poCount,
-		AmountMinor:   amount,
-		CostedMinor:   costed,
-		UncostedMinor: uncosted,
-		CapitalMinor:  capital,
-		MarginMinor:   margin,
-		MarginBps:     marginBps,
-		CoverageBps:   coverageBps,
+		PoCount:           poCount,
+		AmountMinor:       amount,
+		CostedMinor:       costed,
+		UncostedMinor:     uncosted,
+		ExtraExpenseMinor: extra,
+		CapitalMinor:      capital,
+		MarginMinor:       margin,
+		MarginBps:         marginBps,
+		CoverageBps:       coverageBps,
 	}, nil
 }
 
