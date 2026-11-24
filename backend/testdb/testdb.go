@@ -19,7 +19,14 @@
 // The template is named after the test binary, not after this package: `go
 // test ./...` runs store.test and api.test in parallel against one test
 // database, and a shared template name would let one process drop and rebuild
-// the template while the other is cloning it.
+// the template while the other is cloning it. Two processes of the *same*
+// binary still share a template, so the template's lifecycle and every clone
+// run under a Postgres session-level advisory lock keyed on the template name;
+// a second process waits rather than dropping the template underneath the
+// first. The clone's name is reserved for the test's own lifetime for the same
+// reason: two processes running the same test derive one clone name, and the
+// second must wait for the first to drop it, not force-drop a database the
+// first is still using.
 //
 // The package deliberately imports no application package. backend/store's
 // in-package test files import this package, so a dependency on store would be
@@ -50,6 +57,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -87,6 +95,10 @@ type Database struct {
 	Identity string
 	// Schema is the schema the clone carries, always Schema.
 	Schema string
+	// reservation is the session holding the clone-name lock. It stays open
+	// until the clone is dropped, so another process running the same test
+	// waits instead of force-dropping a database this test still uses.
+	reservation *pgx.Conn
 }
 
 // process is the state shared by every test in one test binary.
@@ -117,6 +129,108 @@ type registry struct {
 // "built again quickly".
 func Builds() int {
 	return int(process.builds.Load())
+}
+
+// The lock namespaces keep the test-database locks in their own key space, so
+// an unrelated advisory lock that happens to hash to the same number cannot
+// block a test run. They must never change: two processes meet on the same lock
+// only when both derive the key the same way.
+const (
+	templateLockNamespace = "vera-app/testdb/template"
+	cloneLockNamespace    = "vera-app/testdb/clone"
+)
+
+// TemplateLockKey is the stable 64-bit advisory-lock key for a template's
+// lifecycle. It depends only on the template name, so every process sharing a
+// test database -- and only those -- contends on the same session lock.
+func TemplateLockKey(template string) int64 {
+	return advisoryKey(templateLockNamespace, template)
+}
+
+// CloneLockKey is the stable 64-bit advisory-lock key that reserves one clone
+// name for its test's lifetime.
+func CloneLockKey(clone string) int64 {
+	return advisoryKey(cloneLockNamespace, clone)
+}
+
+// advisoryKey is the stable 64-bit hash of a namespaced object name.
+func advisoryKey(namespace, name string) int64 {
+	digest := fnv.New64a()
+	_, _ = digest.Write([]byte(namespace + "\x00" + name))
+	return int64(digest.Sum64())
+}
+
+// LockConn is the connection surface the advisory locks use. Both *pgx.Conn
+// (a template build or a clone reservation) and *pgxpool.Conn (a clone) implement
+// it. A session-level lock belongs to its session, so the same connection must
+// take it and release it.
+type LockConn interface {
+	Exec(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error)
+	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
+}
+
+// AcquireTemplateLock takes the session-level advisory lock that serializes one
+// template's lifecycle across every process sharing the test database. It waits
+// until the lock is granted or ctx is done; a timeout names the template rather
+// than letting the caller proceed into DROP DATABASE.
+func AcquireTemplateLock(ctx context.Context, conn LockConn, template string) error {
+	if err := acquireLock(ctx, conn, TemplateLockKey(template)); err != nil {
+		return lockError(ctx, err, "the test database template", template)
+	}
+	return nil
+}
+
+// ReleaseTemplateLock releases the session lock AcquireTemplateLock took on
+// conn. It reports a failed unlock rather than hiding it: a lock left behind
+// blocks every later process until the session ends.
+func ReleaseTemplateLock(ctx context.Context, conn LockConn, template string) error {
+	return releaseLock(ctx, conn, TemplateLockKey(template), "the test database template", template)
+}
+
+// AcquireCloneLock reserves one clone name for the test's lifetime. Two
+// processes running the same test derive the same clone name; the second waits
+// here instead of force-dropping a database the first is still using. The lock
+// is held until the clone is dropped, so it must be taken on a connection that
+// lives as long as the clone.
+func AcquireCloneLock(ctx context.Context, conn LockConn, clone string) error {
+	if err := acquireLock(ctx, conn, CloneLockKey(clone)); err != nil {
+		return lockError(ctx, err, "the test database clone", clone)
+	}
+	return nil
+}
+
+// ReleaseCloneLock releases the reservation AcquireCloneLock took on conn. It
+// is called after the clone is dropped, so the next process can create it.
+func ReleaseCloneLock(ctx context.Context, conn LockConn, clone string) error {
+	return releaseLock(ctx, conn, CloneLockKey(clone), "the test database clone", clone)
+}
+
+// acquireLock blocks until the session holds key or ctx is done.
+func acquireLock(ctx context.Context, conn LockConn, key int64) error {
+	_, err := conn.Exec(ctx, "SELECT pg_advisory_lock($1)", key)
+	return err
+}
+
+// releaseLock reports a failed or impossible unlock rather than hiding it: a
+// lock left behind blocks every later process until the session ends.
+func releaseLock(ctx context.Context, conn LockConn, key int64, kind, name string) error {
+	var released bool
+	if err := conn.QueryRow(ctx, "SELECT pg_advisory_unlock($1)", key).Scan(&released); err != nil {
+		return fmt.Errorf("release the lock on %s %q: %w", kind, name, err)
+	}
+	if !released {
+		return fmt.Errorf("release the lock on %s %q: the session did not hold it", kind, name)
+	}
+	return nil
+}
+
+// lockError names what was being locked and, for a bounded wait, says outright
+// that the wait expired rather than leaking a driver error.
+func lockError(ctx context.Context, err error, kind, name string) error {
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return fmt.Errorf("wait for the lock on %s %q: %w", kind, name, ctxErr)
+	}
+	return fmt.Errorf("lock %s %q: %w", kind, name, err)
 }
 
 // Acquire returns the test's clone of the migrated template database for
@@ -150,29 +264,87 @@ func Acquire(tb testing.TB, dsn, identity string, migrate Migrate) *Database {
 	ctx, cancel := context.WithTimeout(context.Background(), Timeout)
 	defer cancel()
 
+	template := TemplateNameFor(BinaryName())
 	name := CloneNameFor(identity, BinaryName(), scope)
 	cloneDSN, err := DSNFor(dsn, name)
 	if err != nil {
 		tb.Fatalf("test database %s: %v", name, err)
 	}
+	// Two processes running the same test derive the same clone name, so the
+	// name is reserved for this test's whole lifetime, not only while CREATE
+	// DATABASE runs: the next process would otherwise FORCE-drop a database
+	// this test is still using. The reservation connection stays open until
+	// cleanup has dropped the clone.
+	reservation, err := pgx.Connect(ctx, dsn)
+	if err != nil {
+		tb.Fatalf("test database clone %s: connect to reserve the name: %v", name, err)
+	}
+	reserved := false
+	defer func() {
+		if reserved {
+			unlockCtx, cancel := context.WithTimeout(context.Background(), Timeout)
+			defer cancel()
+			_ = ReleaseCloneLock(unlockCtx, reservation, name)
+			_ = reservation.Close(context.Background())
+		}
+	}()
+	if err := AcquireCloneLock(ctx, reservation, name); err != nil {
+		_ = reservation.Close(context.Background())
+		tb.Fatalf("test database clone %s: %v", name, err)
+	}
+	reserved = true
+
+	// The clone is created with the template locked: another process building
+	// the same template must not DROP it between the catalog lookup and the
+	// copy. The held connection is also the one that unlocks, because an
+	// advisory lock belongs to its session.
+	adminConn, err := admin.Acquire(ctx)
+	if err != nil {
+		tb.Fatalf("test database clone %s: acquire an admin connection: %v", name, err)
+	}
+	locked := false
+	defer func() {
+		if locked {
+			unlockCtx, cancel := context.WithTimeout(context.Background(), Timeout)
+			defer cancel()
+			if err := ReleaseTemplateLock(unlockCtx, adminConn, template); err != nil {
+				tb.Errorf("test database clone %s: %v", name, err)
+				destroyPoolConn(adminConn)
+			}
+		}
+		adminConn.Release()
+	}()
+	if err := AcquireTemplateLock(ctx, adminConn, template); err != nil {
+		destroyPoolConn(adminConn)
+		tb.Fatalf("test database clone %s: %v", name, err)
+	}
+	locked = true
 	// A run that was interrupted can leave its clone behind; dropping first
 	// keeps a rerun on a warm database behaving like the first run.
-	if _, err := admin.Exec(ctx, "DROP DATABASE IF EXISTS "+quoteIdentifier(name)+" WITH (FORCE)"); err != nil {
+	if _, err := adminConn.Exec(ctx, "DROP DATABASE IF EXISTS "+quoteIdentifier(name)+" WITH (FORCE)"); err != nil {
 		tb.Fatalf("drop the previous test database %s: %v", name, err)
 	}
-	if _, err := admin.Exec(ctx,
-		"CREATE DATABASE "+quoteIdentifier(name)+" TEMPLATE "+quoteIdentifier(TemplateNameFor(BinaryName()))); err != nil {
+	if _, err := adminConn.Exec(ctx,
+		"CREATE DATABASE "+quoteIdentifier(name)+" TEMPLATE "+quoteIdentifier(template)); err != nil {
 		tb.Fatalf("clone the test database template into %s: %v", name, err)
 	}
+	if err := ReleaseTemplateLock(ctx, adminConn, template); err != nil {
+		tb.Fatalf("test database clone %s: %v", name, err)
+	}
+	locked = false
 
 	database := &Database{
-		DSN:      cloneDSN,
-		Name:     name,
-		Identity: identity,
-		Schema:   Schema,
+		DSN:         cloneDSN,
+		Name:        name,
+		Identity:    identity,
+		Schema:      Schema,
+		reservation: reservation,
 	}
 	registry.byIdent[identity] = database
 	registry.order = append(registry.order, identity)
+	// Ownership of the reservation moves to the registry, whose cleanup drops
+	// the clone and only then releases the name.
+	reserved = false
 	return database
 }
 
@@ -216,12 +388,23 @@ func (r *registry) dropAll(tb testing.TB) {
 		return
 	}
 	for i := len(r.order) - 1; i >= 0; i-- {
-		name := r.byIdent[r.order[i]].Name
+		database := r.byIdent[r.order[i]]
 		ctx, cancel := context.WithTimeout(context.Background(), Timeout)
-		if _, err := admin.Exec(ctx, "DROP DATABASE IF EXISTS "+quoteIdentifier(name)+" WITH (FORCE)"); err != nil {
-			tb.Errorf("drop test database %s: %v", name, err)
+		if _, err := admin.Exec(ctx, "DROP DATABASE IF EXISTS "+quoteIdentifier(database.Name)+" WITH (FORCE)"); err != nil {
+			tb.Errorf("drop test database %s: %v", database.Name, err)
 		}
 		cancel()
+		// Release the name only after the drop: a process waiting on it must
+		// not create the clone before this one is really gone. Closing the
+		// session releases the lock even if the unlock statement fails.
+		if database.reservation != nil {
+			unlockCtx, unlockCancel := context.WithTimeout(context.Background(), Timeout)
+			if err := ReleaseCloneLock(unlockCtx, database.reservation, database.Name); err != nil {
+				tb.Errorf("release the reservation on test database %s: %v", database.Name, err)
+			}
+			unlockCancel()
+			_ = database.reservation.Close(context.Background())
+		}
 	}
 }
 
@@ -257,6 +440,19 @@ func buildTemplate(dsn string, migrate Migrate) error {
 	}
 	defer func() { _ = conn.Close(context.Background()) }()
 
+	// The template's whole lifecycle -- drop, create, migrate -- happens under
+	// one advisory lock, so two store.test processes sharing a database
+	// serialize instead of dropping the template under each other. Closing the
+	// session releases the lock even if the unlock statement itself failed.
+	if err := AcquireTemplateLock(ctx, conn, template); err != nil {
+		return err
+	}
+	defer func() {
+		unlockCtx, cancel := context.WithTimeout(context.Background(), Timeout)
+		defer cancel()
+		_ = ReleaseTemplateLock(unlockCtx, conn, template)
+	}()
+
 	var role string
 	var canCreate bool
 	if err := conn.QueryRow(ctx,
@@ -287,6 +483,14 @@ func buildTemplate(dsn string, migrate Migrate) error {
 	process.admin = admin
 	process.builds.Add(1)
 	return nil
+}
+
+// destroyPoolConn closes a pooled connection instead of returning it to the
+// pool. A session whose lock state is uncertain must not be reused: if the
+// unlock failed, a pooled session holding the template lock would deadlock
+// every later clone in this process.
+func destroyPoolConn(conn *pgxpool.Conn) {
+	_ = conn.Hijack().Close(context.Background())
 }
 
 // CreatedbError names the privilege that is missing rather than letting CREATE
