@@ -33,6 +33,9 @@ const UOMS = [
 export function editorItemFromSource(item: SourceItem): EditorItem {
   const subItems: EditorSubItem[] = item.subItems.map((sub) => ({
     id: sub.subNo,
+    // #648: the source sub-item's stored number is the allocation identity a
+    // PO line names (the ghost's own source ref travels on the line).
+    no: sub.subNo,
     description: sub.description,
     qty: formatQuantityScaled(sub.quantityScaled),
     uom: sub.uom,
@@ -47,6 +50,7 @@ export function editorItemFromSource(item: SourceItem): EditorItem {
   }));
   return {
     key: item.itemNo,
+    no: item.itemNo,
     description: item.description,
     bullets: [...item.descriptionLines],
     qty: formatQuantityScaled(item.quantityScaled),

@@ -16,6 +16,7 @@ const draft: DraftPayload = {
   items: [
     {
       key: 0,
+      no: 1,
       description: "Cable tray",
       bullets: ["Hot-dip galvanised"],
       qty: "2",

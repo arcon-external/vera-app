@@ -47,6 +47,7 @@ const noop = () => {};
 function editorItem(overrides: Partial<EditorItem> = {}): EditorItem {
   return {
     key: 0,
+    no: 0,
     description: "Widget",
     bullets: [],
     qty: "1",

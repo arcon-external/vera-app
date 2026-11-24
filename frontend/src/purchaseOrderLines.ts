@@ -108,6 +108,10 @@ function subItemFromLine(
 ): EditorSubItem {
   return {
     id: line.key,
+    // #648: a PO editor row is not a quotation leaf; its stable number is not
+    // this component's concern (the PO names its allocation by the source
+    // item, carried on the line itself), so the row is unnumbered.
+    no: 0,
     description: line.description,
     qty: line.quantity,
     uom: line.uom,
@@ -137,6 +141,7 @@ export function editorItemsFromGroups(
       const line = group.lines[0];
       return {
         key: group.key,
+        no: 0,
         description: line.description,
         bullets: line.descriptionLines,
         qty: line.quantity,
@@ -155,6 +160,7 @@ export function editorItemsFromGroups(
     const first = group.lines[0];
     return {
       key: group.key,
+      no: 0,
       description: effectiveParentDescription(group),
       bullets: [],
       qty: "1",

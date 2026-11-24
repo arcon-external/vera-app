@@ -1187,6 +1187,7 @@ const DETAIL_QUOTATION = {
 const EDITOR_ITEMS: EditorItem[] = [
   {
     key: 0,
+    no: 1,
     description: "Widget",
     bullets: [],
     qty: "1",
@@ -1201,6 +1202,7 @@ const EDITOR_ITEMS: EditorItem[] = [
   },
   {
     key: 1,
+    no: 2,
     description: "Installation",
     bullets: [],
     qty: "1",
@@ -1214,6 +1216,7 @@ const EDITOR_ITEMS: EditorItem[] = [
     subItems: [
       {
         id: 1,
+        no: 1,
         description: "Cable tray",
         qty: "10",
         uom: "m",

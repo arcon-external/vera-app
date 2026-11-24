@@ -69,6 +69,14 @@ import {
   type QuotationCopyPayload,
 } from "./quotationClipboard";
 import {
+  boughtQuantitiesByLeaf,
+  buildQuotationItemInputs,
+  nextItemNo,
+  numberMissingItems,
+  takeItemNo,
+  takeSubNos,
+} from "./quotationItemIdentity";
+import {
   TAX_TYPE_OPTIONS,
   TAX_ZONE_OPTIONS,
   normalizeServiceCategory,
@@ -222,6 +230,10 @@ const INCOTERM_OPTIONS = [
 
 const DEFAULT_ITEM: EditorItem = {
   key: 0,
+  // #648: unnumbered. The editor hands out a stable number when it adds the
+  // line; a component default never guesses one.
+  no: 0,
+  nextSubNo: 1,
   description: "",
   bullets: [],
   qty: "1",
@@ -265,9 +277,13 @@ const DEFAULT_DETAILS: DetailsState = {
  * unit or set a different canonical one, and a line defaulting to a unit the
  * server will refuse fails Prepare. Empty only in the pre-load window; the
  * fill-empty effect below sets it once the served list arrives.
+ *
+ * #648: `no` is the line's stable allocation identity; the editor passes the
+ * next number it has never handed out. The default 0 means "unnumbered", the
+ * shape a bare component fixture uses.
  */
-export function newItem(key: number, uom: string): EditorItem {
-  return { ...DEFAULT_ITEM, key, uom };
+export function newItem(key: number, uom: string, no = 0): EditorItem {
+  return { ...DEFAULT_ITEM, key, uom, no, nextSubNo: 1 };
 }
 
 function splitRows(text: string): string[] {
@@ -531,14 +547,6 @@ function parseSubItems(text: string): { description: string; subItems: string[] 
   return { description: mainParts.join(" "), subItems: bullets };
 }
 
-function buildDescription(description: string, bullets: string[]): string {
-  const parts = [description];
-  for (const line of bullets) {
-    parts.push("- " + line);
-  }
-  return parts.join("\n");
-}
-
 /** Issue #491: the three PO tabs share one workspace. */
 export function isPurchaseOrderPage(page: AppPage): boolean {
   return page === "po" || page === "po-drafts" || page === "po-archive";
@@ -686,9 +694,22 @@ function App() {
 
   const nextKey = useRef(1);
   const nextSubId = useRef(1);
+  // #648: the line-number high-water mark. It starts one past the first blank
+  // line and is never lowered by a removal, so a bought line's number can
+  // never be handed to a different product.
+  const nextItemNoRef = useRef({ next: 2 });
+  // The revision being edited, if any: its availability answer supplies the
+  // bought counts the editor shows beside each line.
+  const [editingSource, setEditingSource] = useState<{
+    quotationId: number;
+    revision: number;
+  } | null>(null);
+  const [boughtQuantities, setBoughtQuantities] = useState<
+    ReadonlyMap<string, number>
+  >(() => new Map());
   // "" until the served list arrives; the fill-empty effect below sets the
   // canonical unit on this first line once GetCompanyUnits() answers.
-  const [items, setItems] = useState<EditorItem[]>([newItem(0, "")]);
+  const [items, setItems] = useState<EditorItem[]>([newItem(0, "", 1)]);
   const [details, setDetails] = useState<DetailsState>(DEFAULT_DETAILS);
   // The subject a fresh draft was initialized with -- the saved default, or "".
   // Applying a default subject is not an edit, so the editor must not read as
@@ -1323,7 +1344,12 @@ function App() {
   const resetForm = useCallback(() => {
     nextKey.current = 1;
     nextSubId.current = 1;
-    setItems([newItem(0, canonicalUnit)]);
+    // #648: a fresh sheet still numbers its lines from 1, and the high-water
+    // mark restarts with it -- nothing from the previous sheet survives.
+    nextItemNoRef.current = { next: 2 };
+    setItems([newItem(0, canonicalUnit, 1)]);
+    setEditingSource(null);
+    setBoughtQuantities(new Map());
     // Issue #492: a brand-new quotation starts from this account's saved
     // defaults. A pasted copy or a reopened draft writes its own details
     // afterwards, so those values always win.
@@ -1418,14 +1444,23 @@ function App() {
   // context, because the work never reached the server.
   const applyRecoveryDraft = useCallback(
     (restored: DraftPayload) => {
-      nextKey.current = restored.items.length;
+      // #648: a crash copy of a revision edit carries the numbers it already
+      // had; one written before identity existed is numbered by position on
+      // the way in, and the counter starts past everything loaded.
+      const numbered = numberMissingItems(restored.items);
+      nextItemNoRef.current = { next: numbered.nextItemNo };
+      nextKey.current = numbered.items.length;
       nextSubId.current =
-        restored.items.reduce(
+        numbered.items.reduce(
           (highest, item) =>
             Math.max(highest, ...item.subItems.map((sub) => sub.id)),
           0
         ) + 1;
-      setItems(restored.items);
+      setItems(numbered.items);
+      // The revision context did not survive the crash, so this snapshot is
+      // new work: it has no bought history to show.
+      setEditingSource(null);
+      setBoughtQuantities(new Map());
       setDetails({ ...restored.details, discountPercent: 0 });
       setPristineSubject(null);
       setCustomerId(
@@ -1776,9 +1811,13 @@ function App() {
         // Sub-item ids only have to be unique within their own line, but the
         // counter that hands out new ones is global -- so it has to start past
         // every id already in use, not past the number of lines.
-        nextKey.current = restored.items.length;
+        // #648: stable line numbers are kept, and a draft written before them
+        // is numbered by position so a new line can never reuse a bought one.
+        const numbered = numberMissingItems(restored.items);
+        nextItemNoRef.current = { next: numbered.nextItemNo };
+        nextKey.current = numbered.items.length;
         nextSubId.current =
-          restored.items.reduce(
+          numbered.items.reduce(
             (highest, item) =>
               Math.max(
                 highest,
@@ -1786,7 +1825,10 @@ function App() {
               ),
             0
           ) + 1;
-        setItems(restored.items);
+        setItems(numbered.items);
+        // A draft has no issued revision, so no bought history to show.
+        setEditingSource(null);
+        setBoughtQuantities(new Map());
         // #652: retired whole-order discounts on old local drafts are dropped;
         // the issued revision keeps its stored value in the archive.
         setDetails({ ...restored.details, discountPercent: 0 });
@@ -1839,7 +1881,12 @@ function App() {
       void ClearDraftContext().catch(() => undefined);
       nextKey.current = applied.items.length;
       nextSubId.current = applied.nextSubId;
+      // #648: a pasted copy numbers from 1 (it is a new quotation with no
+      // bought history); the high-water mark starts past those lines.
+      nextItemNoRef.current = { next: nextItemNo(applied.items) };
       setItems(applied.items);
+      setEditingSource(null);
+      setBoughtQuantities(new Map());
       setDetails({ ...applied.details, discountPercent: 0 });
       // A pasted copy is entered work, never a pristine default.
       setPristineSubject(null);
@@ -1930,6 +1977,11 @@ function App() {
         const draft = archivedToEditorDraft(quotation);
         nextKey.current = draft.items.length;
         nextSubId.current = 1;
+        // #648: the revision's stored numbers are the identity the next
+        // revision keeps; the counter starts one past the highest one, so a
+        // line added now cannot land on an already-bought number. The
+        // availability read below supplies the bought counts.
+        nextItemNoRef.current = { next: nextItemNo(draft.items) };
         setItems(
           draft.items.map((item, index) => ({
             ...item,
@@ -1937,6 +1989,13 @@ function App() {
             subItems: item.subItems.map((sub) => ({ ...sub, id: nextSubId.current++ })),
           }))
         );
+        // Clear the previous quotation's badges before the new answer lands:
+        // an old count beside a new line would name the wrong product.
+        setBoughtQuantities(new Map());
+        setEditingSource({
+          quotationId: quotation.ID,
+          revision: quotation.RevisionNumber,
+        });
         setDetails(draft.details);
         // A revision being edited is work regardless of its subject.
         setPristineSubject(null);
@@ -1973,7 +2032,10 @@ function App() {
   }, [items, details, customerId, clearPreview]);
 
   const handleAddItem = useCallback(() => {
-    setItems((prev) => [...prev, newItem(nextKey.current++, canonicalUnit)]);
+    setItems((prev) => [
+      ...prev,
+      newItem(nextKey.current++, canonicalUnit, takeItemNo(nextItemNoRef.current)),
+    ]);
   }, [canonicalUnit]);
 
   const handleRemoveItem = useCallback((key: number) => {
@@ -2045,19 +2107,31 @@ function App() {
     setItems((prev) =>
       prev.map((item) => {
         if (item.key !== key) return item;
-        const converted = item.bullets
-          .filter((line) => line.trim() !== "")
-          .map((line) => newSubItem(nextSubId.current++, line.trim(), canonicalUnit));
+        const lines = item.bullets.filter((line) => line.trim() !== "");
+        // #648: sub-item numbers come from the line's high-water mark, so a
+        // number a bought sub-item used is never handed to a new one.
+        const taken = takeSubNos(item, Math.max(1, lines.length));
+        const converted = lines.map((line, index) =>
+          newSubItem(nextSubId.current++, line.trim(), canonicalUnit, taken.nos[index])
+        );
         return {
           ...item,
           bullets: [],
           qty: "1",
           uom: canonicalUnit,
           showSubPrices: false,
+          nextSubNo: taken.nextSubNo,
           subItems:
             converted.length > 0
               ? converted
-              : [newSubItem(nextSubId.current++, "", canonicalUnit)],
+              : [
+                  newSubItem(
+                    nextSubId.current++,
+                    "",
+                    canonicalUnit,
+                    taken.nos[0]
+                  ),
+                ],
         };
       })
     );
@@ -2079,14 +2153,20 @@ function App() {
 
   const handleAddSubRow = useCallback((key: number) => {
     setItems((prev) =>
-      prev.map((item) =>
-        item.key === key
-          ? {
-              ...item,
-              subItems: [...item.subItems, newSubItem(nextSubId.current++, "", canonicalUnit)],
-            }
-          : item
-      )
+      prev.map((item) => {
+        if (item.key !== key) return item;
+        // #648: the new sub-item takes the line's next stable number, never a
+        // removed sub-item's number.
+        const taken = takeSubNos(item, 1);
+        return {
+          ...item,
+          nextSubNo: taken.nextSubNo,
+          subItems: [
+            ...item.subItems,
+            newSubItem(nextSubId.current++, "", canonicalUnit, taken.nos[0]),
+          ],
+        };
+      })
     );
   }, [canonicalUnit]);
 
@@ -2236,11 +2316,20 @@ function App() {
         .filter((sub) => sub.description !== "");
       if (parsed.length === 0) return;
       setItems((prev) =>
-        prev.map((item) =>
-          item.key === key
-            ? { ...item, subItems: [...item.subItems, ...parsed] }
-            : item
-        )
+        prev.map((item) => {
+          if (item.key !== key) return item;
+          // #648: pasted rows are new sub-items on this line, so they take its
+          // next stable numbers; a removed number is never reused.
+          const taken = takeSubNos(item, parsed.length);
+          return {
+            ...item,
+            nextSubNo: taken.nextSubNo,
+            subItems: [
+              ...item.subItems,
+              ...parsed.map((sub, index) => ({ ...sub, no: taken.nos[index] })),
+            ],
+          };
+        })
       );
     },
     [liveEntry, storedUoMs, canonicalUnit]
@@ -2282,10 +2371,17 @@ function App() {
           };
         });
 
-        const first = { ...parsed[0], key: prev[targetIndex].key };
+        const first = {
+          ...parsed[0],
+          key: prev[targetIndex].key,
+          // #648: pasting over a line replaces its content, not its identity:
+          // a bought line keeps the number its purchase order names.
+          no: prev[targetIndex].no,
+        };
         const rest = parsed.slice(1).map((parsedItem, i) => ({
           ...parsedItem,
           key: nextKey.current + i,
+          no: takeItemNo(nextItemNoRef.current),
         }));
         nextKey.current += rest.length;
 
@@ -2316,70 +2412,13 @@ function App() {
     }
     setStatus({ type: "loading", message: "Validating quotation…" });
 
-    const lineItems = items
-      .filter(
-        (item) =>
-          item.description.trim() !== "" ||
-          item.bullets.some((line) => line.trim() !== "") ||
-          item.subItems.some((sub) => sub.description.trim() !== "")
-      )
-      .map((item) => {
-        if (item.subItems.length === 0) {
-          return new backend.QuotationItemInput({
-            Description: buildDescription(item.description, item.bullets),
-            Qty: Number.parseInt(item.qty, 10) || 0,
-            UoM: item.uom,
-            UnitPrice: Number.parseInt(item.unitPrice, 10) || 0,
-            MarginEnabled: item.marginEnabled,
-            MarginPercent: Number.parseInt(item.marginPercent, 10) || 0,
-            DiscountEnabled: item.discountEnabled,
-            DiscountPercent: Number.parseInt(item.discountPercent, 10) || 0,
-            SubItems: [],
-            ShowSubPrices: false,
-          });
-        }
-        // A main item with sub-items never prices itself: Qty 1 / the
-        // canonical unit and a zero unit price are placeholders the backend
-        // replaces with the sub-item rollup, so the margin controls do not
-        // apply either. The unit is the served canonical (#337): the backend
-        // package gate requires it to match the company's canonical, and a
-        // hardcoded "Lot" would be refused for a company that removed it.
-        return new backend.QuotationItemInput({
-          Description: item.description,
-          Qty: 1,
-          UoM: canonicalUnit,
-          UnitPrice: 0,
-          MarginEnabled: false,
-          MarginPercent: 0,
-          DiscountEnabled: false,
-          DiscountPercent: 0,
-          ShowSubPrices: item.showSubPrices,
-          SubItems: item.subItems.map(
-            (sub) =>
-              new backend.QuotationSubItemInput({
-                Description: sub.description,
-                Qty: Number.parseInt(sub.qty, 10) || 0,
-                UoM: sub.uom,
-                UnitCost: Number.parseInt(sub.unitCost, 10) || 0,
-                MarginEnabled: sub.marginEnabled,
-                MarginPercent: Number.parseInt(sub.marginPercent, 10) || 0,
-                DiscountEnabled: sub.discountEnabled,
-                DiscountPercent: Number.parseInt(sub.discountPercent, 10) || 0,
-                SubSubItems: sub.bullets
-                  .filter((line) => line.trim() !== "")
-                  .map(
-                    (line) =>
-                      new backend.QuotationSubSubItemInput({
-                        Description: line,
-                      })
-                  ),
-              })
-          ),
-        });
-      });
+    // #648: every line carries its stable number. The number is attached after
+    // the generated `QuotationInput` constructs, because its own `Items`
+    // conversion copies only the fields the generated class knows and would
+    // drop `No` until the bindings are regenerated.
+    const lineItems = buildQuotationItemInputs(items, canonicalUnit);
 
     const input = new backend.QuotationInput({
-      Items: lineItems,
       Subject: details.subject,
       RecipientName: details.recipientName,
       DiscountPercent: details.discountPercent,
@@ -2398,6 +2437,7 @@ function App() {
       Incoterm: details.incoterm,
       Note: details.note,
     });
+    input.Items = lineItems;
 
     try {
       await Prepare(input);
@@ -2505,6 +2545,9 @@ function App() {
       void ClearRevisionContext().catch(() => undefined);
       void ClearDraftContext().catch(() => undefined);
       setEditingQuote(null);
+      // The revision is issued; its bought badges belong to no editor now.
+      setEditingSource(null);
+      setBoughtQuantities(new Map());
       // The server consumed the draft with the export. Locally it is gone too,
       // and the badge comes down with it.
       setActiveDraftId(0);
@@ -2767,6 +2810,30 @@ function App() {
     },
     []
   );
+
+  // #648: what a purchase order already bought against the revision being
+  // edited. The fetch is deliberately non-blocking for the editor and
+  // fail-soft: a missing or failed answer leaves the badges hidden, never
+  // claiming a zero that was never read.
+  useEffect(() => {
+    if (editingSource === null) {
+      setBoughtQuantities(new Map());
+      return;
+    }
+    let cancelled = false;
+    loadPOSourceAvailability(editingSource.quotationId, editingSource.revision)
+      .then((availability) => {
+        if (cancelled) return;
+        setBoughtQuantities(boughtQuantitiesByLeaf(availability.items));
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setBoughtQuantities(new Map());
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [editingSource, loadPOSourceAvailability]);
 
   const validatePOSourceSelection = useCallback(
     async (selection: POSourceSelection): Promise<POSourceValidation> => {
@@ -3519,6 +3586,7 @@ function App() {
                   <ItemEditor
                     items={items}
                     currency={liveEntry}
+                    boughtQuantities={boughtQuantities}
                     uomOptions={storedUoMs ?? []}
                     uomPendingLabel={
                       storedUoMs === null

@@ -15,9 +15,11 @@ import {
 } from "../format";
 import {
   purchaseOrderVarianceBadges,
+  formatQuantityScaled,
   type PurchaseOrderVarianceBadge,
 } from "../purchaseOrder";
 import { sanitizeQuantityInput } from "../poAggregate";
+import { boughtLeafKey } from "../quotationItemIdentity";
 
 // The IDR entry, transcribed field-for-field from
 // backend/currency/currency.go. This is the prop default only -- the live
@@ -65,6 +67,14 @@ export function parseMoneyKeystroke(entry: CurrencyInfo, raw: string): string {
 /** One priced sub-item of a main item. */
 export interface EditorSubItem {
   id: number;
+  /**
+   * #648: the sub-item's stable allocation identity. A purchase order names
+   * its bought quantity by this number, so it never follows position: removing
+   * an earlier sub-item or reordering the list leaves it alone. 0 means "not
+   * numbered yet", the shape a component default has before the editor assigns
+   * one.
+   */
+  no: number;
   description: string;
   qty: string;
   uom: string;
@@ -83,6 +93,19 @@ export interface EditorSubItem {
 
 export interface EditorItem {
   key: number;
+  /**
+   * #648: the line's stable allocation identity, matching the revision's
+   * `ItemNo`. A purchase order names its bought quantity by this number, so it
+   * must survive removal and reordering and never be reused. 0 means "not
+   * numbered yet" -- a component default before the editor assigns one.
+   */
+  no: number;
+  /**
+   * #648: the per-line high-water mark for sub-item numbers. It is stored on
+   * the line rather than derived from the sub-items so removing the last
+   * sub-item cannot release its number for a different product.
+   */
+  nextSubNo?: number;
   description: string;
   /**
    * Description bullets for a plain line. They convert into priced sub-items
@@ -118,9 +141,17 @@ export interface EditorItem {
  *  company's canonical unit, passed in by the caller (#337): there is no
  *  hardcoded "Lot" default any more, because a company may have removed that
  *  unit or set a different canonical one. */
-export function newSubItem(id: number, description = "", uom = ""): EditorSubItem {
+export function newSubItem(
+  id: number,
+  description = "",
+  uom = "",
+  no = 0
+): EditorSubItem {
   return {
     id,
+    // #648: an unnumbered sub-item unless the caller hands over the line's
+    // next stable number. The quotation editor does; a bare fixture does not.
+    no,
     description,
     qty: "1",
     uom,
@@ -189,6 +220,33 @@ function VarianceBadges({ badges }: { badges: PurchaseOrderVarianceBadge[] }) {
         </span>
       ))}
     </>
+  );
+}
+
+/**
+ * #648: how much of this line a purchase order already bought. The number
+ * comes from the quotation's availability answer only -- no answer, or no
+ * entry for the leaf, paints nothing. A fabricated "Bought 0" would read as a
+ * confirmed empty purchase history, which is a different fact from "we could
+ * not ask".
+ */
+function BoughtBadge({
+  quantityScaled,
+  what,
+}: {
+  quantityScaled: number | undefined;
+  what: string;
+}) {
+  if (quantityScaled === undefined || quantityScaled <= 0) return null;
+  const quantity = formatQuantityScaled(quantityScaled);
+  return (
+    <span
+      data-bought-badge=""
+      title={`${quantity} already bought on a purchase order against this ${what}. The number is kept, so the bought history stays with this product even if the row moves or is removed.`}
+      className="tnum inline-flex items-center rounded-full border border-rule bg-paper-subtle px-2 py-0.5 text-caption font-medium text-ink-600"
+    >
+      Bought {quantity}
+    </span>
   );
 }
 
@@ -300,6 +358,12 @@ interface ItemEditorProps {
     percent: string,
     subId?: number
   ) => void;
+  /**
+   * #648: bought quantities by stable leaf key (`boughtLeafKey`), read from
+   * the edited quotation's availability answer. Absent means "no answer":
+   * every badge stays hidden rather than claiming nothing was bought.
+   */
+  boughtQuantities?: ReadonlyMap<string, number>;
   /** A select commits its NEW value immediately; blur would read the previous
    *  render because React has not applied the change yet. */
   onLineSelectCommit?: (
@@ -367,6 +431,7 @@ export function ItemEditor({
   onLineFieldBlur,
   onLineDiscountCommit,
   onLineSelectCommit,
+  boughtQuantities,
   onAddItem,
   onRemoveItem,
   onChange,
@@ -501,6 +566,10 @@ export function ItemEditor({
   // #654: one row plus its optional ghost; the same node whether it is flat or
   // inside an aggregate wrapper, so the quotation path cannot drift from the
   // grouped one. A Fragment keeps the existing DOM shape (no extra element).
+  // #648: a bought quantity belongs to a numbered leaf; an unnumbered row (0)
+  // must never inherit a count from a "0" key.
+  const boughtFor = (no: number, subNo = 0): number | undefined =>
+    no > 0 ? boughtQuantities?.get(boughtLeafKey(no, subNo)) : undefined;
   const renderRow = (item: EditorItem, index: number) => (
     <Fragment key={item.key}>
       <ItemRow
@@ -513,6 +582,8 @@ export function ItemEditor({
         uomPendingLabel={uomPendingLabel}
         mode={mode}
         meta={renderItemMeta?.(item, index)}
+        boughtQuantityScaled={boughtFor(item.no)}
+        boughtSubQuantityScaled={(sub) => boughtFor(item.no, sub.no)}
         renderSubItemMeta={renderSubItemMeta}
         allowMergeSubItems={allowMergeSubItems}
         tutorialAnchors={tutorialAnchors}
@@ -900,6 +971,8 @@ export function ItemRow({
   uomPendingLabel,
   mode,
   meta,
+  boughtQuantityScaled,
+  boughtSubQuantityScaled,
   renderSubItemMeta,
   allowMergeSubItems,
   tutorialAnchors = false,
@@ -934,6 +1007,11 @@ export function ItemRow({
   uomPendingLabel?: string;
   mode: "quotation" | "purchase-order";
   meta?: React.ReactNode;
+  /** #648: bought quantity for this line's stable number; undefined when the
+   *  availability answer has no entry for it. */
+  boughtQuantityScaled?: number;
+  /** #648: bought quantity lookup for this line's sub-items. */
+  boughtSubQuantityScaled?: (sub: EditorSubItem) => number | undefined;
   renderSubItemMeta?: (
     item: EditorItem,
     sub: EditorSubItem,
@@ -1015,6 +1093,14 @@ export function ItemRow({
   const removeLineTitle = hasSubItems
     ? `Remove split line ${index + 1} and all its sub-items`
     : `Remove line ${index + 1}`;
+  // #648: removing a bought line is allowed, but the control says what is at
+  // stake first. The number is kept, so the bought history still points here.
+  const removeLineTitleWithBought =
+    boughtQuantityScaled !== undefined && boughtQuantityScaled > 0
+      ? `${removeLineTitle} — Bought ${formatQuantityScaled(
+          boughtQuantityScaled
+        )}; the line keeps its number so the bought history stays with this product.`
+      : removeLineTitle;
   const controlCells = hasSubItems && rollup ? (
     <>
       <Captioned label="UoM">
@@ -1339,6 +1425,10 @@ export function ItemRow({
               Split into sub-items
             </button>
           )}
+          <BoughtBadge
+            quantityScaled={boughtQuantityScaled}
+            what={`line ${index + 1}`}
+          />
           {purchaseOrder ? (
             hasSubItems ? null : (
               <VarianceBadges
@@ -1374,7 +1464,7 @@ export function ItemRow({
         <button
           type="button"
           aria-label={removeLineLabel}
-          title={removeLineTitle}
+          title={removeLineTitleWithBought}
           onClick={() => onRemoveItem(item.key)}
           disabled={!canRemove}
           className="flex h-9 w-9 shrink-0 cursor-pointer items-center justify-center rounded-md text-ink-300 transition-colors duration-150 hover:bg-danger-50 hover:text-danger-500 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-danger-400/40 disabled:opacity-0 disabled:hover:bg-transparent"
@@ -1470,6 +1560,7 @@ export function ItemRow({
                 uomPendingLabel={uomPendingLabel}
                 mode={mode}
                 meta={renderSubItemMeta?.(item, sub, index, subIndex)}
+                boughtQuantityScaled={boughtSubQuantityScaled?.(sub)}
                 onFieldFocus={onLineFieldFocus}
                 onFieldBlur={onLineFieldBlur}
                 onDiscountCommit={onLineDiscountCommit}
@@ -1538,6 +1629,7 @@ function SubRow({
   uomPendingLabel,
   mode,
   meta,
+  boughtQuantityScaled,
   onFieldFocus,
   onFieldBlur,
   onDiscountCommit,
@@ -1560,6 +1652,8 @@ function SubRow({
   uomPendingLabel?: string;
   mode: "quotation" | "purchase-order";
   meta?: React.ReactNode;
+  /** #648: bought quantity for this sub-item's stable number. */
+  boughtQuantityScaled?: number;
   onFieldFocus?: (
     itemKey: number,
     field: EditorLineField,
@@ -1599,6 +1693,14 @@ function SubRow({
     sub.marginEnabled
   );
   const label = `sub-item ${subIndex + 1} of line ${index + 1}`;
+  // #648: the same warning as the line's remove control -- the sub-item's
+  // number is kept, so the bought history stays with this part.
+  const removeTitle =
+    boughtQuantityScaled !== undefined && boughtQuantityScaled > 0
+      ? `Remove ${label} — Bought ${formatQuantityScaled(
+          boughtQuantityScaled
+        )}; the sub-item keeps its number so the bought history stays with this product.`
+      : `Remove ${label}`;
 
   return (
     <div className="rounded-md border border-rule/70 bg-white px-2.5 py-2">
@@ -1641,7 +1743,7 @@ function SubRow({
           <button
             type="button"
             aria-label={`Remove ${label}`}
-            title={`Remove ${label}`}
+            title={removeTitle}
             onClick={onRemove}
             className="flex h-9 w-7 cursor-pointer items-center justify-center rounded-md text-ink-300 transition-colors duration-150 hover:bg-danger-50 hover:text-danger-500 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-danger-400/40"
           >
@@ -1652,6 +1754,14 @@ function SubRow({
         </div>
       </div>
       {meta === undefined ? null : <div className="mt-1">{meta}</div>}
+      {boughtQuantityScaled === undefined ? null : (
+        <div className="mt-1">
+          <BoughtBadge
+            quantityScaled={boughtQuantityScaled}
+            what={`sub-item ${subIndex + 1} of line ${index + 1}`}
+          />
+        </div>
+      )}
       {purchaseOrder ? (
         <div className="mt-1 flex flex-wrap gap-1.5">
           <VarianceBadges
