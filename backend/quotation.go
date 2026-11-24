@@ -73,7 +73,12 @@ type QuotationSubItemInput struct {
 	DiscountPercent uint16
 	DiscountEnabled bool
 	MarginEnabled   bool
-	SubSubItems     []QuotationSubSubItemInput
+	// No is the part's stable identity inside its parent line, preserved
+	// across revisions. Zero means a new part and the backend assigns a
+	// number above every preserved one; removals leave gaps rather than
+	// shifting the parts that remain (#648).
+	No          uint32
+	SubSubItems []QuotationSubSubItemInput
 }
 
 // QuotationSubSubItemInput is one detail line beneath a priced sub-item. It
@@ -84,7 +89,7 @@ type QuotationSubSubItemInput struct {
 }
 
 // QuotationItemInput is a single line item from the frontend.
-// No is assigned by the backend. UnitPrice is in raw IDR.
+// UnitPrice is in raw IDR.
 //
 // SubItems turns the line into a modular package: each sub-item is priced on
 // its own and the parent becomes the rollup (Qty 1, UoM Lot, price = Σ subs).
@@ -94,13 +99,20 @@ type QuotationSubSubItemInput struct {
 // way the pricing is identical; only what the customer sees differs.
 type QuotationItemInput struct {
 	// Pointer-bearing fields first: strings and the sub-item slice lead, so
-	// the collector's scan window is short and the struct stays at its 72-byte
+	// the collector's scan window is short and the struct stays at its 80-byte
 	// size floor (see struct_alignment_test.go).
-	Description     string
-	UoM             string
-	SubItems        []QuotationSubItemInput
-	UnitPrice       uint64
-	Qty             uint32
+	Description string
+	UoM         string
+	SubItems    []QuotationSubItemInput
+	UnitPrice   uint64
+	Qty         uint32
+	// No is the line's stable identity, preserved across revisions. Zero
+	// means a new line and the backend assigns a number above every
+	// preserved one; removals leave gaps rather than shifting the lines
+	// that remain. Item and sub numbers are what bought quantity, Unsold
+	// and ghost rows point at (#648), so they must never be reassigned to
+	// a different product.
+	No              uint32
 	MarginPercent   uint16
 	DiscountPercent uint16
 	DiscountEnabled bool
@@ -136,6 +148,10 @@ type QuotationSubItem struct {
 	DiscountEnabled     bool
 	MarginEnabled       bool
 	Qty                 uint32
+	// No is the part's stable identity inside its parent line; SubNo is the
+	// printed label derived from it and the parent's number. Kept numeric so
+	// the revision draft stores identity, not a string to parse back (#648).
+	No uint32
 }
 
 // QuotationSubSubItem is one detail line beneath a priced sub-item. It has no
@@ -1165,7 +1181,10 @@ func (q *Quotation) Prepare(input QuotationInput) error {
 	// reworded sentence reaches both documents or neither (issue #339).
 	q.Data.Terms = q.termsLines()
 
-	items := buildItems(input.Items, q.Data.Currency)
+	items, err := buildItems(input.Items, q.Data.Currency)
+	if err != nil {
+		return err
+	}
 	q.Data.Items = items
 
 	date, validUntil := buildDates(input.Validity)
@@ -1388,7 +1407,7 @@ func (q *Quotation) revisionDraft(htmlSnapshot string, pdfData []byte, pdfPath s
 	items := make([]store.RevisionItem, 0, len(q.Data.Items))
 	for _, item := range q.Data.Items {
 		subItems := make([]store.RevisionSubItem, 0, len(item.SubItems))
-		for i, sub := range item.SubItems {
+		for _, sub := range item.SubItems {
 			lows := make([]store.RevisionSubSubItem, 0, len(sub.SubSubItems))
 			for k, low := range sub.SubSubItems {
 				lows = append(lows, store.RevisionSubSubItem{
@@ -1397,7 +1416,7 @@ func (q *Quotation) revisionDraft(htmlSnapshot string, pdfData []byte, pdfPath s
 				})
 			}
 			subItems = append(subItems, store.RevisionSubItem{
-				SubNo:           i + 1,
+				SubNo:           int(sub.No),
 				Description:     sub.Description,
 				Qty:             int64(sub.Qty),
 				UoM:             sub.UoM,

@@ -50,7 +50,7 @@ func TestPackageDiscountPercent(t *testing.T) {
 // money untouched -- and a stale parent input cleared, because the parent's
 // own discount fields are ignored once it has sub-items.
 func TestPackageRollupDerivesDiscountFields(t *testing.T) {
-	items := buildItems([]QuotationItemInput{{
+	items := mustBuildItems(t, []QuotationItemInput{{
 		Description: "discounted package",
 		UoM:         "Lot",
 		Qty:         1,

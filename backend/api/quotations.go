@@ -240,6 +240,15 @@ func (s *Server) exportEndpoint(context echo.Context) error {
 				"code":  "quotation_closed",
 			})
 		}
+		// #648: a reused line or part number is the client's mistake, not a
+		// conflict with the quotation's state, so it answers 422 with a code
+		// the editor can branch on.
+		if errors.Is(err, store.ErrQuotationItemIdentityReused) {
+			return context.JSON(http.StatusUnprocessableEntity, map[string]string{
+				"error": err.Error(),
+				"code":  "quotation_item_identity_reused",
+			})
+		}
 		return context.JSON(http.StatusConflict, map[string]string{"error": err.Error()})
 	}
 	// The draft has become a quotation, so it has nothing left to be. Scoped
