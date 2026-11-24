@@ -105,6 +105,7 @@ func TestPR495TagMatrixWorkflowShape(t *testing.T) {
 		"exit 1",
 		"RepoDigests",
 		"::notice",
+		"CI_TOOLCHAIN_IMAGE=${digest}",
 	)
 	if !strings.Contains(pull.Run, "could not pull") {
 		t.Fatalf("the pull failure does not explain itself:\n%s", pull.Run)

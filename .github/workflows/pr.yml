@@ -569,8 +569,9 @@ jobs:
         # Three attempts, then fail closed. A transient registry blip should
         # not fail a PR, but a persistent failure must fail it: falling back to
         # the apt install this image replaced is the 22-minute cost (622s in
-        # run 45171434818) the whole change exists to remove. Log the digest so
-        # the run records exactly which image the matrix ran against.
+        # run 45171434818) the whole change exists to remove. The digest is
+        # both logged and handed to the matrix step, so the run executes
+        # exactly the image whose identity it recorded.
         if: >-
           steps.scope.outputs.needs_go != 'false' &&
           steps.scope.outputs.needs_tags != 'false'
@@ -593,7 +594,7 @@ jobs:
           digest="$(docker image inspect --format '{{index .RepoDigests 0}}' "$image")"
           echo "::notice title=CI toolchain image::${digest}"
           echo "pulled $image (${digest})"
-          echo "CI_TOOLCHAIN_IMAGE=$image" >> "$GITHUB_ENV"
+          echo "CI_TOOLCHAIN_IMAGE=${digest}" >> "$GITHUB_ENV"
 
       - name: API configuration and session build modes (#495)
         # The development API resolver and the dev keychain identity are
@@ -745,8 +746,8 @@ jobs:
     # Narrowed, not defaulted. Checkout needs contents; the Dependabot step
     # below needs security-events. Declaring both keeps the grant
     # least-privilege -- naming any scope zeroes the rest, so contents has to
-    # be listed explicitly. Kept off the Go job deliberately: its cache
-    # restore/save steps keep whatever token they have today.
+    # be listed explicitly. The Go store job names its own scopes because the
+    # #495 step pulls the toolchain image.
     permissions:
       contents: read
       security-events: read
