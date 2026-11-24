@@ -13,12 +13,14 @@ import (
 
 // Issue #683: the Excel export of one purchase-order report document.
 //
-// RenderXLSX accepts exactly the two export payloads the PDF accepts and reads
-// only the document's overview snapshot. It makes no network call, reads no
-// clock and computes no report figure: every number in the workbook is a frozen
-// server value. The workbook carries no formulas at all, because a spreadsheet
-// that recalculated a server figure could disagree with the signed report it was
-// exported from.
+// RenderXLSX accepts exactly the two export payloads the PDF accepts and prints
+// the same document: the overview owns the Summary, Forecast and Notes sheets,
+// while the Periods and Categories sheets follow the view's own selected months
+// and categories exactly as the PDF's selected sections do. It makes no network
+// call, reads no clock and computes no report figure: every number in the
+// workbook is a frozen server value. The workbook carries no formulas at all,
+// because a spreadsheet that recalculated a server figure could disagree with
+// the signed report it was exported from.
 
 // The workbook's fixed sheet vocabulary. The order is the reading order: the
 // answer first, then the evidence, then the disclosures.
@@ -32,24 +34,37 @@ const (
 
 // RenderXLSX renders the export document as an .xlsx workbook.
 func RenderXLSX(document ExportDocument) ([]byte, error) {
+	var (
+		overview poreport.Report
+		resolved *resolvedView
+	)
 	switch {
 	case document.Legacy != nil:
 		if err := ValidateSnapshot(*document.Legacy); err != nil {
 			return nil, err
 		}
+		overview = *document.Legacy
 	case document.View != nil:
 		if err := ValidateView(*document.View); err != nil {
 			return nil, err
 		}
+		// The same resolver the PDF prints through: the Periods and Categories
+		// sheets must show the view's selection, not the overview's full range.
+		view, err := resolveView(*document.View)
+		if err != nil {
+			return nil, err
+		}
+		resolved = &view
+		overview = view.Overview
 	default:
 		return nil, fmt.Errorf("purchase order report export has no document")
 	}
 
-	book, err := newReportWorkbook(document.Overview())
+	book, err := newReportWorkbook(overview)
 	if err != nil {
 		return nil, err
 	}
-	if err := book.render(document.Overview()); err != nil {
+	if err := book.render(overview, resolved); err != nil {
 		return nil, err
 	}
 	raw, err := book.file.WriteToBuffer()
@@ -227,29 +242,26 @@ func (b *reportWorkbook) setWidths() error {
 	if err := b.file.SetColWidth(xlsxForecastSheet, "B", "G", 15); err != nil {
 		return fmt.Errorf("size the forecast columns: %w", err)
 	}
-	if err := b.file.SetColWidth(xlsxForecastSheet, "J", "N", 13); err != nil {
-		return fmt.Errorf("size the forecast chart data: %w", err)
-	}
 	if err := b.file.SetColWidth(xlsxNotesSheet, "B", "B", 110); err != nil {
 		return fmt.Errorf("size the notes column: %w", err)
 	}
 	return nil
 }
 
-func (b *reportWorkbook) render(snapshot poreport.Report) error {
-	if err := b.renderSummary(snapshot); err != nil {
+func (b *reportWorkbook) render(overview poreport.Report, resolved *resolvedView) error {
+	if err := b.renderSummary(overview); err != nil {
 		return err
 	}
-	if err := b.renderPeriods(snapshot); err != nil {
+	if err := b.renderPeriods(newPeriodSection(overview, resolved)); err != nil {
 		return err
 	}
-	if err := b.renderCategories(snapshot); err != nil {
+	if err := b.renderCategories(newCategorySection(overview, resolved)); err != nil {
 		return err
 	}
-	if err := b.renderForecast(snapshot); err != nil {
+	if err := b.renderForecast(overview); err != nil {
 		return err
 	}
-	if err := b.renderNotes(snapshot); err != nil {
+	if err := b.renderNotes(overview); err != nil {
 		return err
 	}
 	summary, err := b.file.GetSheetIndex(xlsxSummarySheet)
@@ -477,16 +489,150 @@ func (b *reportWorkbook) major(minor int64) float64 {
 	return float64(minor) / divisor
 }
 
-func (b *reportWorkbook) renderPeriods(snapshot poreport.Report) error {
+// periodSection is the Periods sheet's row set and the total that belongs to
+// it. A legacy snapshot prints its own actual rows and total; a versioned view
+// prints the selected months and keeps the overview's total, labelled for what
+// it is. A section with no rows prints its empty message and no total, exactly
+// as the PDF's empty selection does.
+type periodSection struct {
+	rows       []poreport.Period
+	total      *poreport.Metrics
+	totalLabel string
+	note       string
+	empty      string
+	// status overrides the Status cell for a period start. A view names the
+	// current month "Month to date" and a recorded future month "Recorded
+	// future"; a legacy row keeps its own partial/in-progress flags.
+	status map[string]string
+}
+
+// newPeriodSection builds the Periods sheet's rows from the document: the
+// snapshot's own rows for a legacy payload, the resolved selected months for a
+// view.
+func newPeriodSection(overview poreport.Report, resolved *resolvedView) periodSection {
+	if resolved == nil {
+		note := "Actual purchase orders in the report range. PPN is excluded; an uncosted amount is never counted as profit."
+		if _, limited := periodTableLimit(overview); limited {
+			note += " The table stops at the period containing the as-of date; later buckets are forecast territory."
+		}
+		totals := overview.Totals
+		return periodSection{
+			rows:       xlsxVisiblePeriods(overview),
+			total:      &totals,
+			totalLabel: "Report total",
+			note:       note,
+			empty:      "No purchase orders in the selected range.",
+		}
+	}
+
+	rows, status, omitted := xlsxSelectedPeriods(*resolved)
+	note := "Selected months only, each read from its frozen source. PPN is excluded; an uncosted amount is never counted as profit."
+	if omitted > 0 {
+		note += " A selected future month with no recorded purchase order is left out rather than printed as a zero actual; its projection is on the Forecast sheet."
+	}
+	section := periodSection{
+		rows:   rows,
+		note:   note,
+		status: status,
+		empty:  "No recorded purchase orders in the selected months.",
+	}
+	if len(resolved.View.Periods.Months) == 0 {
+		section.empty = "No months selected. Choose at least one month to print a period comparison; no figure and no total are shown here."
+		return section
+	}
+	if len(rows) == 0 {
+		return section
+	}
+	totals := resolved.Overview.Totals
+	section.total = &totals
+	section.totalLabel = "Overview total"
+	section.note += " The total is the overview report's own total, not a sum of the selected months."
+	return section
+}
+
+// xlsxSelectedPeriods reads the resolved view's month rows. It mirrors the
+// PDF's monthPrimary: a current month prints its server actual-to-date readout,
+// a past month or a future month with recorded purchase orders prints its
+// supplied row, and a future month with no recorded purchase order has no
+// actual row at all. A month without evidence is counted in omitted, never
+// printed as a zero.
+func xlsxSelectedPeriods(resolved resolvedView) ([]poreport.Period, map[string]string, int) {
+	status := make(map[string]string)
+	if resolved.Aggregate != nil {
+		rows := make([]poreport.Period, 0, len(resolved.Aggregate.Months))
+		omitted := 0
+		for _, month := range resolved.Aggregate.Months {
+			if !month.Recorded || month.Row == nil {
+				omitted++
+				continue
+			}
+			period := *month.Row
+			period.PeriodStart = month.Month + "-01"
+			switch {
+			case month.IsCurrent:
+				status[period.PeriodStart] = "Month to date"
+				period.InProgress = true
+				period.Partial = false
+			case month.IsFuture:
+				status[period.PeriodStart] = "Recorded future"
+				period.InProgress = false
+				period.Partial = false
+			}
+			rows = append(rows, period)
+		}
+		return rows, status, omitted
+	}
+
+	rows := make([]poreport.Period, 0, len(resolved.Months))
+	omitted := 0
+	for _, month := range resolved.Months {
+		period, label, ok := xlsxSelectedMonthPeriod(month)
+		if !ok {
+			omitted++
+			continue
+		}
+		if label != "" {
+			status[period.PeriodStart] = label
+		}
+		rows = append(rows, period)
+	}
+	return rows, status, omitted
+}
+
+// xlsxSelectedMonthPeriod is one resolved month as an actual row. A dashed
+// card in the PDF has no row here: the absence of evidence is not a zero.
+func xlsxSelectedMonthPeriod(month resolvedMonth) (poreport.Period, string, bool) {
+	period := poreport.Period{PeriodStart: month.Month + "-01"}
+	switch {
+	case month.IsCurrent:
+		if month.Summary == nil {
+			return poreport.Period{}, "", false
+		}
+		period.Metrics = month.Summary.Actual
+		return period, "Month to date", true
+	case month.IsFuture:
+		if month.Period == nil || month.Period.PoCount == 0 {
+			return poreport.Period{}, "", false
+		}
+		period.Metrics = month.Period.Metrics
+		return period, "Recorded future", true
+	default:
+		if month.Period == nil {
+			return poreport.Period{}, "", false
+		}
+		period.Metrics = month.Period.Metrics
+		period.Partial = month.Period.Partial
+		period.InProgress = month.Period.InProgress
+		return period, "", true
+	}
+}
+
+func (b *reportWorkbook) renderPeriods(section periodSection) error {
 	const sheet = xlsxPeriodsSheet
 	if err := b.set(sheet, "A1", "Periods", b.styles.title); err != nil {
 		return err
 	}
-	note := "Actual purchase orders in the report range. PPN is excluded; an uncosted amount is never counted as profit."
-	if _, limited := periodTableLimit(snapshot); limited {
-		note += " The table stops at the period containing the as-of date; later buckets are forecast territory."
-	}
-	if err := b.set(sheet, "A2", note, b.styles.subtitle); err != nil {
+	if err := b.set(sheet, "A2", section.note, b.styles.subtitle); err != nil {
 		return err
 	}
 
@@ -500,13 +646,11 @@ func (b *reportWorkbook) renderPeriods(snapshot poreport.Report) error {
 		}
 	}
 
-	periods := xlsxVisiblePeriods(snapshot)
-	if len(periods) == 0 {
-		return b.set(sheet, fmt.Sprintf("A%d", headerRow+1),
-			"No purchase orders in the selected range.", b.styles.subtitle)
+	if len(section.rows) == 0 {
+		return b.set(sheet, fmt.Sprintf("A%d", headerRow+1), section.empty, b.styles.subtitle)
 	}
 	row := headerRow + 1
-	for _, period := range periods {
+	for _, period := range section.rows {
 		if err := b.set(sheet, fmt.Sprintf("A%d", row), period.PeriodStart, b.styles.text); err != nil {
 			return err
 		}
@@ -530,12 +674,14 @@ func (b *reportWorkbook) renderPeriods(snapshot poreport.Report) error {
 		if err := b.set(sheet, fmt.Sprintf("I%d", row), b.major(period.UncostedMinor), b.styles.money); err != nil {
 			return err
 		}
-		status := ""
-		switch {
-		case period.InProgress:
-			status = "In progress"
-		case period.Partial:
-			status = "Partial"
+		status := section.status[period.PeriodStart]
+		if status == "" {
+			switch {
+			case period.InProgress:
+				status = "In progress"
+			case period.Partial:
+				status = "Partial"
+			}
 		}
 		if err := b.set(sheet, fmt.Sprintf("J%d", row), status, b.styles.text); err != nil {
 			return err
@@ -543,29 +689,34 @@ func (b *reportWorkbook) renderPeriods(snapshot poreport.Report) error {
 		row++
 	}
 
+	// An empty section and a selection with no recorded evidence carry no
+	// total: a total with no rows beside it would be an invented answer.
+	if section.total == nil {
+		return b.addPeriodCharts(sheet, headerRow+1, row-1)
+	}
+	total := *section.total
 	totalRow := row
-	if err := b.set(sheet, fmt.Sprintf("A%d", totalRow), "Report total", b.styles.strong); err != nil {
+	if err := b.set(sheet, fmt.Sprintf("A%d", totalRow), section.totalLabel, b.styles.strong); err != nil {
 		return err
 	}
-	if err := b.set(sheet, fmt.Sprintf("B%d", totalRow), snapshot.Totals.PoCount, b.styles.count); err != nil {
+	if err := b.set(sheet, fmt.Sprintf("B%d", totalRow), total.PoCount, b.styles.count); err != nil {
 		return err
 	}
 	for index, minor := range []int64{
-		snapshot.Totals.AmountMinor, snapshot.Totals.CostedMinor,
-		snapshot.Totals.CapitalMinor, snapshot.Totals.MarginMinor,
+		total.AmountMinor, total.CostedMinor, total.CapitalMinor, total.MarginMinor,
 	} {
 		column := columnLetter(2 + index)
 		if err := b.set(sheet, fmt.Sprintf("%s%d", column, totalRow), b.major(minor), b.styles.total); err != nil {
 			return err
 		}
 	}
-	if err := b.setPercentCell(sheet, fmt.Sprintf("G%d", totalRow), snapshot.Totals.MarginBps); err != nil {
+	if err := b.setPercentCell(sheet, fmt.Sprintf("G%d", totalRow), total.MarginBps); err != nil {
 		return err
 	}
-	if err := b.setPercentCell(sheet, fmt.Sprintf("H%d", totalRow), snapshot.Totals.CoverageBps); err != nil {
+	if err := b.setPercentCell(sheet, fmt.Sprintf("H%d", totalRow), total.CoverageBps); err != nil {
 		return err
 	}
-	if err := b.set(sheet, fmt.Sprintf("I%d", totalRow), b.major(snapshot.Totals.UncostedMinor), b.styles.total); err != nil {
+	if err := b.set(sheet, fmt.Sprintf("I%d", totalRow), b.major(total.UncostedMinor), b.styles.total); err != nil {
 		return err
 	}
 
@@ -646,14 +797,69 @@ func (b *reportWorkbook) addPeriodCharts(sheet string, firstRow, lastRow int) er
 	return nil
 }
 
-func (b *reportWorkbook) renderCategories(snapshot poreport.Report) error {
+// categorySection is the Categories sheet's row set. A legacy snapshot prints
+// every supplied row and its own total; a view prints exactly the selected
+// codes in the source's supplied order. Only an aggregate selection is the whole
+// supplied row set, so only that one carries the source's total: a subset with
+// the source total beside it would read as a subset total.
+type categorySection struct {
+	rows       []poreport.Category
+	total      *poreport.Metrics
+	totalLabel string
+	note       string
+	empty      string
+}
+
+// newCategorySection builds the Categories sheet's rows from the document.
+func newCategorySection(overview poreport.Report, resolved *resolvedView) categorySection {
+	if resolved == nil {
+		totals := overview.Totals
+		return categorySection{
+			rows:       overview.Categories,
+			total:      &totals,
+			totalLabel: "Report total",
+			empty:      "No purchase orders in the selected range.",
+		}
+	}
+
+	section := categorySection{
+		note:  "Selected business categories only, in the source's supplied order.",
+		empty: "No categories selected. Choose at least one business category to print a category comparison; no figure and no total are shown here.",
+	}
+	if len(resolved.View.Categories.Codes) == 0 {
+		return section
+	}
+	labels := make(map[string]string, len(resolved.Categories.Categories))
+	for _, row := range resolved.Categories.Categories {
+		labels[row.BusinessCategory] = row.Label
+	}
+	section.rows = make([]poreport.Category, 0, len(resolved.ResolvedCategories))
+	for _, item := range resolved.ResolvedCategories {
+		section.rows = append(section.rows, poreport.Category{
+			BusinessCategory: item.Code,
+			Label:            labels[item.Code],
+			Metrics:          item.Metrics,
+		})
+	}
+	if resolved.View.Categories.Layout == ViewLayoutAggregate {
+		totals := resolved.Categories.Totals
+		section.total = &totals
+		section.totalLabel = "Source total"
+		section.note += " The total is the category source's own total, not a sum of the printed rows."
+	}
+	return section
+}
+
+func (b *reportWorkbook) renderCategories(section categorySection) error {
 	const sheet = xlsxCategoriesSheet
 	if err := b.set(sheet, "A1", "Categories", b.styles.title); err != nil {
 		return err
 	}
-	if err := b.set(sheet, "A2",
-		"Actual purchase orders by business category. Capital is the pinned source cost; margin is costed amount minus capital.",
-		b.styles.subtitle); err != nil {
+	subtitle := "Actual purchase orders by business category. Capital is the pinned source cost; margin is costed amount minus capital."
+	if section.note != "" {
+		subtitle += " " + section.note
+	}
+	if err := b.set(sheet, "A2", subtitle, b.styles.subtitle); err != nil {
 		return err
 	}
 
@@ -666,13 +872,12 @@ func (b *reportWorkbook) renderCategories(snapshot poreport.Report) error {
 			return err
 		}
 	}
-	if len(snapshot.Categories) == 0 {
-		return b.set(sheet, fmt.Sprintf("A%d", headerRow+1),
-			"No purchase orders in the selected range.", b.styles.subtitle)
+	if len(section.rows) == 0 {
+		return b.set(sheet, fmt.Sprintf("A%d", headerRow+1), section.empty, b.styles.subtitle)
 	}
 
 	row := headerRow + 1
-	for _, category := range snapshot.Categories {
+	for _, category := range section.rows {
 		label := category.Label
 		if strings.TrimSpace(label) == "" {
 			label = categoryLabel(category.BusinessCategory)
@@ -724,28 +929,31 @@ func (b *reportWorkbook) renderCategories(snapshot poreport.Report) error {
 		return fmt.Errorf("add the category bar chart: %w", err)
 	}
 
-	if err := b.set(sheet, fmt.Sprintf("A%d", row), "Report total", b.styles.strong); err != nil {
+	if section.total == nil {
+		return nil
+	}
+	total := *section.total
+	if err := b.set(sheet, fmt.Sprintf("A%d", row), section.totalLabel, b.styles.strong); err != nil {
 		return err
 	}
-	if err := b.set(sheet, fmt.Sprintf("C%d", row), snapshot.Totals.PoCount, b.styles.count); err != nil {
+	if err := b.set(sheet, fmt.Sprintf("C%d", row), total.PoCount, b.styles.count); err != nil {
 		return err
 	}
 	for index, minor := range []int64{
-		snapshot.Totals.AmountMinor, snapshot.Totals.CostedMinor,
-		snapshot.Totals.CapitalMinor, snapshot.Totals.MarginMinor,
+		total.AmountMinor, total.CostedMinor, total.CapitalMinor, total.MarginMinor,
 	} {
 		column := columnLetter(3 + index)
 		if err := b.set(sheet, fmt.Sprintf("%s%d", column, row), b.major(minor), b.styles.total); err != nil {
 			return err
 		}
 	}
-	if err := b.setPercentCell(sheet, fmt.Sprintf("H%d", row), snapshot.Totals.MarginBps); err != nil {
+	if err := b.setPercentCell(sheet, fmt.Sprintf("H%d", row), total.MarginBps); err != nil {
 		return err
 	}
-	if err := b.setPercentCell(sheet, fmt.Sprintf("I%d", row), snapshot.Totals.CoverageBps); err != nil {
+	if err := b.setPercentCell(sheet, fmt.Sprintf("I%d", row), total.CoverageBps); err != nil {
 		return err
 	}
-	if err := b.set(sheet, fmt.Sprintf("J%d", row), b.major(snapshot.Totals.UncostedMinor), b.styles.total); err != nil {
+	if err := b.set(sheet, fmt.Sprintf("J%d", row), b.major(total.UncostedMinor), b.styles.total); err != nil {
 		return err
 	}
 	return nil
@@ -833,141 +1041,47 @@ func (b *reportWorkbook) renderForecast(snapshot poreport.Report) error {
 		row++
 	}
 
-	return b.addForecastChart(sheet, snapshot)
+	return b.addForecastChart(sheet, headerRow+1, row-1)
 }
 
-// addForecastChart places the actual-versus-forecast chart below the bucket
-// table. The two series share one month axis: actual periods and forecast
-// buckets occupy different months, so each series leaves a gap where the other
-// has evidence. The chart data block lives in J:N; the chart itself is a native
-// column-plus-line combo, never a picture.
-func (b *reportWorkbook) addForecastChart(sheet string, snapshot poreport.Report) error {
-	type monthValues struct {
-		actual   *int64
-		forecast *int64
-		low      *int64
-		high     *int64
-	}
-	months := make(map[string]*monthValues, len(snapshot.Periods)+len(snapshot.Projection.Monthly.Buckets))
-	month := func(key string) *monthValues {
-		values, ok := months[key]
-		if !ok {
-			values = &monthValues{}
-			months[key] = values
-		}
-		return values
-	}
-	actuals := 0
-	for index := range snapshot.Periods {
-		period := snapshot.Periods[index]
-		amount := period.AmountMinor
-		month(period.PeriodStart).actual = &amount
-		actuals++
-	}
-	for index := range snapshot.Projection.Monthly.Buckets {
-		bucket := snapshot.Projection.Monthly.Buckets[index]
-		values := month(bucket.PeriodStart)
-		low, base, high := bucket.AmountLowMinor, bucket.AmountBaseMinor, bucket.AmountHighMinor
-		values.low, values.forecast, values.high = &low, &base, &high
-	}
-	if len(months) == 0 {
+// addForecastChart places the projection-only chart below the bucket table.
+//
+// It plots the projected buckets and nothing else. The Forecast sheet has no
+// actual series at all: a current-period report materializes future days as
+// zero placeholders, and a zero on this sheet would claim an actual that has
+// not happened. The retired actual-versus-forecast combo also put a monthly
+// projection bucket on a day-bucketed report's monthly axis beside the daily
+// actual of the same date, so one row carried both. The Periods sheet's chart
+// is the actual series; a forecast is never evidence and never shares its axis
+// with one.
+func (b *reportWorkbook) addForecastChart(sheet string, firstRow, lastRow int) error {
+	if lastRow < firstRow {
 		return nil
 	}
-	keys := make([]string, 0, len(months))
-	for key := range months {
-		keys = append(keys, key)
-	}
-	for left := 1; left < len(keys); left++ {
-		for right := left; right > 0 && keys[right] < keys[right-1]; right-- {
-			keys[right], keys[right-1] = keys[right-1], keys[right]
-		}
-	}
-
-	const blockColumn = 10 // J
-	headers := []string{"Month", "Actual", "Forecast", "Low", "High"}
-	for index, header := range headers {
-		if err := b.set(sheet, fmt.Sprintf("%s8", columnLetter(blockColumn-1+index)), header, b.styles.header); err != nil {
-			return err
-		}
-	}
-	firstDataRow := 9
-	for index, key := range keys {
-		row := firstDataRow + index
-		values := months[key]
-		if err := b.set(sheet, fmt.Sprintf("%s%d", columnLetter(blockColumn-1), row), key, b.styles.text); err != nil {
-			return err
-		}
-		cells := []struct {
-			offset int
-			value  *int64
-		}{
-			{1, values.actual},
-			{2, values.forecast},
-			{3, values.low},
-			{4, values.high},
-		}
-		for _, cell := range cells {
-			column := columnLetter(blockColumn - 1 + cell.offset)
-			address := fmt.Sprintf("%s%d", column, row)
-			if cell.value == nil {
-				if err := b.set(sheet, address, nil, b.styles.money); err != nil {
-					return err
-				}
-				continue
-			}
-			if err := b.set(sheet, address, b.major(*cell.value), b.styles.money); err != nil {
-				return err
-			}
-		}
-	}
-	lastRow := firstDataRow + len(keys) - 1
-	categories := fmt.Sprintf("%s!$%s$%d:$%s$%d", sheet,
-		columnLetter(blockColumn-1), firstDataRow, columnLetter(blockColumn-1), lastRow)
-	series := make([]excelize.ChartSeries, 0, 2)
-	if actuals > 0 {
+	categories := fmt.Sprintf("%s!$A$%d:$A$%d", sheet, firstRow, lastRow)
+	series := make([]excelize.ChartSeries, 0, 3)
+	for _, column := range []string{"B", "C", "D"} {
 		series = append(series, excelize.ChartSeries{
-			Name:       fmt.Sprintf("%s!$%s$8", sheet, columnLetter(blockColumn)),
+			Name:       fmt.Sprintf("%s!$%s$%d", sheet, column, firstRow-1),
 			Categories: categories,
-			Values: fmt.Sprintf("%s!$%s$%d:$%s$%d", sheet,
-				columnLetter(blockColumn), firstDataRow, columnLetter(blockColumn), lastRow),
+			Values:     fmt.Sprintf("%s!$%s$%d:$%s$%d", sheet, column, firstRow, column, lastRow),
 		})
 	}
-	series = append(series, excelize.ChartSeries{
-		Name:       fmt.Sprintf("%s!$%s$8", sheet, columnLetter(blockColumn+1)),
-		Categories: categories,
-		Values: fmt.Sprintf("%s!$%s$%d:$%s$%d", sheet,
-			columnLetter(blockColumn+1), firstDataRow, columnLetter(blockColumn+1), lastRow),
-	})
-	primary := &excelize.Chart{
+	chart := &excelize.Chart{
 		Type:         excelize.Col,
 		Series:       series,
-		Title:        chartTitle("Actual versus forecast"),
+		Title:        chartTitle("Forecast amount (low, base, high) by projected bucket"),
 		Legend:       excelize.ChartLegend{Position: "bottom"},
 		Dimension:    excelize.ChartDimension{Width: 900, Height: 340},
-		XAxis:        excelize.ChartAxis{Title: chartTitle("Month")},
+		XAxis:        excelize.ChartAxis{Title: chartTitle("Projected bucket")},
 		YAxis:        excelize.ChartAxis{Title: chartTitle("Amount (" + b.info.Code + ")"), MajorGridLines: true},
 		ShowBlanksAs: "gap",
 	}
-	bandSeries := func(offset int) *excelize.Chart {
-		return &excelize.Chart{
-			Type: excelize.Line,
-			Series: []excelize.ChartSeries{{
-				Name:       fmt.Sprintf("%s!$%s$8", sheet, columnLetter(blockColumn-1+offset)),
-				Categories: categories,
-				Values: fmt.Sprintf("%s!$%s$%d:$%s$%d", sheet,
-					columnLetter(blockColumn-1+offset), firstDataRow,
-					columnLetter(blockColumn-1+offset), lastRow),
-				Marker: excelize.ChartMarker{Symbol: "none", Size: 0},
-			}},
-			ShowBlanksAs: "gap",
-		}
-	}
-	// Both the bucket table and the J:N chart-data block sit above the chart, so
-	// the chart never covers a cell a reader might want to inspect.
+	// The bucket table sits above the chart, so the chart never covers a cell a
+	// reader might want to inspect.
 	anchor := fmt.Sprintf("A%d", lastRow+2)
-	if err := b.file.AddChart(sheet, anchor, primary,
-		bandSeries(3), bandSeries(4)); err != nil {
-		return fmt.Errorf("add the actual-versus-forecast chart: %w", err)
+	if err := b.file.AddChart(sheet, anchor, chart); err != nil {
+		return fmt.Errorf("add the forecast chart: %w", err)
 	}
 	return nil
 }

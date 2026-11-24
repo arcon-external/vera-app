@@ -4,13 +4,18 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 
+	"vera-app/backend/apiclient"
 	"vera-app/backend/auth"
 	"vera-app/backend/poreport"
 	"vera-app/backend/render/report"
@@ -72,7 +77,9 @@ func reportJSON(t *testing.T, snapshot poreport.Report) string {
 
 // adminQuotation is a signed-in admin binding. Issue #683 makes the report
 // exports admin-only, so the successful-path tests must carry the role the
-// route and the binding now require.
+// route and the binding now require. This is the injected-service seam; the
+// desktop shape (no auth service, role read from the server) is covered by
+// TestExportPurchaseOrderReportAllowsAnAdminInTheDesktopShape.
 func adminQuotation() *Quotation {
 	q := newTestQuotation()
 	q.SetAuthService(auth.AdminTestService())
@@ -80,6 +87,9 @@ func adminQuotation() *Quotation {
 }
 
 // staffQuotation is a signed-in staff binding: the role that must be refused.
+// The desktop never builds this seam; the shipped path is covered by
+// TestExportPurchaseOrderReportRefusesStaffInTheDesktopShape, which attaches no
+// auth service and lets the fake server answer the role.
 func staffQuotation() *Quotation {
 	q := newTestQuotation()
 	q.SetAuthService(auth.StaffTestService())
@@ -810,5 +820,159 @@ func TestExportPurchaseOrderReportRefusesInvalidCategoryViewsBeforeTheDialog(t *
 				t.Fatal("the save dialog opened before the invalid category view was refused")
 			}
 		})
+	}
+}
+
+// Issue #683, F1. The desktop builds &backend.Quotation{} with no auth service
+// (main.go:23), so the only role source it has is the server. These tests use
+// that exact shape: no SetAuthService, a stored session token, and a real HTTP
+// server answering /v1/auth/me. The injected auth.StaffTestService seam the
+// other staff tests use is deliberately absent, because a green test against a
+// seam the desktop never builds proves nothing about the shipped binding.
+type desktopSessionProbe struct {
+	quotation    *Quotation
+	dialogOpened *bool
+	roleChecks   *int32
+}
+
+// newDesktopSessionProbe wires the desktop shape at a fake veraserver. role is
+// the role /v1/auth/me reports; a request without the stored bearer token is
+// refused with the server's coded 401.
+func newDesktopSessionProbe(t *testing.T, role string) desktopSessionProbe {
+	t.Helper()
+	t.Setenv("VERA_NO_KEYRING", "1")
+	setSessionTokenMemory("desktop-session-token")
+	t.Cleanup(func() { setSessionTokenMemory("") })
+
+	var roleChecks int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/auth/me" {
+			http.NotFound(w, r)
+			return
+		}
+		if r.Header.Get("Authorization") != "Bearer desktop-session-token" {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusUnauthorized)
+			_, _ = io.WriteString(w, `{"error":"missing session","code":"session_missing"}`)
+			return
+		}
+		atomic.AddInt32(&roleChecks, 1)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"id":7,"email":"user@example.com","displayName":"User","role":"`+role+`"}`)
+	}))
+	t.Cleanup(server.Close)
+
+	previousClient := apiClient
+	ConfigureAPI(apiclient.New(server.URL, SessionToken))
+	t.Cleanup(func() { apiClient = previousClient })
+
+	dialogOpened := false
+	previousDialog := saveFileDialog
+	saveFileDialog = func(context.Context, runtime.SaveDialogOptions) (string, error) {
+		dialogOpened = true
+		return "", nil
+	}
+	t.Cleanup(func() { saveFileDialog = previousDialog })
+
+	return desktopSessionProbe{
+		quotation:    &Quotation{},
+		dialogOpened: &dialogOpened,
+		roleChecks:   &roleChecks,
+	}
+}
+
+// TestExportPurchaseOrderReportRefusesStaffInTheDesktopShape is the criterion
+// the first pass missed: a signed-in staff token, no auth service, both
+// report bindings must refuse before the payload is decoded and before the save
+// dialog opens. Delete the server role check and this test goes green while a
+// staff desktop writes both files.
+func TestExportPurchaseOrderReportRefusesStaffInTheDesktopShape(t *testing.T) {
+	probe := newDesktopSessionProbe(t, "staff")
+
+	if _, err := probe.quotation.ExportPurchaseOrderReport(reportJSON(t, reportExportFixture())); err == nil {
+		t.Fatalf("desktop staff session exported a PDF")
+	}
+	if *probe.dialogOpened {
+		t.Errorf("the PDF save dialog opened for a desktop staff session")
+	}
+
+	if _, err := probe.quotation.ExportPurchaseOrderReportXLSX(reportJSON(t, reportExportFixture())); err == nil {
+		t.Fatalf("desktop staff session exported a workbook")
+	}
+	if *probe.dialogOpened {
+		t.Errorf("the Excel save dialog opened for a desktop staff session")
+	}
+
+	if got := atomic.LoadInt32(probe.roleChecks); got != 2 {
+		t.Errorf("role checks = %d; want the server asked once per binding", got)
+	}
+}
+
+// TestExportPurchaseOrderReportAllowsAnAdminInTheDesktopShape keeps the real
+// path from becoming a blanket refusal: an admin session the server confirms is
+// allowed to reach the dialog. Cancelling the dialog is enough proof that the
+// export passed the role gate, because the dialog is opened after it.
+func TestExportPurchaseOrderReportAllowsAnAdminInTheDesktopShape(t *testing.T) {
+	probe := newDesktopSessionProbe(t, "admin")
+
+	got, err := probe.quotation.ExportPurchaseOrderReport(reportJSON(t, reportExportFixture()))
+	if err != nil {
+		t.Fatalf("desktop admin PDF export: %v", err)
+	}
+	if got != "" {
+		t.Errorf("cancelled PDF export returned %q, want an empty path", got)
+	}
+
+	got, err = probe.quotation.ExportPurchaseOrderReportXLSX(reportJSON(t, reportExportFixture()))
+	if err != nil {
+		t.Fatalf("desktop admin Excel export: %v", err)
+	}
+	if got != "" {
+		t.Errorf("cancelled Excel export returned %q, want an empty path", got)
+	}
+
+	if !*probe.dialogOpened {
+		t.Errorf("the save dialog never opened for an admin session")
+	}
+	if got := atomic.LoadInt32(probe.roleChecks); got != 2 {
+		t.Errorf("role checks = %d; want the server asked once per binding", got)
+	}
+}
+
+// A refused or unreachable role lookup is a refusal, never a fallback to "a
+// token exists". The fake server answers 401 for a token it never issued.
+func TestExportPurchaseOrderReportRefusesWhenTheRoleCannotBeConfirmed(t *testing.T) {
+	t.Setenv("VERA_NO_KEYRING", "1")
+	setSessionTokenMemory("a-token-the-server-does-not-know")
+	t.Cleanup(func() { setSessionTokenMemory("") })
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusUnauthorized)
+		_, _ = io.WriteString(w, `{"error":"missing session","code":"session_missing"}`)
+	}))
+	t.Cleanup(server.Close)
+
+	previousClient := apiClient
+	ConfigureAPI(apiclient.New(server.URL, SessionToken))
+	t.Cleanup(func() { apiClient = previousClient })
+
+	dialogOpened := false
+	previousDialog := saveFileDialog
+	saveFileDialog = func(context.Context, runtime.SaveDialogOptions) (string, error) {
+		dialogOpened = true
+		return "", nil
+	}
+	t.Cleanup(func() { saveFileDialog = previousDialog })
+
+	q := &Quotation{}
+	if _, err := q.ExportPurchaseOrderReport(reportJSON(t, reportExportFixture())); err == nil {
+		t.Fatalf("an unconfirmed session exported a PDF")
+	}
+	if _, err := q.ExportPurchaseOrderReportXLSX(reportJSON(t, reportExportFixture())); err == nil {
+		t.Fatalf("an unconfirmed session exported a workbook")
+	}
+	if dialogOpened {
+		t.Errorf("the save dialog opened without a confirmed admin role")
 	}
 }

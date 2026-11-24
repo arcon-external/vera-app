@@ -582,15 +582,38 @@ func (q *Quotation) requireUser(ctx context.Context) error {
 }
 
 // requireAdmin denies callers without an admin role.
+//
+// On the API server the auth service answers from the request's own session.
+// The desktop builds &backend.Quotation{} with no auth service (main.go:23),
+// and the bindings that use this — the report exports and the company template
+// previews — make no report or settings call of their own, so there is no
+// endpoint to return 403. A stored token therefore proves only that someone
+// signed in, never that they are an admin: without a local auth service the
+// role is read from /v1/auth/me, and a refused, unreachable or non-admin answer
+// is a refusal.
 func (q *Quotation) requireAdmin(ctx context.Context) error {
 	if q.auth != nil {
 		_, err := q.auth.RequireAdmin(ctx)
 		return err
 	}
-	// Without a local auth service the role is enforced server-side, which
-	// surfaces 403 for staff. A token must still be present to call at all.
+	return requireAdminSession()
+}
+
+// requireAdminSession confirms with the server that the signed-in user is an
+// admin. It is the desktop's admin gate: the role is the server's answer, not
+// an assumption carried by token presence. CurrentUser is the same binding the
+// desktop already uses to learn who is signed in, so this adds no second
+// notion of a session.
+func requireAdminSession() error {
 	if SessionToken() == "" {
 		return fmt.Errorf("not signed in")
+	}
+	user, err := NewAuthAPI().CurrentUser()
+	if err != nil {
+		return fmt.Errorf("check admin role: %w", err)
+	}
+	if user.Role != "admin" {
+		return fmt.Errorf("admin access required")
 	}
 	return nil
 }

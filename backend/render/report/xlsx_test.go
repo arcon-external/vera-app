@@ -8,6 +8,7 @@ import (
 	"sort"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/xuri/excelize/v2"
 
@@ -434,11 +435,11 @@ func TestRenderXLSXPeriodsAndCategoriesCarryRowsAndNativeCharts(t *testing.T) {
 	}
 }
 
-// The Forecast sheet keeps the projection in its own place and never
-// mixes it into the actual tables. When the monthly series is available the
-// workbook carries the actual-versus-forecast chart; when it is not, the sheet
-// states the stable reason and draws no forecast chart at all.
-func TestRenderXLSXForecastWritesBucketsAndTheActualVersusForecastChart(t *testing.T) {
+// The Forecast sheet keeps the projection in its own place and never mixes it
+// into the actual tables. When the monthly series is available the workbook
+// carries a projection chart of the low/base/high band; when it is not, the
+// sheet states the stable reason and draws no forecast chart at all.
+func TestRenderXLSXForecastWritesBucketsAndTheProjectionChart(t *testing.T) {
 	raw := renderXLSXSnapshot(t, sampleReport())
 	workbook := openWorkbook(t, raw)
 
@@ -475,16 +476,22 @@ func TestRenderXLSXForecastWritesBucketsAndTheActualVersusForecastChart(t *testi
 	}
 	forecastChart := ""
 	for _, name := range charts {
-		if strings.Contains(parts[name], "Forecast!$K$") && strings.Contains(parts[name], "Forecast!$L$") {
+		if strings.Contains(parts[name], "Forecast!") {
 			forecastChart = name
 			break
 		}
 	}
 	if forecastChart == "" {
-		t.Fatalf("no chart references both the actual and forecast series: %v", charts)
+		t.Fatalf("no chart references the forecast sheet: %v", charts)
 	}
-	if !strings.Contains(parts[forecastChart], "Actual versus forecast") {
-		t.Errorf("forecast chart has no actual-versus-forecast title: %s", forecastChart)
+	content := parts[forecastChart]
+	if !strings.Contains(content, "Forecast amount") {
+		t.Errorf("forecast chart has no forecast title: %s", forecastChart)
+	}
+	for _, column := range []string{"$B$", "$C$", "$D$"} {
+		if !strings.Contains(content, "Forecast!"+column) {
+			t.Errorf("forecast chart does not plot the %s bucket column", column)
+		}
 	}
 }
 
@@ -623,5 +630,328 @@ func TestRenderXLSXWritesTheFiveSheetWorkbook(t *testing.T) {
 	}
 	if !foundCode || !foundText {
 		t.Errorf("Notes rows = %v; want the legacy adjustment note and its text", rows)
+	}
+}
+
+// isISODate reports whether text is a zero-padded YYYY-MM-DD date. Period rows
+// are the only dated rows the workbook prints, so this is how a test tells a
+// data row from a heading.
+func isISODate(text string) bool {
+	if len(text) != len("2006-01-02") {
+		return false
+	}
+	_, err := time.Parse(time.DateOnly, text)
+	return err == nil
+}
+
+// datedRows returns the first cell of every dated row on a sheet.
+func datedRows(t *testing.T, workbook *excelize.File, sheet string) []string {
+	t.Helper()
+	rows, err := workbook.GetRows(sheet)
+	if err != nil {
+		t.Fatalf("read %s rows: %v", sheet, err)
+	}
+	dates := make([]string, 0, len(rows))
+	for _, row := range rows {
+		if first := cellAt(row, 0); isISODate(first) {
+			dates = append(dates, first)
+		}
+	}
+	return dates
+}
+
+// Issue #683, F2. The Forecast sheet is projection territory: its chart plots
+// the projected buckets only. A future day is never a zero actual, and one row
+// never carries both a daily actual and a monthly forecast, because the sheet
+// has no actual series at all. The Periods sheet carries the actual chart.
+func TestRenderXLSXForecastChartPlotsOnlyTheProjectedBuckets(t *testing.T) {
+	cases := []struct {
+		name     string
+		snapshot poreport.Report
+	}{
+		{name: "day report", snapshot: dayReport()},
+		{name: "current year report", snapshot: currentYearReport()},
+	}
+	for _, test := range cases {
+		t.Run(test.name, func(t *testing.T) {
+			raw := renderXLSXSnapshot(t, test.snapshot)
+			workbook := openWorkbook(t, raw)
+
+			header := rowWithLabel(t, workbook, "Forecast", "Period")
+			for _, cell := range header {
+				if strings.EqualFold(strings.TrimSpace(cell), "Actual") {
+					t.Errorf("Forecast header carries an Actual column: %v", header)
+				}
+			}
+
+			dates := datedRows(t, workbook, "Forecast")
+			want := len(test.snapshot.Projection.Monthly.Buckets)
+			if len(dates) != want {
+				t.Fatalf("Forecast dated rows = %v; want the %d projected buckets", dates, want)
+			}
+			buckets := make(map[string]struct{}, want)
+			for _, bucket := range test.snapshot.Projection.Monthly.Buckets {
+				buckets[bucket.PeriodStart] = struct{}{}
+			}
+			for _, date := range dates {
+				if _, ok := buckets[date]; !ok {
+					t.Errorf("Forecast plotted %q, which is not a projected bucket", date)
+				}
+				if !strings.HasSuffix(date, "-01") {
+					t.Errorf("Forecast plotted %q on a month axis; want a month start", date)
+				}
+			}
+
+			// The old actual-versus-forecast block lived in J:N with a blank
+			// first cell. Nothing may sit past the bucket table any more.
+			rows, err := workbook.GetRows("Forecast")
+			if err != nil {
+				t.Fatalf("read Forecast rows: %v", err)
+			}
+			for index, row := range rows {
+				for column := 9; column < len(row); column++ {
+					if strings.TrimSpace(row[column]) != "" {
+						t.Errorf("Forecast row %d has a value in column %d (%q); the chart data block is gone",
+							index+1, column+1, row[column])
+					}
+				}
+				if cellAt(row, 0) == "" && len(row) > 1 && strings.TrimSpace(row[1]) != "" {
+					t.Errorf("Forecast row %d carries a value with no period (%v)", index+1, row)
+				}
+			}
+
+			parts := workbookParts(t, raw)
+			forecastChart := ""
+			for _, name := range chartParts(parts) {
+				if strings.Contains(parts[name], "Forecast!") {
+					forecastChart = name
+				}
+			}
+			if forecastChart == "" {
+				t.Fatalf("no chart references the Forecast sheet")
+			}
+			content := parts[forecastChart]
+			if !strings.Contains(content, "Forecast amount") {
+				t.Errorf("forecast chart is not titled as a projection: %s", forecastChart)
+			}
+			for _, column := range []string{"$B$", "$C$", "$D$"} {
+				if !strings.Contains(content, "Forecast!"+column) {
+					t.Errorf("forecast chart does not plot the %s bucket column", column)
+				}
+			}
+			for _, column := range []string{"$J$", "$K$", "$L$", "$M$", "$N$"} {
+				if strings.Contains(content, "Forecast!"+column) {
+					t.Errorf("forecast chart plots %s, the retired actual-versus-forecast block", column)
+				}
+			}
+			if strings.Contains(content, "Actual") {
+				t.Errorf("forecast chart still names an actual series")
+			}
+			// An actual series that read the Periods sheet would reintroduce the
+			// collision the old combo chart had: one row whose category is a
+			// month start carrying both a daily actual and a monthly forecast.
+			if strings.Contains(content, "Periods!") {
+				t.Errorf("forecast chart plots actual rows from the Periods sheet")
+			}
+		})
+	}
+}
+
+// Issue #683, F3. The workbook is the PDF's document: a view that selects one
+// month prints one period row, not the overview's whole range.
+func TestRenderXLSXViewPrintsTheSelectedMonths(t *testing.T) {
+	view := validPastMonthView(t) // October 2026 only
+	workbook := openWorkbook(t, renderXLSXView(t, view))
+
+	got := datedRows(t, workbook, "Periods")
+	if len(got) != 1 || got[0] != "2026-10-01" {
+		t.Fatalf("Periods rows = %v; want the single selected month 2026-10-01", got)
+	}
+	october := rowNumberWithFirstCell(t, workbook, "Periods", "2026-10-01")
+	assertNumber(t, "October PO count", numberAt(t, workbook, "Periods", october, 1), 2)
+	if count := cellAt(rowWithFirstCellContaining(t, workbook, "Periods", "2026-10-01"), 1); count != "2" {
+		t.Errorf("October PO count cell = %q, want 2", count)
+	}
+	for _, absent := range []string{"2026-01-01", "2026-06-01", "2026-11-01", "2026-12-01"} {
+		for _, date := range got {
+			if date == absent {
+				t.Errorf("Periods printed %s, which the view did not select", date)
+			}
+		}
+	}
+
+	// The one-calendar-year aggregate reads its twelve rows from its own
+	// annual source, so every recorded month is printed.
+	source := annualViewReport(2025, "2025-12-20", nil)
+	aggregate := annualAggregateView(source)
+	aggregateBook := openWorkbook(t, renderXLSXView(t, aggregate))
+	if months := datedRows(t, aggregateBook, "Periods"); len(months) != 12 {
+		t.Errorf("aggregate Periods rows = %v; want the twelve months of 2025", months)
+	}
+}
+
+// Issue #683, F3. A category selection prints exactly those rows in the
+// source's supplied order, and a subset carries no total that would read as the
+// subset's own.
+func TestRenderXLSXViewPrintsOnlyTheSelectedCategories(t *testing.T) {
+	codes := []string{poreport.CategorySupplyGeneral, poreport.CategoryOthers}
+	view := categoryComparisonView(t, ViewLayoutIndividual, codes, false)
+	workbook := openWorkbook(t, renderXLSXView(t, view))
+
+	rows, err := workbook.GetRows("Categories")
+	if err != nil {
+		t.Fatalf("read Categories rows: %v", err)
+	}
+	var printed []string
+	inTable := false
+	for _, row := range rows {
+		code := cellAt(row, 0)
+		if code == "Code" {
+			inTable = true
+			continue
+		}
+		if !inTable || code == "" {
+			continue
+		}
+		if strings.Contains(strings.ToLower(code), "total") {
+			t.Errorf("a selected subset printed a total row %q", code)
+			continue
+		}
+		printed = append(printed, code)
+	}
+	if len(printed) != len(codes) {
+		t.Fatalf("Categories rows = %v; want %v", printed, codes)
+	}
+	for index := range codes {
+		if printed[index] != codes[index] {
+			t.Fatalf("Categories rows = %v; want the source order %v", printed, codes)
+		}
+	}
+	for _, absent := range []string{poreport.CategoryFm, poreport.CategoryFab, poreport.CategoryUnassigned} {
+		for _, code := range printed {
+			if code == absent {
+				t.Errorf("Categories printed %s, which the view did not select", code)
+			}
+		}
+	}
+
+	// The aggregate layout is the whole supplied row set, so it keeps the
+	// source's own server total under an honest label.
+	all := viewCodes(categoryComparisonSource(t))
+	aggregate := categoryComparisonView(t, ViewLayoutAggregate, all, false)
+	aggregateBook := openWorkbook(t, renderXLSXView(t, aggregate))
+	totalRows, err := aggregateBook.GetRows("Categories")
+	if err != nil {
+		t.Fatalf("read aggregate Categories: %v", err)
+	}
+	found := false
+	for _, row := range totalRows {
+		if cellAt(row, 0) == "Source total" {
+			found = true
+			assertNumber(t, "aggregate source total", numberAt(t, aggregateBook, "Categories",
+				rowNumberWithLabel(t, aggregateBook, "Categories", "Source total"), 3), 1_100_000_000)
+		}
+	}
+	if !found {
+		t.Errorf("aggregate category workbook has no source total row")
+	}
+}
+
+// Issue #683, F3. An explicit empty selection prints an empty section. It must
+// not fall back to the overview's full months or categories, because the PDF
+// prints none of them either.
+func TestRenderXLSXViewEmptySelectionPrintsTheEmptySections(t *testing.T) {
+	overview := currentYearReport()
+	view := ViewEnvelope{
+		Version:  ViewVersion,
+		Sources:  []poreport.Report{overview},
+		Overview: 0,
+		Periods: ViewPeriods{
+			Sources: []int{}, Months: []string{}, Layout: ViewLayoutIndividual,
+		},
+		Categories: ViewCategories{Source: 0, Codes: []string{}, Layout: ViewLayoutIndividual},
+	}
+	workbook := openWorkbook(t, renderXLSXView(t, view))
+
+	if rows := datedRows(t, workbook, "Periods"); len(rows) != 0 {
+		t.Errorf("an empty month selection printed %v", rows)
+	}
+	periodRows, err := workbook.GetRows("Periods")
+	if err != nil {
+		t.Fatalf("read Periods: %v", err)
+	}
+	if !sheetSays(periodRows, "No months selected") {
+		t.Errorf("Periods does not state the empty month selection: %v", periodRows)
+	}
+
+	categoryRows, err := workbook.GetRows("Categories")
+	if err != nil {
+		t.Fatalf("read Categories: %v", err)
+	}
+	if !sheetSays(categoryRows, "No categories selected") {
+		t.Errorf("Categories does not state the empty category selection: %v", categoryRows)
+	}
+	for _, row := range categoryRows {
+		switch cellAt(row, 0) {
+		case poreport.CategoryFm, poreport.CategoryFab, poreport.CategorySupplyGeneral,
+			poreport.CategoryOthers, poreport.CategoryUnassigned, "Report total", "Source total":
+			t.Errorf("an empty category selection printed %q", cellAt(row, 0))
+		}
+	}
+}
+
+// sheetSays reports whether any cell on the sheet contains text.
+func sheetSays(rows [][]string, text string) bool {
+	for _, row := range rows {
+		for _, cell := range row {
+			if strings.Contains(cell, text) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// Issue #683, F3. The current month's row is the server's actual-to-date
+// readout, not the annual month row that may also carry future-dated records;
+// a future month with no recorded purchase order has no actual row at all.
+func TestRenderXLSXViewCurrentAndFutureMonthsFollowThePdfEvidence(t *testing.T) {
+	overview := yearMonthFixture(t)
+	current := individualMonthsView(t, []string{"2026-11"})
+	workbook := openWorkbook(t, renderXLSXView(t, current))
+	rows := datedRows(t, workbook, "Periods")
+	if len(rows) != 1 || rows[0] != "2026-11-01" {
+		t.Fatalf("Periods rows = %v; want the selected current month only", rows)
+	}
+	row := rowNumberWithFirstCell(t, workbook, "Periods", "2026-11-01")
+	if status := cellAt(rowWithFirstCellContaining(t, workbook, "Periods", "2026-11-01"), 9); status != "Month to date" {
+		t.Errorf("current month status = %q; want Month to date", status)
+	}
+	actual := overview.MonthSummary.Actual
+	assertNumber(t, "current month amount", numberAt(t, workbook, "Periods", row, 2), float64(actual.AmountMinor))
+	assertNumber(t, "current month PO count", numberAt(t, workbook, "Periods", row, 1), float64(actual.PoCount))
+
+	// December 2026 is a future month with a zero annual row and no recorded
+	// purchase order: the PDF prints a dashed card, the workbook prints no
+	// actual row and says so, rather than a zero.
+	future := individualMonthsView(t, []string{"2026-12"})
+	futureBook := openWorkbook(t, renderXLSXView(t, future))
+	if rows := datedRows(t, futureBook, "Periods"); len(rows) != 0 {
+		t.Errorf("a future month with no recorded purchase order printed %v", rows)
+	}
+	periodRows, err := futureBook.GetRows("Periods")
+	if err != nil {
+		t.Fatalf("read Periods: %v", err)
+	}
+	if !sheetSays(periodRows, "No recorded purchase orders in the selected months") {
+		t.Errorf("the future month's empty section is not stated: %v", periodRows)
+	}
+	if !sheetSays(periodRows, "left out rather than printed as a zero actual") {
+		t.Errorf("the workbook does not say the future month was left out: %v", periodRows)
+	}
+	for _, row := range periodRows {
+		if cellAt(row, 0) == "Overview total" {
+			t.Errorf("an empty future selection printed an overview total")
+		}
 	}
 }
