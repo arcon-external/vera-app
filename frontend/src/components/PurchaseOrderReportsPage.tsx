@@ -80,6 +80,12 @@ export interface PurchaseOrderReportsPageProps {
    */
   onExport?: (view: PurchaseOrderReportView) => Promise<string>;
   /**
+   * #683: the native Excel binding. Same contract as `onExport`: it receives
+   * the frozen view and returns the saved path (empty when the user cancels).
+   * Absent means the Excel button is disabled.
+   */
+  onExportXLSX?: (view: PurchaseOrderReportView) => Promise<string>;
+  /**
    * Issue #645: true while Reports is the visible workspace. A hidden page
    * fetches nothing; each false → true return revalidates the currently
    * required scopes once. Defaults to true for standalone tests.
@@ -111,6 +117,10 @@ export interface PurchaseOrderReportsViewProps {
   catalogue: readonly CurrencyInfo[] | null;
   exporting: boolean;
   canExport: boolean;
+  /** #683: true while the Excel workbook save is in flight. */
+  exportingXLSX?: boolean;
+  /** #683: absent means the Excel button renders disabled. */
+  onExportXLSX?: () => void;
   onPresetChange: (preset: ReportPreset) => void;
   onPeriodChange: (period: ReportPeriodMode | null) => void;
   onFromChange: (value: string) => void;
@@ -350,6 +360,8 @@ export function PurchaseOrderReportsView({
   catalogue,
   exporting,
   canExport,
+  exportingXLSX = false,
+  onExportXLSX,
   onPresetChange,
   onPeriodChange,
   onFromChange,
@@ -479,7 +491,7 @@ export function PurchaseOrderReportsView({
           )}
           <Button
             aria-label="Export PDF"
-            disabled={!canExport || exporting}
+            disabled={!canExport || exporting || exportingXLSX}
             title={
               canExport
                 ? "Save this visible report as a PDF"
@@ -488,6 +500,29 @@ export function PurchaseOrderReportsView({
             onClick={onExport}
           >
             {exporting ? "Exporting…" : "Export PDF"}
+          </Button>
+          <Button
+            aria-label="Export Excel"
+            disabled={
+              !canExport ||
+              exporting ||
+              exportingXLSX ||
+              onExportXLSX === undefined
+            }
+            title={
+              onExportXLSX === undefined
+                ? "Excel export is not available."
+                : exportingXLSX
+                  ? "The workbook is being saved."
+                  : exporting
+                    ? "Wait for the PDF export to finish."
+                    : canExport
+                      ? "Save this visible report as an Excel workbook"
+                      : "A valid, current report is required before export."
+            }
+            onClick={onExportXLSX}
+          >
+            {exportingXLSX ? "Exporting…" : "Export Excel"}
           </Button>
         </div>
       </header>
@@ -577,6 +612,7 @@ export function PurchaseOrderReportsPage({
   defaultCurrency,
   currencyCatalogue,
   onExport,
+  onExportXLSX,
   active: activeProp = true,
   mutationEpoch = 0,
   isAdmin = false,
@@ -589,6 +625,9 @@ export function PurchaseOrderReportsPage({
     initialReportFilters(todayWIB(), defaultCurrency)
   );
   const [exporting, setExporting] = useState(false);
+  // #683: the Excel save is a second in-flight state so the two buttons keep
+  // independent labels while neither can start beside the other.
+  const [exportingXLSX, setExportingXLSX] = useState(false);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [pickerYear, setPickerYear] = useState("");
   const [categoryPickerOpen, setCategoryPickerOpen] = useState(false);
@@ -886,36 +925,37 @@ export function PurchaseOrderReportsPage({
     monthComparison.aggregate?.refreshing === true ||
     categoryComparison.readout.refreshing === true;
 
-  const canExport =
-    onExport !== undefined &&
+  // Both exports need the same evidence: a current, valid overview plus the
+  // month and category selections the screen is showing. The in-flight flags
+  // are separate so one save never blocks or enables the other mid-run.
+  const exportReady =
     report !== null &&
     !overview.loading &&
     !overview.stale &&
     overview.error === "" &&
-    !exporting &&
     monthComparison.canExport &&
     categoryComparison.canExport;
+  const canExport =
+    onExport !== undefined && exportReady && !exporting && !exportingXLSX;
+  const canExportXLSX =
+    onExportXLSX !== undefined && exportReady && !exportingXLSX && !exporting;
 
   const refresh = useCallback(() => {
     invalidateAll();
     setFulfillmentRefresh((current) => current + 1);
   }, [invalidateAll]);
 
-  const handleExport = useCallback(() => {
-    // Defense in depth: the button is disabled while `canExport` is false, but
-    // an explicit empty month/category selection can keep both selection
-    // objects resolvable while the overview is stale or re-reading. Refuse at
-    // the handler too, so a programmatic call can never export old evidence.
-    if (!onExport || !canExport || report === null || exporting) return;
+  // Freeze the whole v1 envelope before either binding call. A later month,
+  // category, layout, filter or Refresh cannot alter a document already being
+  // saved; its sources stay pinned until that save settles. Both handlers use
+  // this one builder so the PDF and the workbook cannot disagree.
+  const freezeExportView = useCallback((): PurchaseOrderReportView | null => {
+    if (report === null) return null;
     const monthSelection = monthComparison.exportSelection;
     const categorySelection = categoryComparison.exportSelection;
-    if (monthSelection === null || categorySelection === null) return;
-    // Freeze the whole v1 envelope before the binding call. A later month,
-    // category, layout, filter or Refresh cannot alter the document already
-    // being saved; its sources stay pinned until the save settles.
-    let view: PurchaseOrderReportView;
+    if (monthSelection === null || categorySelection === null) return null;
     try {
-      view = buildPurchaseOrderReportView(report, {
+      return buildPurchaseOrderReportView(report, {
         ...monthSelection,
         categories: categorySelection,
       });
@@ -924,8 +964,23 @@ export function PurchaseOrderReportsPage({
         "error",
         errorMessage(caught, "The selected comparison cannot be exported.")
       );
-      return;
+      return null;
     }
+  }, [
+    categoryComparison.exportSelection,
+    monthComparison.exportSelection,
+    pushToast,
+    report,
+  ]);
+
+  const handleExport = useCallback(() => {
+    // Defense in depth: the button is disabled while `canExport` is false, but
+    // an explicit empty month/category selection can keep both selection
+    // objects resolvable while the overview is stale or re-reading. Refuse at
+    // the handler too, so a programmatic call can never export old evidence.
+    if (!onExport || !canExport || report === null || exporting) return;
+    const view = freezeExportView();
+    if (view === null) return;
     const releasePin = pinExport(
       view.sources.map((source) => reportFilterKey(source.filter))
     );
@@ -951,10 +1006,50 @@ export function PurchaseOrderReportsPage({
     })();
   }, [
     canExport,
-    categoryComparison.exportSelection,
     exporting,
-    monthComparison.exportSelection,
+    freezeExportView,
     onExport,
+    pinExport,
+    pushToast,
+    report,
+  ]);
+
+  const handleExportXLSX = useCallback(() => {
+    // Same defense as the PDF handler: refuse before the binding when the
+    // button is disabled or another save already holds the evidence.
+    if (!onExportXLSX || !canExportXLSX || report === null || exportingXLSX) {
+      return;
+    }
+    const view = freezeExportView();
+    if (view === null) return;
+    const releasePin = pinExport(
+      view.sources.map((source) => reportFilterKey(source.filter))
+    );
+    setExportingXLSX(true);
+    void (async () => {
+      try {
+        const path = await onExportXLSX(view);
+        if (path.trim() !== "") {
+          pushToast("success", `Report saved to ${path}`);
+        }
+      } catch (caught) {
+        pushToast(
+          "error",
+          errorMessage(
+            caught,
+            "The Excel workbook could not be saved. Choose another location and try again."
+          )
+        );
+      } finally {
+        releasePin();
+        setExportingXLSX(false);
+      }
+    })();
+  }, [
+    canExportXLSX,
+    exportingXLSX,
+    freezeExportView,
+    onExportXLSX,
     pinExport,
     pushToast,
     report,
@@ -972,6 +1067,8 @@ export function PurchaseOrderReportsPage({
         catalogue={currencyCatalogue}
         exporting={exporting}
         canExport={canExport}
+        exportingXLSX={exportingXLSX}
+        onExportXLSX={onExportXLSX === undefined ? undefined : handleExportXLSX}
         onPresetChange={changePreset}
         onPeriodChange={changePeriod}
         onFromChange={(value) =>

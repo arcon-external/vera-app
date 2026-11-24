@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { newItem, normalizeUoM } from "./App";
+import { isAdminPage, newItem, normalizeUoM } from "./App";
 
 // Issue #337: the editor's unit-of-measure defaults are the company's served
 // list and canonical unit, never a hardcoded "Lot". These pins fail the moment
@@ -67,5 +67,18 @@ describe("normalizeUoM paste fallback", () => {
 
   it("returns the served spelling, so m2 stays m2 even though its label is m²", () => {
     expect(normalizeUoM("M2", SERVED, "Week")).toBe("m2");
+  });
+});
+
+describe("isAdminPage (#683)", () => {
+  // #683: Reports is admin-only now. The guard is shared by the shell's page
+  // resolution and the Admin Dashboard's own render condition, so a staff
+  // session that somehow names "reports" lands on Home instead.
+  it("treats Reports as an admin page alongside the admin tabs", () => {
+    expect(isAdminPage("reports")).toBe(true);
+    expect(isAdminPage("admin-clients")).toBe(true);
+    expect(isAdminPage("home")).toBe(false);
+    expect(isAdminPage("po")).toBe(false);
+    expect(isAdminPage("create")).toBe(false);
   });
 });

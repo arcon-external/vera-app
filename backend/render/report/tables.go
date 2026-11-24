@@ -216,14 +216,15 @@ func (r *reportRenderer) drawCategoryTable() {
 // A current-period report materializes the whole month or year, including
 // buckets that have not happened yet; those are ghost territory. The screen
 // stops the same table at today (day mode) or at the current month (month
-// mode), and the PDF must print the same actual rows. Mode none, a historical
-// range and a snapshot without a current projection keep every period.
-func (r *reportRenderer) periodTableLimit() (time.Time, bool) {
-	current := r.snapshot.CurrentProjection
+// mode), and every actual table must print the same rows. Mode none, a
+// historical range and a snapshot without a current projection keep every
+// period.
+func periodTableLimit(snapshot poreport.Report) (time.Time, bool) {
+	current := snapshot.CurrentProjection
 	if current.Mode != poreport.ProjectionModeDay && current.Mode != poreport.ProjectionModeMonth {
 		return time.Time{}, false
 	}
-	asOf, err := time.Parse(time.DateOnly, r.snapshot.AsOf)
+	asOf, err := time.Parse(time.DateOnly, snapshot.AsOf)
 	if err != nil {
 		// ValidateSnapshot requires this date. If an unvalidated snapshot still
 		// reaches the layout, print every supplied period rather than hide rows.
@@ -233,6 +234,10 @@ func (r *reportRenderer) periodTableLimit() (time.Time, bool) {
 		return firstOfMonthDate(asOf), true
 	}
 	return asOf, true
+}
+
+func (r *reportRenderer) periodTableLimit() (time.Time, bool) {
+	return periodTableLimit(r.snapshot)
 }
 
 // periodTablePeriods is the row set the actual period table prints. The chart
