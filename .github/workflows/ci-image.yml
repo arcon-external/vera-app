@@ -7,25 +7,23 @@ name: CI toolchain image
 #
 # Go is deliberately absent. The publish job mounts the GOROOT that setup-go
 # installed from go.mod -- read-only -- plus the module and build caches, and
-# runs the real tag vet inside the candidate. A Go upgrade is therefore a
-# setup-go change, and the image cannot drift from the toolchain go.mod pins.
+# runs the shared tag-matrix script inside the candidate. A Go upgrade is
+# therefore a setup-go change, and the image cannot drift from the toolchain
+# go.mod pins.
 #
-# Bootstrap (one-time, done by a human after the first publish):
+# Pulling the image: the authenticated path is the contract, not a fallback.
+# The #495 job declares `packages: read` and logs in to ghcr.io with
+# GITHUB_TOKEN, so the private package pulls with no human visibility step.
+# Public visibility is an optional optimisation: it only saves the login, and
+# nothing here depends on it. A consumer must still fail loudly when the pull
+# fails after its retries -- never fall back to apt, because that is the 22
+# minutes this image exists to remove.
 #
-#   1. GHCR creates the package private. Open
-#      https://github.com/orgs/arcon-external/packages/container/ci-toolchain/settings
-#      and set Visibility to Public, or an unauthenticated consumer cannot pull
-#      `latest`. Prove it from a clean environment with:
-#        docker logout ghcr.io
-#        docker pull ghcr.io/arcon-external/vera-app/ci-toolchain:latest
-#   2. Until step 1 is done, the fallback is explicit and authenticated: the
-#      consuming job adds `packages: read` to its permissions and runs
-#      `docker login ghcr.io` with GITHUB_TOKEN before pulling. #686 owns that
-#      wiring. This workflow does not assume the visibility change happened,
-#      and it does not prove the anonymous path for you.
-#
-# Either way the consumer must fail loudly when the pull fails: never fall back
-# to apt, because that is the 22 minutes this image exists to remove.
+# Bootstrap (one-time, done by a human after the first publish): run this
+# workflow once by hand and confirm the candidate validation and the `latest`
+# promotion. No visibility change is required; #686's `packages: read` login is
+# the supported path. If the package is made public later, that is a
+# convenience, not a prerequisite.
 
 on:
   pull_request:
@@ -220,9 +218,11 @@ jobs:
 
       - name: Validate the candidate with the host Go toolchain
         # The image carries no Go. Mount the setup-go GOROOT read-only and give
-        # Go its own caches, then run the exact command #495 depends on. If this
-        # fails, the container is broken or the tag matrix is broken, and either
-        # way `latest` must not move.
+        # Go its own caches, then run the exact script #495 depends on in the
+        # candidate. If this fails, the container is broken or the tag matrix
+        # is broken, and either way `latest` must not move. The workspace is
+        # mounted read-only: the script and the embedded frontend/dist are
+        # inputs, and Go's writable state lives in the caches.
         run: |
           set -euo pipefail
           IMAGE="ghcr.io/arcon-external/vera-app/ci-toolchain:candidate"
@@ -244,11 +244,12 @@ jobs:
             --env GOMODCACHE=/go/pkg/mod \
             --env GOCACHE=/go-build-cache \
             --env GOFLAGS=-mod=readonly \
+            --env GOTOOLCHAIN=local \
             --env CGO_ENABLED=1 \
             "$IMAGE" sh -ec '
               echo "go: $(go version)"
               pkg-config --modversion gtk+-3.0 webkit2gtk-4.1 libsoup-3.0
-              go vet -tags dev,webkit2_41 ./ ./backend/auth
+              bash scripts/ci-tag-matrix.sh
             '
 
       - name: Promote the validated candidate to latest
