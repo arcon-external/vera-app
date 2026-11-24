@@ -28,6 +28,7 @@ function sampleItems(): EditorItem[] {
   return [
     {
       key: 0,
+      no: 1,
       description: "Roof replacement",
       bullets: ["Old roof removed"],
       qty: "1",
@@ -42,6 +43,7 @@ function sampleItems(): EditorItem[] {
     },
     {
       key: 1,
+      no: 2,
       description: "Control panel",
       bullets: [],
       qty: "1",
@@ -55,6 +57,7 @@ function sampleItems(): EditorItem[] {
       subItems: [
         {
           id: 1,
+          no: 1,
           description: "Panel enclosure",
           qty: "2",
           uom: "Pc",
@@ -67,6 +70,7 @@ function sampleItems(): EditorItem[] {
         },
         {
           id: 2,
+          no: 2,
           description: "Wiring",
           qty: "1",
           uom: "LS",
@@ -117,6 +121,39 @@ describe("draft payloads", () => {
     });
     expect(restored!.details).toEqual(DETAILS);
     expect(restored!.customerId).toBe(7);
+  });
+
+  it("round-trips the stable line and sub-item numbers (#648)", () => {
+    const restored = roundTrip(sampleItems());
+    expect(restored!.items.map((item) => item.no)).toEqual([1, 2]);
+    expect(restored!.items[1].subItems.map((sub) => sub.no)).toEqual([1, 2]);
+  });
+
+  it("opens a draft written before identity existed with unnumbered rows (#648)", () => {
+    // The caller numbers those rows; the parser must not invent a number and
+    // silently attach an old draft's line to a bought quotation item.
+    const legacy = parseDraftPayload(
+      JSON.stringify({
+        items: [
+          {
+            description: "Old line",
+            bullets: [],
+            qty: "1",
+            uom: "Lot",
+            unitPrice: "1000",
+            marginEnabled: false,
+            marginPercent: "0",
+            discountEnabled: false,
+            discountPercent: "0",
+            subItems: [],
+            showSubPrices: false,
+          },
+        ],
+        details: DETAILS,
+        customerId: 0,
+      })
+    );
+    expect(legacy!.items[0].no).toBe(0);
   });
 
   it("reissues row keys so they never collide with the live editor", () => {
@@ -290,6 +327,7 @@ describe("countDraftItems", () => {
   it("counts rows worth listing and ignores blank ones", () => {
     const blank: EditorItem = {
       key: 0,
+      no: 1,
       description: "   ",
       bullets: ["  "],
       qty: "1",

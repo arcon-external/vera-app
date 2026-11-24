@@ -387,6 +387,12 @@ export function archivedToEditorDraft(quotation: ArchivedQuotation): ArchivedEdi
     items: quotation.Items.map((item) => {
       const parsed = splitRawDescription(item.Description);
       return {
+        // #648: the revision's stored numbers are the allocation identity and
+        // survive into the next revision unchanged -- a bought line keeps its
+        // number even when lines before it are removed.
+        no: item.ItemNo,
+        nextSubNo:
+          Math.max(0, ...(item.Subs ?? []).map((sub) => sub.SubNo)) + 1,
         description: parsed.description,
         bullets: parsed.bullets,
         qty: String(item.Qty),
@@ -400,6 +406,7 @@ export function archivedToEditorDraft(quotation: ArchivedQuotation): ArchivedEdi
         discountPercent: String(item.DiscountPercent ?? 0),
         showSubPrices: item.ShowSubPrices ?? false,
         subItems: (item.Subs ?? []).map((sub) => ({
+          no: sub.SubNo,
           description: sub.Description,
           qty: String(sub.Qty),
           uom: sub.UoM,
@@ -452,6 +459,11 @@ export function applyQuotationCopy(
     const parsed = splitRawDescription(item.description);
     return {
       key: index,
+      // #648: a pasted copy is a brand-new quotation with no bought history,
+      // so its identity starts at 1 rather than inheriting the source
+      // revision's numbers (which may have gaps where bought lines were
+      // removed).
+      no: index + 1,
       description: parsed.description,
       bullets: parsed.bullets,
       qty: String(item.qty),
@@ -462,8 +474,10 @@ export function applyQuotationCopy(
       discountEnabled: item.discountEnabled,
       discountPercent: String(item.discountPercent),
       showSubPrices: item.showSubPrices,
-      subItems: item.subItems.map((sub) => ({
+      nextSubNo: item.subItems.length + 1,
+      subItems: item.subItems.map((sub, subIndex) => ({
         id: subId++,
+        no: subIndex + 1,
         description: sub.description,
         qty: String(sub.qty),
         uom: sub.uom,
