@@ -46,19 +46,26 @@ type ciWorkflowConcurrency struct {
 
 type ciWorkflowJob struct {
 	Name           string            `yaml:"name"`
+	Needs          any               `yaml:"needs"`
 	If             string            `yaml:"if"`
+	RunsOn         string            `yaml:"runs-on"`
 	TimeoutMinutes int               `yaml:"timeout-minutes"`
 	Permissions    map[string]string `yaml:"permissions"`
+	Outputs        map[string]string `yaml:"outputs"`
+	Env            map[string]string `yaml:"env"`
+	Services       map[string]any    `yaml:"services"`
 	Steps          []ciWorkflowStep  `yaml:"steps"`
 }
 
 type ciWorkflowStep struct {
-	Name string            `yaml:"name"`
-	Uses string            `yaml:"uses"`
-	Run  string            `yaml:"run"`
-	If   string            `yaml:"if"`
-	With map[string]any    `yaml:"with"`
-	Env  map[string]string `yaml:"env"`
+	ID              string            `yaml:"id"`
+	Name            string            `yaml:"name"`
+	Uses            string            `yaml:"uses"`
+	Run             string            `yaml:"run"`
+	If              string            `yaml:"if"`
+	ContinueOnError any               `yaml:"continue-on-error"`
+	With            map[string]any    `yaml:"with"`
+	Env             map[string]string `yaml:"env"`
 }
 
 // ciStepMentions reports whether the step's name, run script or environment
