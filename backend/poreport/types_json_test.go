@@ -24,14 +24,15 @@ func TestReportJSONUsesContractNamesAndNullRatios(t *testing.T) {
 			SourceMissingPoCount: 1,
 		},
 		Totals: Metrics{
-			PoCount:       2,
-			AmountMinor:   300,
-			CostedMinor:   300,
-			UncostedMinor: 0,
-			CapitalMinor:  300,
-			MarginMinor:   0,
-			MarginBps:     &marginBps,
-			CoverageBps:   &coverageBps,
+			PoCount:           2,
+			AmountMinor:       1300,
+			CostedMinor:       300,
+			UncostedMinor:     0,
+			ExtraExpenseMinor: 1000,
+			CapitalMinor:      300,
+			MarginMinor:       0,
+			MarginBps:         &marginBps,
+			CoverageBps:       &coverageBps,
 		},
 		Pipeline: PipelineSummary{UnsoldAmountMinor: 20_000, UnsoldMarginMinor: 8_000},
 		Variance: VarianceSummary{
@@ -126,11 +127,19 @@ func TestReportJSONUsesContractNamesAndNullRatios(t *testing.T) {
 	totals := decoded["totals"].(map[string]any)
 	for _, key := range []string{
 		"poCount", "amountMinor", "costedMinor", "uncostedMinor",
-		"capitalMinor", "marginMinor", "marginBps", "coverageBps",
+		"extraExpenseMinor", "capitalMinor", "marginMinor", "marginBps", "coverageBps",
 	} {
 		if _, ok := totals[key]; !ok {
 			t.Errorf("totals JSON is missing %q", key)
 		}
+	}
+	if totals["extraExpenseMinor"] != float64(1000) {
+		t.Errorf("extraExpenseMinor = %v; want the exact 1000", totals["extraExpenseMinor"])
+	}
+	if totals["amountMinor"] != float64(1300) ||
+		totals["costedMinor"] != float64(300) ||
+		totals["uncostedMinor"] != float64(0) {
+		t.Errorf("totals identity JSON = %v; want amount 1300 = costed 300 + extra 1000", totals)
 	}
 	if totals["coverageBps"] != float64(10000) {
 		t.Errorf("coverageBps = %v; want the exact 10000 pointer", totals["coverageBps"])
@@ -157,7 +166,7 @@ func TestReportJSONUsesContractNamesAndNullRatios(t *testing.T) {
 	for _, key := range []string{
 		"periodStart", "partial", "inProgress",
 		"poCount", "amountMinor", "costedMinor", "uncostedMinor",
-		"capitalMinor", "marginMinor", "marginBps", "coverageBps",
+		"extraExpenseMinor", "capitalMinor", "marginMinor", "marginBps", "coverageBps",
 	} {
 		if _, ok := period[key]; !ok {
 			t.Errorf("period JSON is missing promoted %q", key)

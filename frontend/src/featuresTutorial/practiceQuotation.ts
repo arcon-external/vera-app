@@ -29,6 +29,9 @@ export const TUTORIAL_QUOTATION_CUSTOMER_OPTIONS = [
 export function blankPracticeItem(key: number, uom: string): EditorItem {
   return {
     key,
+    // Practice rows never reach the server, so they carry no allocation
+    // identity; the tour's own practice editor is not a saved quotation.
+    no: 0,
     description: "",
     bullets: [],
     qty: "1",
@@ -74,6 +77,7 @@ export function tutorialQuotationItems(uom: string): EditorItem[] {
   return [
     {
       key: 1,
+      no: 0,
       description: "Tutorial installation service (MOCK)",
       bullets: ["Practice scope line (MOCK)"],
       qty: "2",
@@ -88,6 +92,7 @@ export function tutorialQuotationItems(uom: string): EditorItem[] {
     },
     {
       key: 2,
+      no: 0,
       description: "Tutorial equipment package (MOCK)",
       bullets: [],
       qty: "1",
@@ -101,6 +106,7 @@ export function tutorialQuotationItems(uom: string): EditorItem[] {
       subItems: [
         {
           id: 1,
+          no: 0,
           description: "Tutorial panel A (MOCK)",
           qty: "2",
           uom,
@@ -113,6 +119,7 @@ export function tutorialQuotationItems(uom: string): EditorItem[] {
         },
         {
           id: 2,
+          no: 0,
           description: "Tutorial panel B (MOCK)",
           qty: "1",
           uom,

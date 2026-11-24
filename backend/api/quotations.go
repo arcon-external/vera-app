@@ -234,6 +234,21 @@ func (s *Server) exportEndpoint(context echo.Context) error {
 				"code":  "quotation_header_discount_retired",
 			})
 		}
+		if errors.Is(err, store.ErrQuotationClosed) {
+			return context.JSON(http.StatusConflict, map[string]string{
+				"error": err.Error(),
+				"code":  "quotation_closed",
+			})
+		}
+		// #648: a reused line or part number is the client's mistake, not a
+		// conflict with the quotation's state, so it answers 422 with a code
+		// the editor can branch on.
+		if errors.Is(err, store.ErrQuotationItemIdentityReused) {
+			return context.JSON(http.StatusUnprocessableEntity, map[string]string{
+				"error": err.Error(),
+				"code":  "quotation_item_identity_reused",
+			})
+		}
 		return context.JSON(http.StatusConflict, map[string]string{"error": err.Error()})
 	}
 	// The draft has become a quotation, so it has nothing left to be. Scoped
@@ -322,6 +337,7 @@ func mapSummaryRow(row store.QuotationSummary) apicontract.QuotationSummaryRow {
 		CreatedAt:      row.CreatedAt.Format("2006-01-02T15:04:05Z07:00"),
 		GrandTotal:     row.GrandTotal,
 		DisplayGrand:   formatMoney(row.Currency, row.GrandTotal),
+		Closed:         row.Closed,
 	}
 }
 
@@ -506,5 +522,11 @@ func mapDetail(record store.QuotationRecord, hasPDF bool) apicontract.QuotationD
 		Items:                       items,
 		HTMLSnapshot:                record.HTMLSnapshot,
 		HasPDF:                      hasPDF,
+		Closed:                      record.ClosedAt != nil,
+		ClosedAt:                    optionalRFC3339(record.ClosedAt),
+		ClosedReason:                record.ClosedReason,
+		ClosedByName:                record.ClosedByName,
+		ValidUntil:                  optionalDate(record.ValidUntil),
+		ExpiredUnclosed:             record.ExpiredUnclosed,
 	}
 }

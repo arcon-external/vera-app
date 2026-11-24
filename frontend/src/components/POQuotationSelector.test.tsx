@@ -30,6 +30,11 @@ const QUOTATION: POSourceQuotation = {
   savedPoCount: 0,
   draftPoCount: 0,
   legacyHeaderDiscount: false,
+  closed: false,
+  closedAt: null,
+  closedReason: "",
+  validUntil: null,
+  expiredUnclosed: false,
 };
 
 const USED: POSourceQuotation = {
@@ -46,6 +51,11 @@ const USED: POSourceQuotation = {
   savedPoCount: 1,
   draftPoCount: 0,
   legacyHeaderDiscount: false,
+  closed: false,
+  closedAt: null,
+  closedReason: "",
+  validUntil: null,
+  expiredUnclosed: false,
 };
 
 const DRAFT: POSourceQuotation = {
@@ -62,6 +72,11 @@ const DRAFT: POSourceQuotation = {
   savedPoCount: 0,
   draftPoCount: 1,
   legacyHeaderDiscount: false,
+  closed: false,
+  closedAt: null,
+  closedReason: "",
+  validUntil: null,
+  expiredUnclosed: false,
 };
 
 const ALL_BOUGHT: POSourceQuotation = {
@@ -78,6 +93,11 @@ const ALL_BOUGHT: POSourceQuotation = {
   savedPoCount: 2,
   draftPoCount: 0,
   legacyHeaderDiscount: false,
+  closed: false,
+  closedAt: null,
+  closedReason: "",
+  validUntil: null,
+  expiredUnclosed: false,
 };
 
 const TWO_REVISIONS = [
@@ -91,6 +111,11 @@ const AVAILABILITY = {
   latestRevision: 1,
   allBought: false,
   legacyHeaderDiscount: false,
+  closed: false,
+  closedAt: null,
+  closedReason: "",
+  validUntil: null,
+  expiredUnclosed: false,
   savedPoCount: 1,
   draftPoCount: 0,
   items: [
@@ -393,5 +418,81 @@ describe("POQuotationSelectorView step 3 (issue #467)", () => {
     const html = render(failed);
     expect(html).toContain("no longer exists");
     expect(html).toContain('role="alert"');
+  });
+});
+
+// Issue #656: closure and expiry share the row's badge area but mean different
+// things. A closed quotation is disabled with its own reason; an expired but
+// unclosed one stays selectable because its remainder is still Unsold.
+const CLOSED_ROW: POSourceQuotation = {
+  ...QUOTATION,
+  id: 21,
+  quoteNumber: "1502260021",
+  customerName: "PT. Closed Customer",
+  closed: true,
+  closedAt: "2026-11-20T03:04:05Z",
+  closedReason: "customer cancelled the remainder",
+  validUntil: "2026-12-01",
+};
+
+const EXPIRED_ROW: POSourceQuotation = {
+  ...QUOTATION,
+  id: 22,
+  quoteNumber: "1502260022",
+  customerName: "PT. Expired Customer",
+  validUntil: "2026-01-01",
+  expiredUnclosed: true,
+};
+
+describe("POQuotationSelectorView closure and expiry (issue #656)", () => {
+  function oneRowState(row: POSourceQuotation): POSourceSelectorState {
+    return stepOneState({ rows: [row], total: 1, totalPages: 1 });
+  }
+
+  it("disables a closed Quotation with its own reopen reason", () => {
+    const html = render(oneRowState(CLOSED_ROW));
+    const rowTag = buttonTagFor(html, "Quotation 1502260021, PT. Closed Customer");
+    expect(rowTag).toContain(" disabled=");
+    expect(rowTag).toContain('aria-disabled="true"');
+    const describedBy = /aria-describedby="([^"]+)"/.exec(rowTag)?.[1];
+    expect(describedBy).toBeTruthy();
+    expect(html).toContain(`id="${describedBy}"`);
+    expect(html).toContain("Closed");
+    expect(html).toContain("Reopen it before ordering.");
+    // The all-bought reason stays distinct: a closed quotation is not
+    // "fully bought", and its remedy is a reopen, not a revision.
+    expect(html).not.toContain("Revise the quotation to order more.");
+  });
+
+  it("keeps an expired-unclosed Quotation selectable with its badge", () => {
+    const html = render(oneRowState(EXPIRED_ROW));
+    const rowTag = buttonTagFor(html, "Quotation 1502260022, PT. Expired Customer");
+    expect(rowTag).not.toContain(" disabled=");
+    expect(html).toContain("Expired (unclosed)");
+    expect(html).not.toContain("Reopen it before ordering.");
+  });
+
+  it("lets repair and link select a closed quotation", () => {
+    for (const mode of ["repair", "link"] as const) {
+      const html = render(oneRowState(CLOSED_ROW), mode);
+      const row = buttonTagFor(html, "Quotation 1502260021, PT. Closed Customer");
+      expect(row).not.toContain(" disabled=");
+      expect(html).toContain("Closed");
+      expect(html).not.toContain("Reopen it before ordering.");
+    }
+  });
+
+  it("disables Confirm when the availability read says the source is closed", () => {
+    const state = atStepThree();
+    const closed: POSourceSelectorState = {
+      ...state,
+      availability:
+        state.availability === null
+          ? null
+          : { ...state.availability, closed: true, closedReason: "customer cancelled" },
+    };
+    const html = render(closed);
+    expect(html).toContain("This quotation is closed. Reopen it before ordering.");
+    expect(buttonTagFor(html, "Confirm source")).toContain(" disabled=");
   });
 });

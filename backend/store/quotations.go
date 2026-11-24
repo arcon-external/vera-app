@@ -20,6 +20,15 @@ import (
 // a stored legacy revision remains readable and is never rewritten.
 var ErrQuotationHeaderDiscountRetired = errors.New("whole-order quotation discounts are retired; use row discounts")
 
+// ErrQuotationItemIdentityReused refuses a revision that gives a line or part
+// a number the previous revision used for something else (#648). Item and sub
+// numbers are the stable identity purchase history, Unsold remainders and
+// ghost rows point at; reusing one would move that history to a different
+// product without anyone editing it. Removing a line is fine — the number
+// simply stops appearing — and a genuinely new line must be numbered above
+// every number the previous revision carried.
+var ErrQuotationItemIdentityReused = errors.New("quotation item and sub-item numbers must not be reused from an earlier revision")
+
 type RevisionItem struct {
 	Description           string
 	UoM                   string
@@ -142,6 +151,9 @@ type QuotationSummary struct {
 	ID             int64
 	GrandTotal     int64
 	RevisionNumber int16
+	// Closed is the archive badge (#656). The closure itself is quotation-level,
+	// so the summary reports it beside the latest revision it is showing.
+	Closed bool
 }
 
 type QuotationRecord struct {
@@ -175,8 +187,19 @@ type QuotationRecord struct {
 	// Currency is the code the revision was issued in, for money displays
 	// built from this record. History, not the live profile.
 	Currency string
-	Items    []RevisionItem
-	PDFData  []byte
+	// Closure (#656): who closed the quotation, when and why. A reopen clears
+	// all three; quotation_closure_events keeps the history.
+	ClosedAt     *time.Time
+	ClosedByName string
+	ClosedReason string
+	// ValidUntil and ExpiredUnclosed are the latest issued revision's offer
+	// window (#656), not the requested revision's: a reissue resets the clock,
+	// so an old page cannot declare a quotation expired after it was renewed.
+	// ExpiredUnclosed is false while closed -- closure wins.
+	ValidUntil      *time.Time
+	ExpiredUnclosed bool
+	Items           []RevisionItem
+	PDFData         []byte
 	QuotationSummary
 	Totals          RevisionTotals
 	CustomerCode    int16
@@ -204,7 +227,8 @@ func (s *Store) ListQuotations(ctx context.Context) ([]QuotationSummary, error) 
 		SELECT DISTINCT ON (q.id)
 		       q.id, q.quote_number, r.revision_number,
 		       COALESCE(NULLIF(r.recipient_company, ''), c.legal_name),
-		       r.subject, r.created_at, t.customer_grand_total, r.currency
+		       r.subject, r.created_at, t.customer_grand_total, r.currency,
+		       (q.closed_at IS NOT NULL)
 		FROM %s.quotations q
 		JOIN %s.customers c ON c.id = q.customer_id
 		JOIN %s.quotation_revisions r ON r.quotation_id = q.id
@@ -227,6 +251,7 @@ func (s *Store) ListQuotations(ctx context.Context) ([]QuotationSummary, error) 
 			&quotation.CreatedAt,
 			&quotation.GrandTotal,
 			&quotation.Currency,
+			&quotation.Closed,
 		); err != nil {
 			return nil, fmt.Errorf("scan quotation summary: %w", err)
 		}
@@ -266,9 +291,19 @@ func (s *Store) GetQuotation(ctx context.Context, quotationID int64, revision *i
 		       t.marginalized_subtotal, t.marginalized_discount,
 		       t.marginalized_grand_total, t.tax_amount,
 		       t.marginalized_grand_after_tax, t.profit_amount, t.nett_profit,
-		       t.ppn_amount, t.customer_grand_total
+		       t.ppn_amount, t.customer_grand_total,
+		       q.closed_at, q.closed_reason, COALESCE(cb.display_name, ''),
+		       latest.created_at, latest.validity_days
 		FROM %s.quotations q
 		JOIN %s.customers c ON c.id = q.customer_id
+		LEFT JOIN %s.users cb ON cb.id = q.closed_by
+		LEFT JOIN LATERAL (
+			SELECT lr.created_at, lr.validity_days
+			FROM %s.quotation_revisions lr
+			WHERE lr.quotation_id = q.id
+			ORDER BY lr.revision_number DESC
+			LIMIT 1
+		) latest ON TRUE
 		LEFT JOIN LATERAL (
 			SELECT address FROM %s.customer_addresses
 			WHERE customer_id = c.id AND is_primary = TRUE LIMIT 1
@@ -276,7 +311,7 @@ func (s *Store) GetQuotation(ctx context.Context, quotationID int64, revision *i
 		JOIN %s.quotation_revisions r ON r.quotation_id = q.id
 		JOIN %s.quotation_revision_totals t ON t.revision_id = r.id
 		JOIN %s.quotation_documents d ON d.revision_id = r.id
-		WHERE q.id = $1`, schema, schema, schema, schema, schema, schema)
+		WHERE q.id = $1`, schema, schema, schema, schema, schema, schema, schema, schema)
 	args := []any{quotationID}
 	if revision == nil {
 		filter += " ORDER BY r.revision_number DESC LIMIT 1"
@@ -286,6 +321,8 @@ func (s *Store) GetQuotation(ctx context.Context, quotationID int64, revision *i
 	}
 
 	var record QuotationRecord
+	var latestIssuedAt time.Time
+	var latestValidityDays int16
 	err = pool.QueryRow(ctx, filter, args...).Scan(
 		&record.ID,
 		&record.UUID,
@@ -329,11 +366,19 @@ func (s *Store) GetQuotation(ctx context.Context, quotationID int64, revision *i
 		&record.Totals.NettProfit,
 		&record.Totals.PpnAmount,
 		&record.Totals.CustomerGrandTotal,
+		&record.ClosedAt,
+		&record.ClosedReason,
+		&record.ClosedByName,
+		&latestIssuedAt,
+		&latestValidityDays,
 	)
 	if err != nil {
 		return QuotationRecord{}, fmt.Errorf("get quotation %d: %w", quotationID, err)
 	}
 	record.GrandTotal = record.Totals.CustomerGrandTotal
+	validUntil, expired := quotationExpiryAt(latestIssuedAt, latestValidityDays, time.Now())
+	record.ValidUntil = &validUntil
+	record.ExpiredUnclosed = expired && record.ClosedAt == nil
 
 	rows, err := pool.Query(ctx, fmt.Sprintf(`
 		SELECT item_no, description, qty, uom, unit_price, margin_enabled,
@@ -588,6 +633,29 @@ func (s *Store) SaveRevision(ctx context.Context, draft RevisionDraft) (Quotatio
 	if err != nil {
 		return QuotationRecord{}, err
 	}
+	// #656: a new issued revision changes the closed population under the
+	// report, so a closed quotation is revised only after an explicit reopen.
+	// Only an existing quotation can be closed: a first revision creates the
+	// row, and the row is already locked when it existed.
+	if draft.QuoteNumber != "" {
+		var closedAt *time.Time
+		if err := tx.QueryRow(ctx, fmt.Sprintf(
+			`SELECT closed_at FROM %s.quotations WHERE id = $1`, schema), quoteID).Scan(&closedAt); err != nil {
+			return QuotationRecord{}, fmt.Errorf("read quotation %d closure: %w", quoteID, err)
+		}
+		if closedAt != nil {
+			return QuotationRecord{}, ErrQuotationClosed
+		}
+	}
+
+	// #648: item and sub numbers are the stable identity purchase history keyed
+	// on, so a revision cannot hand a number the previous revision used for
+	// something else to a new product. This runs inside the transaction, after
+	// the quotation row is locked, and before anything is written: a refused
+	// revision leaves the quotation exactly as it was.
+	if err := refuseReusedIdentities(ctx, tx, schema, quoteID, draft.Items); err != nil {
+		return QuotationRecord{}, err
+	}
 
 	var revisionID int64
 	// An empty draft currency stores as the default, exactly like the column
@@ -799,6 +867,82 @@ func (s *Store) SaveRevision(ctx context.Context, draft RevisionDraft) (Quotatio
 		PDFData:          draft.PDFData,
 		PDFPath:          draft.PDFPath,
 	}, nil
+}
+
+// refuseReusedIdentities compares a revision's submitted numbers with the
+// immediately previous revision's. A submitted number that the previous
+// revision did not carry, and that is not above its highest number, is a reused
+// identity: some other line or part may still have history keyed on it. Numbers
+// present in the previous revision are edits and are always allowed, and
+// numbers above its maximum are new lines.
+func refuseReusedIdentities(ctx context.Context, tx pgx.Tx, schema string, quotationID int64, items []RevisionItem) error {
+	previous := make(map[int]map[int]struct{}, len(items))
+	var previousTop int
+	rows, err := tx.Query(ctx, fmt.Sprintf(`
+		SELECT ri.item_no, s.sub_no
+		FROM %s.quotation_revision_items ri
+		LEFT JOIN %s.quotation_revision_sub_items s ON s.revision_item_id = ri.id
+		WHERE ri.revision_id = (
+			SELECT id FROM %s.quotation_revisions
+			WHERE quotation_id = $1
+			ORDER BY revision_number DESC LIMIT 1
+		)`, schema, schema, schema), quotationID)
+	if err != nil {
+		return fmt.Errorf("read previous revision identity: %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var itemNo int
+		var subNo *int
+		if err := rows.Scan(&itemNo, &subNo); err != nil {
+			return fmt.Errorf("scan previous revision identity: %w", err)
+		}
+		subs, ok := previous[itemNo]
+		if !ok {
+			subs = make(map[int]struct{})
+			previous[itemNo] = subs
+		}
+		if subNo != nil {
+			subs[*subNo] = struct{}{}
+		}
+		if itemNo > previousTop {
+			previousTop = itemNo
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("iterate previous revision identity: %w", err)
+	}
+	if len(previous) == 0 {
+		// The first revision of this quotation has no identities to reuse.
+		return nil
+	}
+
+	for _, item := range items {
+		subs, existed := previous[item.ItemNo]
+		if !existed {
+			if item.ItemNo <= previousTop {
+				return fmt.Errorf("%w: item %d was not in the previous revision and is not above its highest item number %d",
+					ErrQuotationItemIdentityReused, item.ItemNo, previousTop)
+			}
+			continue
+		}
+		subTop := 0
+		for subNo := range subs {
+			if subNo > subTop {
+				subTop = subNo
+			}
+		}
+		for _, sub := range item.SubItems {
+			if _, exists := subs[sub.SubNo]; exists {
+				continue
+			}
+			if sub.SubNo <= subTop {
+				return fmt.Errorf("%w: item %d sub-item %d was not in the previous revision and is not above that item's highest sub-item number %d",
+					ErrQuotationItemIdentityReused, item.ItemNo, sub.SubNo, subTop)
+			}
+		}
+	}
+	return nil
 }
 
 func validateRevisionDraft(draft RevisionDraft) error {

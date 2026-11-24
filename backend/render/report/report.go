@@ -555,6 +555,7 @@ func validateMetrics(name string, metrics poreport.Metrics) error {
 		{"amountMinor", metrics.AmountMinor},
 		{"costedMinor", metrics.CostedMinor},
 		{"uncostedMinor", metrics.UncostedMinor},
+		{"extraExpenseMinor", metrics.ExtraExpenseMinor},
 		{"capitalMinor", metrics.CapitalMinor},
 		{"marginMinor", metrics.MarginMinor},
 	} {

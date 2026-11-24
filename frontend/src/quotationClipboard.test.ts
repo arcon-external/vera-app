@@ -72,6 +72,12 @@ function makeArchived(overrides: Partial<ArchivedQuotation> = {}): ArchivedQuota
     DisplayNett: "",
     HTMLSnapshot: "",
     AvailableRevisions: [3],
+    Closed: false,
+    ClosedAt: null,
+    ClosedByName: "",
+    ClosedReason: "",
+    ValidUntil: null,
+    ExpiredUnclosed: false,
     Items: [
       {
         ItemNo: 1,
@@ -324,6 +330,22 @@ describe("archivedToEditorDraft", () => {
     expect(draft.details.taxType).toBe("Services");
     expect(draft.details.serviceCategory).toBe("NonConstruction");
   });
+
+  it("keeps the revision's line and sub-item numbers as the editor identity (#648)", () => {
+    const draft = archivedToEditorDraft(
+      makeArchived({
+        Items: [
+          { ...makeArchived().Items[0], ItemNo: 7 },
+          { ...makeArchived().Items[1], ItemNo: 9 },
+        ],
+      })
+    );
+    expect(draft.items.map((item) => item.no)).toEqual([7, 9]);
+    expect(draft.items[1].subItems.map((sub) => sub.no)).toEqual([1]);
+    // The high-water mark keeps a new sub-item off the revision's existing
+    // numbers, so a bought sub-item number can never be reused.
+    expect(draft.items[1].nextSubNo).toBe(2);
+  });
 });
 
 describe("applyQuotationCopy", () => {
@@ -370,6 +392,21 @@ describe("applyQuotationCopy", () => {
     const applied = applyQuotationCopy(parsed, CUSTOMERS);
     expect(applied.ok).toBe(true);
     expect(JSON.stringify(applied)).not.toContain("1502260059");
+  });
+
+  it("starts a pasted copy at 1, never inheriting the source revision's numbers (#648)", () => {
+    const source = makeArchived();
+    source.Items[0].ItemNo = 7;
+    source.Items[1].ItemNo = 9;
+    const parsed = parseQuotationCopy(buildQuotationCopy(source)) as QuotationCopyPayload;
+    const applied = applyQuotationCopy(parsed, CUSTOMERS);
+    expect(applied.ok).toBe(true);
+    if (!applied.ok) return;
+    // A copy is a brand-new quotation with no bought history, so its lines
+    // number from 1 rather than carrying the source revision's gap-ridden
+    // identity into work that never had it.
+    expect(applied.items.map((item) => item.no)).toEqual([1, 2]);
+    expect(applied.items[1].subItems.map((sub) => sub.no)).toEqual([1]);
   });
 
   it("refuses an unknown customer code without partial changes", () => {

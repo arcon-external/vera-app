@@ -7,7 +7,7 @@ import (
 )
 
 func TestBuildItemsUsesPerItemMargins(t *testing.T) {
-	items := buildItems([]QuotationItemInput{
+	items := mustBuildItems(t, []QuotationItemInput{
 		{
 			Description:   "Margined item",
 			Qty:           2,
@@ -49,7 +49,7 @@ func TestBuildItemsUsesPerItemMargins(t *testing.T) {
 }
 
 func TestBuildPricingUsesOriginalAndMarginalizedGrandTotals(t *testing.T) {
-	items := buildItems([]QuotationItemInput{
+	items := mustBuildItems(t, []QuotationItemInput{
 		{
 			Description:   "Margined item",
 			Qty:           2,
@@ -174,7 +174,7 @@ func TestRowDiscountFollowsTheConfirmedFlow(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			items := buildItems([]QuotationItemInput{{
+			items := mustBuildItems(t, []QuotationItemInput{{
 				Description:     "Line",
 				Qty:             tc.qty,
 				UoM:             "Lot",
@@ -217,7 +217,7 @@ func TestRowDiscountFollowsTheConfirmedFlow(t *testing.T) {
 // a quotation with no row discounts has to price byte-for-byte as it did
 // before this feature existed.
 func TestUndiscountedLineIsUnchanged(t *testing.T) {
-	items := buildItems([]QuotationItemInput{{
+	items := mustBuildItems(t, []QuotationItemInput{{
 		Description: "Control panel", Qty: 2, UoM: "Lot", UnitPrice: 15000000,
 		MarginEnabled: true, MarginPercent: 20,
 	}}, "IDR")

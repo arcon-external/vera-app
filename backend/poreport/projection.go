@@ -304,6 +304,7 @@ type aggregateMonth struct {
 	amount   *big.Int
 	costed   *big.Int
 	uncosted *big.Int
+	extra    *big.Int
 	capital  *big.Int
 }
 
@@ -330,7 +331,7 @@ func buildHistorySample(history []HistoryMonth, query Query, asOf time.Time) his
 		if current == nil {
 			current = &aggregateMonth{
 				poCount: new(big.Int), amount: new(big.Int), costed: new(big.Int),
-				uncosted: new(big.Int), capital: new(big.Int),
+				uncosted: new(big.Int), extra: new(big.Int), capital: new(big.Int),
 			}
 			aggregated[month] = current
 		}
@@ -338,6 +339,7 @@ func buildHistorySample(history []HistoryMonth, query Query, asOf time.Time) his
 		current.amount.Add(current.amount, big.NewInt(entry.AmountMinor))
 		current.costed.Add(current.costed, big.NewInt(entry.CostedMinor))
 		current.uncosted.Add(current.uncosted, big.NewInt(entry.UncostedMinor))
+		current.extra.Add(current.extra, big.NewInt(entry.ExtraExpenseMinor))
 		current.capital.Add(current.capital, big.NewInt(entry.CapitalMinor))
 
 		if isObserved(current) && (firstObserved.IsZero() || month.Before(firstObserved)) {
@@ -361,11 +363,12 @@ func buildHistorySample(history []HistoryMonth, query Query, asOf time.Time) his
 		metrics := Metrics{}
 		if current := aggregated[month]; current != nil {
 			metrics = Metrics{
-				PoCount:       bigIntValue(current.poCount),
-				AmountMinor:   bigIntValue(current.amount),
-				CostedMinor:   bigIntValue(current.costed),
-				UncostedMinor: bigIntValue(current.uncosted),
-				CapitalMinor:  bigIntValue(current.capital),
+				PoCount:           bigIntValue(current.poCount),
+				AmountMinor:       bigIntValue(current.amount),
+				CostedMinor:       bigIntValue(current.costed),
+				UncostedMinor:     bigIntValue(current.uncosted),
+				ExtraExpenseMinor: bigIntValue(current.extra),
+				CapitalMinor:      bigIntValue(current.capital),
 			}
 			if _, err := exactInt64(current.poCount); err != nil {
 				overflow = true
@@ -375,10 +378,15 @@ func buildHistorySample(history []HistoryMonth, query Query, asOf time.Time) his
 				overflow = true
 			} else if _, err := exactInt64(current.uncosted); err != nil {
 				overflow = true
+			} else if _, err := exactInt64(current.extra); err != nil {
+				overflow = true
 			} else if _, err := exactInt64(current.capital); err != nil {
 				overflow = true
 			}
-			if current.costed.Cmp(current.amount) < 0 || current.uncosted.Sign() > 0 {
+			// An extra expense is pass-through, not absent cost: only the
+			// non-extra revenue may carry uncosted money.
+			costedBasis := new(big.Int).Sub(current.amount, current.extra)
+			if current.costed.Cmp(costedBasis) < 0 || current.uncosted.Sign() > 0 {
 				incomplete = true
 			}
 			poCount.Add(poCount, current.poCount)
@@ -406,6 +414,7 @@ func isObserved(month *aggregateMonth) bool {
 		month.amount.Sign() != 0 ||
 		month.costed.Sign() != 0 ||
 		month.uncosted.Sign() != 0 ||
+		month.extra.Sign() != 0 ||
 		month.capital.Sign() != 0
 }
 

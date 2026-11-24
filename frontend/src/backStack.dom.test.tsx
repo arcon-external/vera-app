@@ -3,10 +3,7 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import App from "./App";
-import {
-  blankPurchaseOrderDraft,
-  type PurchaseOrderDTO,
-} from "./purchaseOrder";
+import type { PurchaseOrderDTO } from "./purchaseOrder";
 import type { PurchaseOrderReviewDTO } from "./poFinalize";
 import { purchaseOrderReportFixture } from "./poReportFixtures";
 import { initialReportFilters, toReportQuery } from "./poReportPage";
@@ -336,6 +333,51 @@ async function renderApp(): Promise<void> {
   await flush();
 }
 
+/**
+ * Opens a stored draft through the Drafts list. #655 retired the Editor tab's
+ * source-less draft, so an editor in this suite is always a record that exists.
+ */
+async function openStoredDraft(): Promise<void> {
+  mocks.listPurchaseOrders.mockResolvedValue({
+    PurchaseOrders: [
+      {
+        UUID: "po-uuid-502",
+        State: "draft",
+        PONumber: "PO-502",
+        QuoteNumber: "1502260052",
+        CustomerName: "PT. Buyer",
+        ReceivedDate: "2026-10-22",
+        Currency: "IDR",
+        ID: 7,
+        CustomerID: 2,
+        SourceRevision: 1,
+        SourceMissing: false,
+      },
+    ],
+    Customers: [{ Name: "PT. Buyer", ID: 2 }],
+    Page: 1,
+    PageSize: 15,
+    Total: 1,
+    TotalPages: 1,
+  });
+  mocks.getPurchaseOrder.mockResolvedValue(purchaseOrder());
+  await renderApp();
+  await act(async () => {
+    button("Open Purchase Orders").click();
+  });
+  await flush();
+  await act(async () => {
+    navTab("Drafts").click();
+  });
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 300));
+  });
+  await act(async () => {
+    button("Open purchase order PO-502").click();
+  });
+  await flush();
+}
+
 function button(label: string): HTMLButtonElement {
   const found = document.querySelector<HTMLButtonElement>(
     `button[aria-label="${label}"]`
@@ -446,32 +488,7 @@ function withinActionBar(label: string): HTMLButtonElement | null {
 
 describe("PO back stack (ticket 02)", () => {
   it("Home → workspace → settings → workspace → Home keeps a dirty editor with no prompt", async () => {
-    const blank = blankPurchaseOrderDraft({
-      currency: "IDR",
-      taxZone: "FTZ",
-      taxType: "Goods",
-      serviceCategory: "",
-      receivedDate: "2026-10-22",
-      incoterms: "EXW",
-    });
-    mocks.createBlankPurchaseOrderDraft.mockResolvedValue({
-      ...blank,
-      ID: 41,
-      UUID: "po-first-502",
-      Version: 1,
-    });
-    mocks.getPurchaseOrder.mockResolvedValue({
-      ...blank,
-      ID: 41,
-      UUID: "po-first-502",
-      Version: 2,
-      PONumber: "DIRTY-PO-502",
-    });
-    await renderApp();
-    await act(async () => {
-      button("Open Purchase Orders").click();
-    });
-    await flush();
+    await openStoredDraft();
 
     typeInto(input("Customer PO number"), "DIRTY-PO-502");
     await flush();
@@ -509,13 +526,19 @@ describe("PO back stack (ticket 02)", () => {
   });
 
   it("Save draft and Final Save render once, in the shell action bar", async () => {
-    await renderApp();
-    await act(async () => {
-      button("Open Purchase Orders").click();
+    mocks.updatePurchaseOrderDraft.mockImplementation(async (fields: unknown) => {
+      const input = fields as Record<string, unknown>;
+      return {
+        Order: {
+          ...purchaseOrder(),
+          Version: 2,
+          PONumber: String(input.PONumber ?? ""),
+        },
+      };
     });
-    await flush();
+    await openStoredDraft();
 
-    // The entry view reports its actions up; the footer keeps only Cancel.
+    // The open record reports its actions up; the footer keeps only Cancel.
     const shellSave = withinActionBar("Save draft");
     const shellFinal = withinActionBar("Final Save");
     expect(shellSave).not.toBeNull();
@@ -528,39 +551,14 @@ describe("PO back stack (ticket 02)", () => {
     ).toHaveLength(1);
 
     // The shell Save draft drives the same persistence as the footer did.
-    const blank = blankPurchaseOrderDraft({
-      currency: "IDR",
-      taxZone: "FTZ",
-      taxType: "Goods",
-      serviceCategory: "",
-      receivedDate: "2026-10-22",
-      incoterms: "EXW",
-    });
-    mocks.createBlankPurchaseOrderDraft.mockResolvedValue({
-      ...blank,
-      ID: 42,
-      UUID: "po-first-502-shell",
-      Version: 1,
-    });
-    mocks.updatePurchaseOrderDraft.mockImplementation(async (fields: unknown) => {
-      const input = fields as Record<string, unknown>;
-      return {
-        Order: {
-          ...blank,
-          ID: 42,
-          UUID: "po-first-502-shell",
-          Version: 2,
-          PONumber: String(input.PONumber ?? ""),
-        },
-      };
-    });
     typeInto(input("Customer PO number"), "SHELL-PO-502");
     await flush();
     await act(async () => {
       withinActionBar("Save draft")?.click();
     });
     await flush();
-    expect(mocks.createBlankPurchaseOrderDraft).toHaveBeenCalledTimes(1);
+    expect(mocks.updatePurchaseOrderDraft).toHaveBeenCalledTimes(1);
+    expect(mocks.createBlankPurchaseOrderDraft).not.toHaveBeenCalled();
     expect(document.body.textContent).toContain("Purchase order draft saved.");
 
     // A settings page has no PO actions: the bar stands down while hidden.
@@ -791,11 +789,7 @@ describe("Quotation note counts as entered work (#535)", () => {
 
 describe("sign-out clears the stack (ticket 02)", () => {
   it("no unsaved workspace, history or scroll survives sign-out", async () => {
-    await renderApp();
-    await act(async () => {
-      button("Open Purchase Orders").click();
-    });
-    await flush();
+    await openStoredDraft();
     typeInto(input("Customer PO number"), "SIGNOUT-PO-502");
     await flush();
     expect(input("Customer PO number").value).toBe("SIGNOUT-PO-502");

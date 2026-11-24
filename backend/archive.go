@@ -20,6 +20,8 @@ type ArchivedQuotationSummary struct {
 	ID             int64
 	GrandTotal     int64
 	RevisionNumber int16
+	// Closed is the archive badge (#656). Closure is quotation-level.
+	Closed bool
 }
 
 type ArchivedQuotationItem struct {
@@ -132,6 +134,14 @@ type ArchivedQuotation struct {
 	DiscountPercent int16
 	ValidityDays    int16
 	TaxRateBps      int16
+	// Closure and expiry (#656): the detail page's status line and its
+	// close/reopen actions. Closed also arrives through the embedded summary;
+	// the rest belongs to the quotation, not to one revision.
+	ClosedAt        *string
+	ClosedByName    string
+	ClosedReason    string
+	ValidUntil      *string
+	ExpiredUnclosed bool
 }
 
 func (q *Quotation) ListQuotations() ([]ArchivedQuotationSummary, error) {
@@ -160,6 +170,7 @@ func (q *Quotation) ListQuotations() ([]ArchivedQuotationSummary, error) {
 			CreatedAt:      row.CreatedAt,
 			GrandTotal:     row.GrandTotal,
 			DisplayGrand:   row.DisplayGrand,
+			Closed:         row.Closed,
 		})
 	}
 	return result, nil
@@ -186,6 +197,13 @@ func (q *Quotation) fetchQuotation(path string) (ArchivedQuotation, error) {
 	if err := client.Get(path, &detail); err != nil {
 		return ArchivedQuotation{}, err
 	}
+	return archivedQuotation(detail), nil
+}
+
+// archivedQuotation maps the wire detail onto the desktop's archive shape. It
+// is shared by the read path and the close/reopen wrappers, so a mutation's
+// answer cannot drift from a fresh fetch.
+func archivedQuotation(detail apicontract.QuotationDetail) ArchivedQuotation {
 	items := make([]ArchivedQuotationItem, 0, len(detail.Items))
 	for _, item := range detail.Items {
 		subs := make([]ArchivedQuotationSubItem, 0, len(item.Subs))
@@ -254,6 +272,7 @@ func (q *Quotation) fetchQuotation(path string) (ArchivedQuotation, error) {
 			CreatedAt:    "",
 			GrandTotal:   detail.GrandTotal,
 			DisplayGrand: detail.DisplayMarginalizedGrand,
+			Closed:       detail.Closed,
 		},
 		RecipientName:               detail.RecipientName,
 		RecipientAddress:            detail.RecipientAddress,
@@ -302,5 +321,10 @@ func (q *Quotation) fetchQuotation(path string) (ArchivedQuotation, error) {
 		// marshals to null, and the detail page reads .length on it.
 		AvailableRevisions: append(make([]int16, 0, len(detail.AvailableRevisions)),
 			detail.AvailableRevisions...),
-	}, nil
+		ClosedAt:        detail.ClosedAt,
+		ClosedByName:    detail.ClosedByName,
+		ClosedReason:    detail.ClosedReason,
+		ValidUntil:      detail.ValidUntil,
+		ExpiredUnclosed: detail.ExpiredUnclosed,
+	}
 }

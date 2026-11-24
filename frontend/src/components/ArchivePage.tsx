@@ -250,6 +250,7 @@ export function ArchivePage({
                           {String(row.RevisionNumber).padStart(2, "0")}
                         </span>
                       </Badge>
+                      {row.Closed ? <Badge tone="danger">Closed</Badge> : null}
                     </td>
                     <td className="px-4 py-3 text-right align-middle text-body font-medium tnum text-ink-950">
                       {decorateMoney(resolveCurrencyEntry(catalogue, row.Currency, currency), row.DisplayGrand)}

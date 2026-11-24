@@ -19,6 +19,12 @@ var schemaPattern = regexp.MustCompile(`^[a-z_][a-z0-9_]*$`)
 type Config struct {
 	DSN    string
 	Schema string
+	// StrictPOAllocations is the #658 cutover: false (the zero value) is the
+	// compatibility server that accepts every pre-v0.24.0 payload, true refuses
+	// new source-less blank drafts, free quotation lines and purchase-order
+	// discounts. It is read once, from VERA_PO_ALLOCATIONS_STRICT, so the API
+	// layer carries no second copy that could disagree.
+	StrictPOAllocations bool
 	// Tracer, when set, observes every statement the store runs. It is nil in
 	// production and exists so a test can assert what a path does -- and does not
 	// -- ask the database for. That is otherwise invisible, which is how an
@@ -48,7 +54,28 @@ func LoadConfig(getenv func(string) string) (Config, error) {
 		return Config{}, fmt.Errorf("invalid Postgres schema %q: use lowercase letters, digits, and underscores only", schema)
 	}
 
-	return Config{DSN: dsn, Schema: schema}, nil
+	strict, err := strictPOAllocationsFromEnvironment(getenv)
+	if err != nil {
+		return Config{}, err
+	}
+
+	return Config{DSN: dsn, Schema: schema, StrictPOAllocations: strict}, nil
+}
+
+// strictPOAllocationsFromEnvironment reads the one cutover switch. An unknown
+// value stops the server rather than falling back to compatibility mode: an
+// operator who typed the flip must never believe strict is on while it is not.
+func strictPOAllocationsFromEnvironment(getenv func(string) string) (bool, error) {
+	raw := strings.TrimSpace(getenv("VERA_PO_ALLOCATIONS_STRICT"))
+	switch strings.ToLower(raw) {
+	case "", "false", "0":
+		return false, nil
+	case "true", "1":
+		return true, nil
+	default:
+		return false, fmt.Errorf(
+			"invalid VERA_PO_ALLOCATIONS_STRICT %q: use true, 1, false or 0", raw)
+	}
 }
 
 func LoadConfigFromEnvironment() (Config, error) {

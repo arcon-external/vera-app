@@ -241,11 +241,31 @@ func (r *reportRenderer) drawKPIs() {
 	c.y = top + cardHeight + 10
 
 	coverage := ""
-	if totals.UncostedMinor != 0 {
+	switch {
+	case totals.ExtraExpenseMinor != 0 && totals.AmountMinor != totals.ExtraExpenseMinor:
+		// #655: an extra line is pass-through, so it is its own bucket and the
+		// coverage denominator is the non-extra amount. Printing costed against
+		// the gross amount would quote a percentage the server did not compute.
+		nonExtra := totals.AmountMinor - totals.ExtraExpenseMinor
+		coverage = fmt.Sprintf("Costed %s of %s (%s) of the non-extra amount",
+			r.money(totals.CostedMinor), r.money(nonExtra), formatPct(totals.CoverageBps))
+		if totals.UncostedMinor != 0 {
+			coverage += fmt.Sprintf("  ·  Uncosted %s", r.money(totals.UncostedMinor))
+		} else {
+			coverage += "  ·  every non-extra amount in this range has a known source cost"
+		}
+		coverage += fmt.Sprintf("  ·  Extra expense %s is pass-through: no cost and no margin",
+			r.money(totals.ExtraExpenseMinor))
+	case totals.ExtraExpenseMinor != 0:
+		// The non-extra denominator is zero: coverage is unknown, never 0% or
+		// 100% profit.
+		coverage = fmt.Sprintf("This range carries only extra expense  ·  Coverage %s  ·  Extra expense %s is pass-through: no cost and no margin",
+			formatPct(totals.CoverageBps), r.money(totals.ExtraExpenseMinor))
+	case totals.UncostedMinor != 0:
 		coverage = fmt.Sprintf("Costed %s of %s (%s)  ·  Uncosted %s",
 			r.money(totals.CostedMinor), r.money(totals.AmountMinor),
 			formatPct(totals.CoverageBps), r.money(totals.UncostedMinor))
-	} else if totals.AmountMinor != 0 {
+	case totals.AmountMinor != 0:
 		coverage = fmt.Sprintf("Costed %s of %s (%s)  ·  every amount in this range has a known source cost",
 			r.money(totals.CostedMinor), r.money(totals.AmountMinor), formatPct(totals.CoverageBps))
 	}

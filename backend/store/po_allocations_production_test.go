@@ -46,23 +46,26 @@ func legacyizeSavedPurchaseOrder(t *testing.T, database *Store, ctx context.Cont
 	}
 }
 
-func TestAllocationBackfillReproducesTheThreeProductionPOs(t *testing.T) {
-	database := openTestSchema(t, "vera_po_alloc_production")
-	ctx := poContext(t, database)
-	user := poTestUser(t, database)
+// productionAllocationFixture is one of the three purchase orders issue #650
+// found in production: revenue with no quotation allocation, so the report could
+// not resolve its cost. #658's rehearsal seeds the same three shapes against a
+// schema stopped at migration 053, so the two tests share one definition and
+// cannot drift.
+type productionAllocationFixture struct {
+	label          string
+	customerCode   int
+	customerName   string
+	quoteQty       int64
+	quantity       int64
+	sell           int64
+	cost           int64
+	received       string
+	number         string
+	chosenQuantity bool
+}
 
-	fixtures := []struct {
-		label          string
-		customerCode   int
-		customerName   string
-		quoteQty       int64
-		quantity       int64
-		sell           int64
-		cost           int64
-		received       string
-		number         string
-		chosenQuantity bool
-	}{
+func productionAllocationFixtures() []productionAllocationFixture {
+	return []productionAllocationFixture{
 		{
 			label: "Quote 70 item 1", customerCode: 2, customerName: "PT. Production 70",
 			quoteQty: 10, quantity: 4, sell: 17_600_000, cost: 11_000_000,
@@ -79,8 +82,14 @@ func TestAllocationBackfillReproducesTheThreeProductionPOs(t *testing.T) {
 			received: "2026-11-04", number: "PO-PROD-45",
 		},
 	}
+}
 
-	for _, fixture := range fixtures {
+func TestAllocationBackfillReproducesTheThreeProductionPOs(t *testing.T) {
+	database := openTestSchema(t, "vera_po_alloc_production")
+	ctx := poContext(t, database)
+	user := poTestUser(t, database)
+
+	for _, fixture := range productionAllocationFixtures() {
 		quotation := seedReportQuotation(t, database, fixture.customerCode,
 			fixture.customerName, fixture.label, "IDR", "FTZ",
 			[]reportQuotationLine{{

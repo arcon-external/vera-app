@@ -13,6 +13,8 @@ export function ClearDraftContext():Promise<void>;
 
 export function ClearRevisionContext():Promise<void>;
 
+export function CloseQuotation(arg1:number,arg2:string):Promise<backend.ArchivedQuotation>;
+
 export function ConfirmDeletion(arg1:backend.DeletionConfirmInput):Promise<backend.DeletionConfirmResult>;
 
 export function CorrectPurchaseOrder(arg1:backend.PurchaseOrderCorrectionInput):Promise<backend.PurchaseOrderWriteResult>;
@@ -54,6 +56,8 @@ export function GetPurchaseOrder(arg1:number):Promise<backend.PurchaseOrderDTO>;
 export function GetPurchaseOrderDocumentState(arg1:number):Promise<backend.PurchaseOrderDocumentStateDTO>;
 
 export function GetPurchaseOrderDocumentVersionContent(arg1:number,arg2:number):Promise<backend.PurchaseOrderDocumentContentDTO>;
+
+export function GetPurchaseOrderFulfillment(arg1:poreport.FulfillmentQuery):Promise<poreport.FulfillmentPage>;
 
 export function GetPurchaseOrderHistory(arg1:number):Promise<Array<backend.PurchaseOrderCorrectionDTO>>;
 
@@ -104,6 +108,8 @@ export function RefreshCompanyIdentity():Promise<void>;
 export function RemovePurchaseOrderDocument(arg1:number,arg2:boolean):Promise<backend.PurchaseOrderDocumentDTO>;
 
 export function RenderPDF():Promise<Array<number>>;
+
+export function ReopenQuotation(arg1:number):Promise<backend.ArchivedQuotation>;
 
 export function RepairPurchaseOrderSource(arg1:backend.PurchaseOrderSourceRepairInput):Promise<backend.PurchaseOrderWriteResult>;
 

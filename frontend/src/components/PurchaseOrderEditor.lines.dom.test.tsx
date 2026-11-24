@@ -451,7 +451,7 @@ describe("line reconciliation in the editor (ticket 05)", () => {
     await flush();
 
     // Add a second line so the matched one can be removed while a line remains.
-    button("Add line").click();
+    button("Add extra line").click();
     await flush();
     button("Remove line 1").click();
     await flush();
@@ -641,10 +641,12 @@ describe("line identity and match control (U1)", () => {
     const transport = fakeTransport(null);
     await renderEditor(transport);
 
-    button("Add line").click();
+    button("Add extra line").click();
     await flush();
     expect(document.activeElement?.getAttribute("aria-label")).toBe("Description for line 2");
-    expect(document.body.textContent).toContain("Line 2 added.");
+    // #655: the explicit add is the extra line, and it is announced as one.
+    expect(document.body.textContent).toContain("Extra line 2 added.");
+    expect(document.body.textContent).toContain("Extra line");
 
     button("Remove line 1").click();
     await flush();
@@ -936,5 +938,194 @@ describe("confirmation-number request (#581)", () => {
     root = createRoot(container);
     await renderEditor(fakeTransport(null), linkedOrder({ ConfirmationRequested: true }));
     expect(checkbox(label).checked).toBe(true);
+  });
+});
+
+// Issue #655: the line kind follows the reference. The explicit add is an
+// extra with editable values and no quotation reference; choosing a match
+// flips it to a quotation-backed line, and clearing the match returns it to
+// an extra instead of leaving a silent legacy quotation row.
+describe("line kind in the editor (#655)", () => {
+  it("adds an extra line with editable values and saves it as extra", async () => {
+    reviewMock.mockResolvedValue({
+      Source: reviewSource([sourceLine()]),
+      DocumentState: "none",
+    });
+    const transport = fakeTransport(null);
+    await renderEditor(transport);
+
+    button("Add extra line").click();
+    await flush();
+
+    // The row is an extra by name and has no quotation reference.
+    const rows = Array.from(document.querySelectorAll("div.animate-item-in"));
+    expect(rows[1]?.textContent).toContain("Extra line");
+    expect(rows[1]?.textContent).not.toContain("Quotation 1");
+
+    // Description, quantity, UoM and price are editable on the extra.
+    typeInto(input("Description for line 2"), "Freight surcharge");
+    typeInto(input("Quantity for line 2"), "2");
+    typeInto(input("Unit price for line 2"), "500000");
+    const uom = document.querySelector<HTMLSelectElement>(
+      'select[aria-label="Unit of measure for line 2"]'
+    );
+    if (uom === null) throw new Error("no UoM control on the extra line");
+    act(() => {
+      const setter = Object.getOwnPropertyDescriptor(
+        HTMLSelectElement.prototype,
+        "value"
+      )?.set;
+      setter?.call(uom, "Box");
+      uom.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+    await flush();
+
+    if (shellActions === null) throw new Error("no shell actions reported");
+    await act(async () => {
+      shellActions?.onSave();
+    });
+    await flush();
+    await flush();
+    const sent = updateMock.mock.calls[0]?.[0] as {
+      Items?: {
+        LineKind?: string;
+        Description?: string;
+        QuantityScaled?: number;
+        UoM?: string;
+        UnitPriceMinor?: number;
+        QuotationItemNo?: unknown;
+        QuotationSubNo?: unknown;
+      }[];
+    };
+    expect(sent.Items?.[1]).toMatchObject({
+      LineKind: "extra",
+      Description: "Freight surcharge",
+      QuantityScaled: 20000,
+      UoM: "Box",
+      UnitPriceMinor: 500000,
+      QuotationItemNo: null,
+      QuotationSubNo: null,
+    });
+
+    // Story 42: the line is a customer document line, never a cost surface.
+    expect(document.body.textContent).not.toMatch(/extra expense/i);
+    expect(document.body.textContent).not.toMatch(/margin/i);
+    expect(document.body.textContent).not.toMatch(/variance/i);
+  });
+
+  it("flips an extra to quotation when matched and back to extra when cleared", async () => {
+    const second = sourceLine({
+      QuotationItemNo: 2,
+      LineLabel: "2",
+      Description: "Freight",
+      QuantityScaled: 10000,
+      UnitPriceMinor: 500000,
+    });
+    reviewMock.mockResolvedValue({
+      Source: reviewSource([sourceLine(), second]),
+      DocumentState: "none",
+    });
+    // Echo the saved rows back, so the editor keeps the extra after the save
+    // and the match can be exercised a second time.
+    updateMock.mockImplementation(async (input: unknown) => {
+      const fields = input as {
+        Items: {
+          Description?: string;
+          QuantityScaled?: number;
+          UoM?: string;
+          UnitPriceMinor?: number;
+          DiscountEnabled?: boolean;
+          DiscountPercent?: number;
+          QuotationItemNo?: number | null;
+          QuotationSubNo?: number | null;
+          LineKind?: string;
+        }[];
+      };
+      return {
+        Order: linkedOrder({
+          Version: 5,
+          Items: fields.Items.map((item, index) => ({
+            LineNumber: index + 1,
+            Description: item.Description ?? "",
+            QuantityScaled: item.QuantityScaled ?? 0,
+            UoM: item.UoM ?? "",
+            UnitPriceMinor: item.UnitPriceMinor ?? 0,
+            DiscountEnabled: item.DiscountEnabled ?? false,
+            DiscountPercent: item.DiscountPercent ?? 0,
+            GrossMinor: 0,
+            DiscountMinor: 0,
+            NetMinor: 0,
+            QuotationItemNo: item.QuotationItemNo ?? null,
+            QuotationSubNo: item.QuotationSubNo ?? null,
+            LineKind: item.LineKind,
+          })),
+        }),
+      };
+    });
+    const transport = fakeTransport(null);
+    await renderEditor(transport);
+
+    button("Add extra line").click();
+    await flush();
+    expect(document.body.textContent).toContain("Extra line");
+
+    // Choose quotation item 2: the row becomes quotation-backed.
+    button("Change quotation match for Line 2").click();
+    await flush();
+    button("Line 2 quotation match").click();
+    await flush();
+    const options = Array.from(
+      document.querySelectorAll<HTMLButtonElement>('button[role="option"]')
+    );
+    const match = options.find((option) =>
+      (option.textContent ?? "").includes("Quotation item 2 ·")
+    );
+    if (match === undefined) throw new Error("no Quotation item 2 option");
+    act(() => match.click());
+    await flush();
+    await flush();
+
+    if (shellActions === null) throw new Error("no shell actions reported");
+    await act(async () => {
+      shellActions?.onSave();
+    });
+    await flush();
+    await flush();
+    let sent = updateMock.mock.calls[0]?.[0] as {
+      Items?: { LineKind?: string; QuotationItemNo?: unknown; QuotationSubNo?: unknown }[];
+    };
+    expect(sent.Items?.[1]).toMatchObject({
+      LineKind: "quotation",
+      QuotationItemNo: 2,
+      QuotationSubNo: null,
+    });
+
+    // Clear the match: the same row returns to an explicit extra.
+    button("Change quotation match for Line 2").click();
+    await flush();
+    button("Line 2 quotation match").click();
+    await flush();
+    const clearOptions = Array.from(
+      document.querySelectorAll<HTMLButtonElement>('button[role="option"]')
+    );
+    const extra = clearOptions.find((option) =>
+      (option.textContent ?? "").includes("Extra line (no quotation match)")
+    );
+    if (extra === undefined) throw new Error("no Extra line option");
+    act(() => extra.click());
+    await flush();
+    await flush();
+
+    await act(async () => {
+      shellActions?.onSave();
+    });
+    await flush();
+    await flush();
+    sent = updateMock.mock.calls[1]?.[0] as typeof sent;
+    expect(sent.Items?.[1]).toMatchObject({
+      LineKind: "extra",
+      QuotationItemNo: null,
+      QuotationSubNo: null,
+    });
   });
 });

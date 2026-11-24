@@ -11,6 +11,7 @@ import { ItemEditor } from "./ItemEditor";
 
 const ITEM: EditorItem = {
   key: 0,
+  no: 1,
   description: "Widget",
   bullets: [],
   qty: "1",
@@ -125,6 +126,7 @@ describe("ItemEditor UoM chevron (#430)", () => {
     subItems: [
       {
         id: 1,
+        no: 1,
         description: "Cable tray",
         qty: "10",
         uom: "m",
@@ -179,6 +181,7 @@ describe("ItemEditor purchase-order mode (#573)", () => {
 
   const split: EditorItem = {
     key: 1,
+    no: 2,
     description: "LV distribution panel",
     bullets: [],
     qty: "1",
@@ -192,6 +195,7 @@ describe("ItemEditor purchase-order mode (#573)", () => {
     subItems: [
       {
         id: 11,
+        no: 1,
         description: "Panel",
         qty: "1",
         uom: "Pc",
@@ -204,6 +208,7 @@ describe("ItemEditor purchase-order mode (#573)", () => {
       },
       {
         id: 12,
+        no: 2,
         description: "Wiring",
         qty: "2",
         uom: "Lot",
@@ -232,6 +237,9 @@ describe("ItemEditor purchase-order mode (#573)", () => {
     expect(html).not.toContain("Enable a discount for sub-item 1 of line 1");
     expect(html).not.toContain("Discount percentage for sub-item 1 of line 1");
     expect(html).not.toContain('aria-label="Enable a discount for line 1"');
+    // #648 spec review: the split line's own discount control is absent too,
+    // not only the sub-item's.
+    expect(html).not.toContain('aria-label="Discount percentage for line 1"');
   });
 
   it("hides the Discount column and labels the price for a plain PO row", () => {
@@ -244,6 +252,8 @@ describe("ItemEditor purchase-order mode (#573)", () => {
     expect(html).not.toContain(">Unit cost<");
     expect(html).toContain(">Unit price<");
     expect(html).not.toContain('aria-label="Enable a discount for line 1"');
+    // #648 spec review: the percentage input is gone in PO mode as well.
+    expect(html).not.toContain('aria-label="Discount percentage for line 1"');
   });
 
   it("shows Unsold, extra-income and price-variance badges in PO mode", () => {
@@ -292,5 +302,71 @@ describe("ItemEditor purchase-order mode (#573)", () => {
     // 2.5 × $10.00 = $25.00, not the truncated 2 × $10.00.
     expect(html).toContain("$25.00");
     expect(html).not.toContain("$20.00");
+  });
+});
+
+// Issue #648: the editor must show what a purchase order already bought
+// against the revision it is editing. The badge is keyed by the line's stable
+// number, and a new line carries number 0 -- it must never inherit a bought
+// count. A failed availability read passes no map, which paints nothing: a
+// fabricated "Bought 0" would read as a confirmed empty purchase history.
+describe("ItemEditor bought counts (#648)", () => {
+  const bought = new Map<string, number>([
+    ["1:0", 20000],
+    ["2:1", 25000],
+  ]);
+
+  const split: EditorItem = {
+    key: 1,
+    no: 2,
+    description: "Installation",
+    bullets: [],
+    qty: "1",
+    uom: "Lot",
+    unitPrice: "0",
+    marginEnabled: false,
+    marginPercent: "0",
+    discountEnabled: false,
+    discountPercent: "0",
+    showSubPrices: false,
+    subItems: [
+      {
+        id: 1,
+        no: 1,
+        description: "Labour",
+        qty: "1",
+        uom: "Lot",
+        unitCost: "4000000",
+        marginEnabled: false,
+        marginPercent: "0",
+        discountEnabled: false,
+        discountPercent: "0",
+        bullets: [],
+      },
+    ],
+  };
+
+  it("shows Bought N on a bought line and on its bought sub-item", () => {
+    const html = render({ items: [ITEM, split], boughtQuantities: bought });
+    expect(html.match(/data-bought-badge/g) ?? []).toHaveLength(2);
+    expect(html).toContain("Bought 2");
+    expect(html).toContain("Bought 2.5");
+  });
+
+  it("warns on the remove control before a bought line is removed", () => {
+    const html = render({ items: [ITEM], boughtQuantities: bought });
+    expect(html).toContain("Remove line 1 — Bought 2");
+    expect(html).toContain("keeps its number");
+  });
+
+  it("shows no badge for a new line, an unbought line or a missing answer", () => {
+    const newLine = render({ items: [{ ...ITEM, no: 0 }], boughtQuantities: bought });
+    expect(newLine).not.toContain("data-bought-badge");
+
+    const unbought = render({ items: [{ ...ITEM, no: 9 }], boughtQuantities: bought });
+    expect(unbought).not.toContain("data-bought-badge");
+
+    const unavailable = render({ items: [ITEM] });
+    expect(unavailable).not.toContain("data-bought-badge");
   });
 });

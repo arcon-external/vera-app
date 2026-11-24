@@ -24,7 +24,9 @@ const mocks = vi.hoisted(() => ({
   listPOSources: vi.fn(),
   listPORevisions: vi.fn(),
   validatePOSource: vi.fn(),
+  getAvailability: vi.fn(),
   createBlank: vi.fn(),
+  createDraft: vi.fn(),
   updateDraft: vi.fn(),
   previewLink: vi.fn(),
   linkSource: vi.fn(),
@@ -90,7 +92,9 @@ vi.mock("@backend/backend/Quotation", async (importOriginal) => {
     ListPOSourceQuotations: (...args: unknown[]) => mocks.listPOSources(...args),
     ListPOSourceRevisions: (...args: unknown[]) => mocks.listPORevisions(...args),
     ValidatePOSource: (...args: unknown[]) => mocks.validatePOSource(...args),
+    GetQuotationAvailability: (...args: unknown[]) => mocks.getAvailability(...args),
     CreatePurchaseOrderBlankDraft: (...args: unknown[]) => mocks.createBlank(...args),
+    CreatePurchaseOrderDraft: (...args: unknown[]) => mocks.createDraft(...args),
     UpdatePurchaseOrderDraft: (...args: unknown[]) => mocks.updateDraft(...args),
     PreviewPurchaseOrderDraftLink: (...args: unknown[]) => mocks.previewLink(...args),
     LinkPurchaseOrderDraftSource: (...args: unknown[]) => mocks.linkSource(...args),
@@ -212,6 +216,41 @@ function blank(): PurchaseOrderDTO {
   };
 }
 
+/** The row the shared selector creates: linked to the chosen revision. */
+function linkedOrder(): PurchaseOrderDTO {
+  return {
+    ...blank(),
+    ID: 41,
+    UUID: "uuid-497-app",
+    Version: 1,
+    QuotationID: 12,
+    SourceRevision: 0,
+    SourceState: "live",
+    SourceMissing: false,
+    PrintedTotalsKnown: true,
+    QuoteNumber: "1502260001",
+    CustomerID: 2,
+    CustomerName: "PT. Source",
+    PaymentTerms: "30 days",
+    Items: [
+      {
+        QuotationItemNo: 1,
+        QuotationSubNo: null,
+        LineNumber: 1,
+        Description: "Source line 1",
+        QuantityScaled: 10000,
+        UoM: "Pc",
+        UnitPriceMinor: 100,
+        DiscountEnabled: false,
+        DiscountPercent: 0,
+        GrossMinor: 100,
+        DiscountMinor: 0,
+        NetMinor: 100,
+      },
+    ],
+  };
+}
+
 let latestOrder: PurchaseOrderDTO;
 let container: HTMLDivElement;
 let root: Root;
@@ -267,7 +306,32 @@ beforeEach(() => {
     Revisions: [{ Revision: 0, IssuedAt: "2026-10-20T10:00:00Z" }],
   });
   mocks.validatePOSource.mockResolvedValue({ Valid: true, Reason: "" });
+  mocks.getAvailability.mockResolvedValue({
+    QuotationID: 12,
+    RevisionNumber: 0,
+    LatestRevision: 0,
+    AllBought: false,
+    LegacyHeaderDiscount: false,
+    SavedPOCount: 0,
+    DraftPOCount: 0,
+    Items: [
+      {
+        QuotationItemNo: 1,
+        QuotationSubNo: null,
+        Label: "1",
+        Description: "Source line 1",
+        UoM: "Pc",
+        QuotedQuantityScaled: 10_000,
+        BoughtQuantityScaled: 0,
+        DraftQuantityScaled: 0,
+        RemainingQuantityScaled: 10_000,
+        OverBoughtQuantityScaled: 0,
+        QuotedUnitPriceMinor: 100,
+      },
+    ],
+  });
   mocks.createBlank.mockImplementation(async () => latestOrder);
+  mocks.createDraft.mockImplementation(async () => linkedOrder());
   mocks.updateDraft.mockImplementation(async (input: PurchaseOrderUpdateInput) => {
     latestOrder = {
       ...latestOrder,
@@ -447,12 +511,23 @@ async function renderApp(): Promise<void> {
 }
 
 describe("draft source link through the real App (issue #497)", () => {
-  it("selects, reviews and links from Home -> Purchase Orders", async () => {
+  it("creates the only kind of row the workspace offers: a linked draft", async () => {
     await renderApp();
 
     act(() => button("Open Purchase Orders").click());
     await flush();
-    act(() => button("Link a Quotation").click());
+
+    // #655: the Editor tab is the entry page. There is no source-less editor
+    // to link from, and no blank create is reachable.
+    expect(document.body.textContent).toContain(
+      "Start a purchase order from an issued quotation revision."
+    );
+    expect(
+      document.querySelector('button[aria-label="Link a Quotation"]')
+    ).toBeNull();
+    expect(mocks.createBlank).not.toHaveBeenCalled();
+
+    act(() => button("Add Purchase Order from a Quotation").click());
     await flush();
 
     // Step 1: the exact quotation, then its issued revision.
@@ -466,25 +541,27 @@ describe("draft source link through the real App (issue #497)", () => {
     await flush();
     await flush();
 
-    // The editor persisted the working copy, previewed the pair and linked it
-    // immediately: there is no review step between the selector and the link.
-    expect(mocks.createBlank).toHaveBeenCalledTimes(1);
-    expect(mocks.updateDraft).toHaveBeenCalledTimes(1);
-    expect(mocks.previewLink).toHaveBeenCalledWith(41, 12, 0);
-    expect(mocks.listPOSources).toHaveBeenCalled();
-    expect(mocks.linkSource).toHaveBeenCalledTimes(1);
+    // The selector created the row from the exact revision. Nothing created a
+    // source-less draft and no link step ran, because there was nothing to
+    // link: the revision is the source from the first save.
+    expect(mocks.createDraft).toHaveBeenCalledTimes(1);
+    const createInput = mocks.createDraft.mock.calls[0][0] as {
+      QuotationID: number;
+      RevisionNumber: number;
+    };
+    expect(createInput.QuotationID).toBe(12);
+    expect(createInput.RevisionNumber).toBe(0);
+    expect(mocks.createBlank).not.toHaveBeenCalled();
+    expect(mocks.previewLink).not.toHaveBeenCalled();
+    expect(mocks.linkSource).not.toHaveBeenCalled();
 
-    const linkInput = mocks.linkSource.mock.calls[0][0] as PurchaseOrderDraftLinkInput;
-    expect(linkInput.ID).toBe(41);
-    expect(linkInput.TargetQuotationID).toBe(12);
-    expect(linkInput.TargetRevisionNumber).toBe(0);
-    // The empty order keeps no value and omits the quotation's line: the
-    // inline editor surfaces it as a ghost instead of adding it silently.
-    expect(linkInput.AcknowledgedMissing).toEqual(["1"]);
-    expect(document.body.textContent).toContain("Linked source");
-    expect(document.body.textContent).not.toContain("Link this draft to a quotation");
-    expect(document.body.textContent).toContain(
-      "Linked to quotation 1502260001, revision 0. Your entered values were kept."
+    // The editor opens on the created draft with its live source.
+    const poNumber = document.querySelector<HTMLInputElement>(
+      'input[aria-label="Customer PO number"]'
     );
+    if (poNumber === null) throw new Error("the created draft did not open");
+    expect(poNumber.value).toBe("");
+    expect(document.body.textContent).toContain("1502260001");
+    expect(document.body.textContent).toContain("PT. Source");
   });
 });

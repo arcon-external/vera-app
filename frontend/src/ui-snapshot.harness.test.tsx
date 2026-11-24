@@ -41,13 +41,16 @@ import { DocumentHomePage } from "./components/DocumentHomePage";
 import { AppShell } from "./components/AppShell";
 import { AdminDashboard } from "./components/AdminDashboard";
 import { PurchaseOrderReportsView } from "./components/PurchaseOrderReportsPage";
+import { PurchaseOrderFulfillmentCardView } from "./components/PurchaseOrderFulfillmentCard";
 import { PurchaseOrderReportPickerView } from "./components/PurchaseOrderReportPicker";
 import {
   normalizePurchaseOrderReport,
   type PurchaseOrderReportData,
   type PurchaseOrderReportMetrics,
 } from "./poReport";
+import type { PurchaseOrderFulfillmentPage } from "./poFulfillment";
 import {
+  purchaseOrderReportExtraExpenseFixture,
   purchaseOrderReportFixture,
   purchaseOrderReportMaxFixture,
   purchaseOrderReportMonthFixture,
@@ -97,6 +100,7 @@ import {
   PurchaseOrderSourceChange,
 } from "./components/PurchaseOrderRepair";
 import { QuotationDetailHeader } from "./components/QuotationDetailPage";
+import { QuotationCloseDialog } from "./components/QuotationCloseDialog";
 import {
   deletionReducer,
   initialDeletionState,
@@ -209,6 +213,11 @@ const PO_SELECTOR_ROWS: POSourceQuotation[] = [
     savedPoCount: 0,
     draftPoCount: 0,
     legacyHeaderDiscount: false,
+    closed: false,
+    closedAt: null,
+    closedReason: "",
+    validUntil: null,
+    expiredUnclosed: false,
   },
   {
     id: 11,
@@ -224,6 +233,11 @@ const PO_SELECTOR_ROWS: POSourceQuotation[] = [
     savedPoCount: 1,
     draftPoCount: 1,
     legacyHeaderDiscount: false,
+    closed: false,
+    closedAt: null,
+    closedReason: "",
+    validUntil: null,
+    expiredUnclosed: false,
   },
   {
     id: 10,
@@ -239,6 +253,11 @@ const PO_SELECTOR_ROWS: POSourceQuotation[] = [
     savedPoCount: 2,
     draftPoCount: 0,
     legacyHeaderDiscount: false,
+    closed: false,
+    closedAt: null,
+    closedReason: "",
+    validUntil: null,
+    expiredUnclosed: false,
   },
 ];
 const PO_SELECTOR_STEP_ONE = {
@@ -389,6 +408,34 @@ const PO_EDITOR_ORDER: PurchaseOrderDTO = {
 };
 const PO_EDITOR_INITIAL = initialPurchaseOrderEditorState(
   PO_EDITOR_ORDER,
+  PO_EDITOR_USD
+);
+// #654: one aggregate line over the plain line and the split package. The
+// header's derived total is the sum of all three child rows and its derived
+// unit price divides that by the display quantity of 2; the children keep their
+// depth and their own discounts. This is a presentation state, not a money
+// change: the line values below the header are the same order as above.
+const PO_AGGREGATE_ORDER: PurchaseOrderDTO = {
+  ...PO_EDITOR_ORDER,
+  Items: PO_EDITOR_ORDER.Items.map((item) => ({
+    ...item,
+    AggregateGroupID: 1,
+  })),
+  AggregateGroups: [
+    {
+      ID: 1,
+      DisplayOrder: 1,
+      Title: "Combined items",
+      OrderedQuantityScaled: 20000,
+      OrderedUoM: "Lot",
+      ShowChildrenToCustomer: false,
+      TotalMinor: 351863,
+      DisplayUnitPriceMinor: 175932,
+    },
+  ],
+};
+const PO_AGGREGATE_STATE = initialPurchaseOrderEditorState(
+  PO_AGGREGATE_ORDER,
   PO_EDITOR_USD
 );
 const PO_EDITOR_CALCULATION = calculatePurchaseOrder(
@@ -1140,6 +1187,7 @@ const DETAIL_QUOTATION = {
 const EDITOR_ITEMS: EditorItem[] = [
   {
     key: 0,
+    no: 1,
     description: "Widget",
     bullets: [],
     qty: "1",
@@ -1154,6 +1202,7 @@ const EDITOR_ITEMS: EditorItem[] = [
   },
   {
     key: 1,
+    no: 2,
     description: "Installation",
     bullets: [],
     qty: "1",
@@ -1167,6 +1216,7 @@ const EDITOR_ITEMS: EditorItem[] = [
     subItems: [
       {
         id: 1,
+        no: 1,
         description: "Cable tray",
         qty: "10",
         uom: "m",
@@ -1385,6 +1435,7 @@ function periodMetrics(
     amountMinor: period.amountMinor,
     costedMinor: period.costedMinor,
     uncostedMinor: period.uncostedMinor,
+    extraExpenseMinor: period.extraExpenseMinor,
     capitalMinor: period.capitalMinor,
     marginMinor: period.marginMinor,
     marginBps: period.marginBps,
@@ -1398,6 +1449,7 @@ function zeroMonthMetrics() {
     amountMinor: 0,
     costedMinor: 0,
     uncostedMinor: 0,
+    extraExpenseMinor: 0,
     capitalMinor: 0,
     marginMinor: 0,
     marginBps: null,
@@ -1609,6 +1661,168 @@ const REPORT_CATALOGUE: CurrencyInfo[] = [
     symbolSpaced: false,
   },
 ];
+
+// Issue #657: the Fulfillment drill-down's settled page. It is the view's own
+// shape, not the server type, because the harness renders the presentational
+// View. The facts are chosen to exercise every block a reader must judge at
+// both widths: an open quotation with a grouped depth-1 child and a depth-3
+// child under one title, a closed quotation whose remainder is Closed Loss and
+// whose Unsold is exactly zero, a standalone extra expense line, saved PO
+// contributions on every priced leaf, and one price loss beside one price
+// extra so the variance column is not a single sample.
+const FULFILLMENT_SNAPSHOT_PAGE: PurchaseOrderFulfillmentPage = {
+  asOf: "2026-11-19",
+  filter: {
+    currency: "IDR",
+    status: "all",
+    search: "",
+    page: 1,
+    pageSize: 25,
+  },
+  quotations: [
+    {
+      quotationId: 7,
+      quoteNumber: "1502260007",
+      customerName: "PT. Infineon Technologies Batam",
+      currency: "IDR",
+      latestRevision: 2,
+      issuedAt: "2026-10-20",
+      validUntil: "2026-11-19",
+      status: "open",
+      items: [
+        {
+          quotationItemNo: 1,
+          quotationSubNo: null,
+          label: "1",
+          description: "WIP rack fabrication and delivery",
+          groupTitle: "Delivered package",
+          removed: false,
+          quotedQuantityScaled: 50000,
+          boughtQuantityScaled: 30000,
+          unsoldQuantityScaled: 20000,
+          overBoughtQuantityScaled: 0,
+          realizedAmountMinor: 600000,
+          realizedMarginMinor: 300000,
+          unsoldAmountMinor: 400000,
+          unsoldMarginMinor: 200000,
+          quantityExtraIncomeAmountMinor: 0,
+          quantityExtraIncomeMarginMinor: 0,
+          priceExtraIncomeMinor: 0,
+          priceLossMinor: 50000,
+          closedLossAmountMinor: 0,
+          closedLossMarginMinor: 0,
+          purchaseOrders: [
+            {
+              id: 11,
+              poNumber: "PO-657-OPEN-1",
+              state: "saved",
+              receivedDate: "2026-10-05",
+              allocatedQuantityScaled: 20000,
+            },
+            {
+              id: 12,
+              poNumber: "PO-657-OPEN-2",
+              state: "saved",
+              receivedDate: "2026-10-18",
+              allocatedQuantityScaled: 10000,
+            },
+          ],
+        },
+        {
+          quotationItemNo: 2,
+          quotationSubNo: 3,
+          label: "2.3",
+          description: "Depth-3 control panel assembly",
+          groupTitle: "Delivered package",
+          removed: false,
+          quotedQuantityScaled: 30000,
+          boughtQuantityScaled: 10000,
+          unsoldQuantityScaled: 20000,
+          overBoughtQuantityScaled: 0,
+          realizedAmountMinor: 200000,
+          realizedMarginMinor: 100000,
+          unsoldAmountMinor: 400000,
+          unsoldMarginMinor: 200000,
+          quantityExtraIncomeAmountMinor: 0,
+          quantityExtraIncomeMarginMinor: 0,
+          priceExtraIncomeMinor: 25000,
+          priceLossMinor: 0,
+          closedLossAmountMinor: 0,
+          closedLossMarginMinor: 0,
+          purchaseOrders: [
+            {
+              id: 13,
+              poNumber: "PO-657-OPEN-3",
+              state: "saved",
+              receivedDate: "2026-10-22",
+              allocatedQuantityScaled: 10000,
+            },
+          ],
+        },
+      ],
+      extraExpenses: [
+        {
+          purchaseOrderId: 11,
+          poNumber: "PO-657-OPEN-1",
+          lineNumber: 3,
+          description: "Freight surcharge",
+          quantityScaled: 10000,
+          uom: "Lot",
+          amountMinor: 1000000,
+          groupTitle: "",
+        },
+      ],
+    },
+    {
+      quotationId: 8,
+      quoteNumber: "1502260008",
+      customerName: "PT. Datalec Global Solution",
+      currency: "IDR",
+      latestRevision: 0,
+      issuedAt: "2026-09-15",
+      validUntil: "2026-10-15",
+      status: "closed",
+      items: [
+        {
+          quotationItemNo: 1,
+          quotationSubNo: null,
+          label: "1",
+          description: "Cooling package, remaining scope closed",
+          groupTitle: "",
+          removed: false,
+          quotedQuantityScaled: 50000,
+          boughtQuantityScaled: 30000,
+          unsoldQuantityScaled: 0,
+          overBoughtQuantityScaled: 0,
+          realizedAmountMinor: 600000,
+          realizedMarginMinor: 300000,
+          unsoldAmountMinor: 0,
+          unsoldMarginMinor: 0,
+          quantityExtraIncomeAmountMinor: 0,
+          quantityExtraIncomeMarginMinor: 0,
+          priceExtraIncomeMinor: 0,
+          priceLossMinor: 0,
+          closedLossAmountMinor: 400000,
+          closedLossMarginMinor: 200000,
+          purchaseOrders: [
+            {
+              id: 14,
+              poNumber: "PO-657-CLOSED",
+              state: "saved",
+              receivedDate: "2026-09-28",
+              allocatedQuantityScaled: 30000,
+            },
+          ],
+        },
+      ],
+      extraExpenses: [],
+    },
+  ],
+  page: 1,
+  pageSize: 25,
+  total: 2,
+  totalPages: 1,
+};
 
 function reportChartFilters(
   report: PurchaseOrderReportData,
@@ -2265,6 +2479,138 @@ const CASES: SnapshotCase[] = [
           onNext: () => undefined,
           onRetryMonth: () => undefined,
         }}
+      />
+    ),
+  },
+  {
+    // #655: the same year snapshot with a pass-through extra expense line, so
+    // the Extra Expense bucket and the non-extra coverage sentence are visible
+    // at both widths.
+    name: "ReportsExtraExpense",
+    element: (
+      <PurchaseOrderReportsView
+        filters={{
+          // The fixture is the "this year to today" snapshot on 19 Nov 2026,
+          // so the controls name the same inclusive range the report covers.
+          preset: "this-year",
+          period: null,
+          from: "2026-01-01",
+          to: "2026-11-19",
+          bucket: "month",
+          category: "all",
+          currency: "IDR",
+        }}
+        report={purchaseOrderReportExtraExpenseFixture()}
+        loading={false}
+        stale={false}
+        error=""
+        validation=""
+        catalogue={[
+          {
+            code: "IDR",
+            exponent: 0,
+            symbol: "Rp",
+            position: "before",
+            groupSep: ".",
+            decimalSep: ",",
+            symbolSpaced: false,
+          },
+          {
+            code: "USD",
+            exponent: 2,
+            symbol: "$",
+            position: "before",
+            groupSep: ",",
+            decimalSep: ".",
+            symbolSpaced: false,
+          },
+        ]}
+        exporting={false}
+        canExport={false}
+        onPresetChange={() => undefined}
+        onPeriodChange={() => undefined}
+        onFromChange={() => undefined}
+        onToChange={() => undefined}
+        onBucketChange={() => undefined}
+        onCategoryChange={() => undefined}
+        onCurrencyChange={() => undefined}
+        onRetry={() => undefined}
+        onExport={() => undefined}
+        monthBrowser={{
+          months: ["2026-11"],
+          activeMonth: "2026-11",
+          allYear: null,
+          layout: "individual",
+          notice: "",
+          readouts: [REPORT_MONTH_CURRENT_READOUT],
+          aggregate: null,
+          triggerRef: createRef<HTMLButtonElement>(),
+          onOpenPicker: () => undefined,
+          onLayoutChange: () => undefined,
+          onPrevious: () => undefined,
+          onNext: () => undefined,
+          onRetryMonth: () => undefined,
+        }}
+      />
+    ),
+  },
+  {
+    // #657: the Fulfillment drill-down with a settled page, rendered through
+    // the presentational View because renderToString runs no effects. The 360
+    // read shows the stacked per-item layout: every quantity and value is in
+    // the card, no horizontal table. The 1280 read shows the fixed-column
+    // table with both quotations, the group heading above its two children,
+    // the standalone extra and the closed loss.
+    //
+    // What this case cannot show: loading, error and empty states, status and
+    // search interactions, paging, and the epoch-driven refresh (all covered by
+    // the card and page DOM suites). The closed quotation sits below the 900px
+    // fold at 360; the 1280 read is the evidence for it.
+    name: "ReportsFulfillment",
+    element: (
+      <PurchaseOrderFulfillmentCardView
+        page={FULFILLMENT_SNAPSHOT_PAGE}
+        currency="IDR"
+        catalogue={REPORT_CATALOGUE}
+        status="all"
+        searchDraft=""
+        pageNumber={1}
+        loading={false}
+        error=""
+        onStatusChange={() => undefined}
+        onSearchDraftChange={() => undefined}
+        onSearchSubmit={() => undefined}
+        onClearFilters={() => undefined}
+        onPreviousPage={() => undefined}
+        onNextPage={() => undefined}
+        onRetry={() => undefined}
+      />
+    ),
+  },
+  {
+    // #648: the admin variant, so the Close/Reopen actions are visible at
+    // both widths beside the open and closed quotations.
+    name: "ReportsFulfillmentAdmin",
+    element: (
+      <PurchaseOrderFulfillmentCardView
+        page={FULFILLMENT_SNAPSHOT_PAGE}
+        currency="IDR"
+        catalogue={REPORT_CATALOGUE}
+        status="all"
+        searchDraft=""
+        pageNumber={1}
+        loading={false}
+        error=""
+        onStatusChange={() => undefined}
+        onSearchDraftChange={() => undefined}
+        onSearchSubmit={() => undefined}
+        onClearFilters={() => undefined}
+        onPreviousPage={() => undefined}
+        onNextPage={() => undefined}
+        onRetry={() => undefined}
+        isAdmin
+        onCloseQuotation={() => undefined}
+        onReopenQuotation={() => undefined}
       />
     ),
   },
@@ -3133,6 +3479,37 @@ const CASES: SnapshotCase[] = [
     ),
   },
   {
+    // #656: a closed quotation and an expired-unclosed one. Closed is disabled
+    // with its own badge; expired-unclosed keeps its remaining quantity and is
+    // selectable, so the two states must read differently at 360 and 1280.
+    name: "POSelectorClosedAndExpired",
+    element: (
+      <POQuotationSelectorView
+        state={{
+          ...PO_SELECTOR_STEP_ONE,
+          rows: [
+            {
+              ...PO_SELECTOR_ROWS[0],
+              closed: true,
+              closedAt: "2026-11-20T10:00:00+07:00",
+              closedReason: "Customer confirmed the remaining quantity will not be ordered.",
+            },
+            {
+              ...PO_SELECTOR_ROWS[1],
+              activePO: null,
+              expiredUnclosed: true,
+              validUntil: "2026-10-01",
+            },
+            PO_SELECTOR_ROWS[2],
+          ],
+        }}
+        dispatch={() => undefined}
+        onClose={() => undefined}
+        onConfirm={() => undefined}
+      />
+    ),
+  },
+  {
     // The manual PO draft editor (issue #468/#470, header from #580): the hero
     // names the customer's PO number with the quotation identity in the Source
     // quotation block; the Purchase order details card sits under it. Lines are
@@ -3149,6 +3526,28 @@ const CASES: SnapshotCase[] = [
     element: (
       <PurchaseOrderEditorView
         state={PO_EDITOR_INITIAL}
+        dispatch={() => undefined}
+        currency={PO_EDITOR_USD}
+        uomOptions={PO_EDITOR_UOM_OPTIONS}
+        incotermOptions={INCOTERM_OPTIONS}
+        onSave={() => undefined}
+        onCancel={() => undefined}
+        onFinalSave={() => undefined}
+        finalSaving={false}
+      />
+    ),
+  },
+  {
+    // #654: the aggregate presentation. The header card carries the derived
+    // total and unit price, the display quantity/unit and the print toggle;
+    // the three child rows below it are the same order as the normal editor,
+    // with their split package and row discounts intact. At 360 this is the
+    // case that says whether the header fields reflow instead of overflowing.
+    name: "PurchaseOrderAggregateEditor",
+    cropToHeading: "Line items",
+    element: (
+      <PurchaseOrderEditorView
+        state={PO_AGGREGATE_STATE}
         dispatch={() => undefined}
         currency={PO_EDITOR_USD}
         uomOptions={PO_EDITOR_UOM_OPTIONS}
@@ -3983,6 +4382,60 @@ const CASES: SnapshotCase[] = [
     ),
   },
   {
+    // #656: the closed header. Create PO is gone, the Closure block names who
+    // closed it and why, and an admin sees the Reopen action beside Copy/Edit.
+    // This case is the layout proof for the long reason sentence at 360.
+    name: "QuotationDetailHeaderClosed",
+    element: (
+      <QuotationDetailHeader
+        quotation={DETAIL_QUOTATION}
+        activeRevision={2}
+        revisionOptions={[
+          { value: 2, label: "Revision 02 (latest)" },
+          { value: 1, label: "Revision 01" },
+          { value: 0, label: "Revision 00" },
+        ]}
+        onRevisionChange={() => undefined}
+        onBack={() => undefined}
+        onEdit={() => undefined}
+        purchaseOrder={null}
+        purchaseOrderPending={false}
+        purchaseOrderAllBought={false}
+        onCreatePurchaseOrder={() => undefined}
+        onOpenPurchaseOrder={() => undefined}
+        onCopy={() => undefined}
+        closure={{
+          closed: true,
+          closedAt: "2026-11-20T10:00:00+07:00",
+          closedByName: "Sari Admin",
+          closedReason:
+            "Customer confirmed the remaining 6 Pc will not be ordered on this quotation.",
+          expiredUnclosed: false,
+        }}
+        isAdmin
+        onCloseQuotation={() => undefined}
+        onReopenQuotation={() => undefined}
+      />
+    ),
+  },
+  {
+    // #656: the ask-for-a-reason dialog, empty and ready. The submit is the
+    // disabled button until a reason is typed; the width and the 500-character
+    // counter are what this case proves.
+    name: "QuotationCloseDialogOpen",
+    element: (
+      <QuotationCloseDialog
+        open
+        isAdmin
+        quotationNumber="1502260012"
+        pending={false}
+        error={null}
+        onCancel={() => undefined}
+        onConfirm={() => undefined}
+      />
+    ),
+  },
+  {
     // #480: single-record scope. The connected purchase order is listed as
     // surviving, because deleting the quotation releases its link rather than
     // deleting it.
@@ -4095,6 +4548,12 @@ const CASES: SnapshotCase[] = [
         onRemoveSubBullet={() => undefined}
         onSubBulletChange={() => undefined}
         onPasteItems={() => undefined}
+        boughtQuantities={
+          new Map([
+            ["1:0", 20000],
+            ["2:1", 25000],
+          ])
+        }
       />
     ),
   },

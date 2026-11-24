@@ -127,6 +127,11 @@ type poSourceRow struct {
 	SavedPOCount         int               `json:"savedPoCount"`
 	DraftPOCount         int               `json:"draftPoCount"`
 	LegacyHeaderDiscount bool              `json:"legacyHeaderDiscount"`
+	Closed               bool              `json:"closed"`
+	ClosedAt             *string           `json:"closedAt"`
+	ClosedReason         string            `json:"closedReason"`
+	ValidUntil           *string           `json:"validUntil"`
+	ExpiredUnclosed      bool              `json:"expiredUnclosed"`
 }
 
 type poSourceList struct {

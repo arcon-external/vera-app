@@ -1256,6 +1256,7 @@ function copyCategoryMetrics(
     amountMinor: metrics.amountMinor,
     costedMinor: metrics.costedMinor,
     uncostedMinor: metrics.uncostedMinor,
+    extraExpenseMinor: metrics.extraExpenseMinor,
     capitalMinor: metrics.capitalMinor,
     marginMinor: metrics.marginMinor,
     marginBps: metrics.marginBps,

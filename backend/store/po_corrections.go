@@ -119,6 +119,25 @@ type PurchaseOrderCorrectionItem struct {
 	GroupKey          string
 	ParentDescription string
 	DescriptionLines  []string
+	// LineKind is the kind the snapshot line carried: quotation or extra. A
+	// snapshot taken before #655 reads quotation, exactly like its record.
+	LineKind string
+	// AggregateGroupOrder is the display order of the snapshot group this line
+	// belonged to; 0 means the line was ungrouped. Group ids are not stable
+	// across saves, so the snapshot is keyed by the derived display order.
+	AggregateGroupOrder int
+}
+
+// PurchaseOrderCorrectionGroup is one aggregate header frozen into a retained
+// snapshot. It carries the layout the record had before the write; the total is
+// derived from the snapshot lines with the same AggregateGroupOrder and is
+// never stored.
+type PurchaseOrderCorrectionGroup struct {
+	DisplayOrder           int
+	Title                  string
+	OrderedQuantityScaled  int64
+	OrderedUoM             string
+	ShowChildrenToCustomer bool
 }
 
 // PurchaseOrderCorrection is one immutable snapshot plus who replaced it, when
@@ -174,6 +193,11 @@ type PurchaseOrderCorrection struct {
 	// BusinessCategory is the category the corrected version carried. Empty
 	// means Unassigned: a record saved before the category existed.
 	BusinessCategory string
+
+	// Groups are the aggregate headers the snapshot record carried, ordered by
+	// display position. Empty for every ungrouped record; the layout is kept
+	// beside the lines so history can say which lines were grouped.
+	Groups []PurchaseOrderCorrectionGroup
 }
 
 // purchaseOrderWriteLock is the row facts every versioned write needs. It is
@@ -329,6 +353,9 @@ func (s *Store) CorrectPurchaseOrder(ctx context.Context, input PurchaseOrderCor
 	if err := validateSavedPurchaseOrderUpdateInput(input.PurchaseOrderUpdate, true); err != nil {
 		return PurchaseOrder{}, err
 	}
+	if err := validatePurchaseOrderAggregatePlacement(input.AggregateGroups, input.Items); err != nil {
+		return PurchaseOrder{}, err
+	}
 
 	pool, err := s.poolOrError()
 	if err != nil {
@@ -361,9 +388,20 @@ func (s *Store) CorrectPurchaseOrder(ctx context.Context, input PurchaseOrderCor
 	if err := requirePurchaseOrderSource(lock); err != nil {
 		return PurchaseOrder{}, err
 	}
+	// #654: a grouped record cannot be corrected by a client that cannot express
+	// groups; refused before the snapshot, which is itself a write.
+	if err := refuseLegacyAggregateOverwrite(
+		ctx, tx, schema, org.ID, input.ID, input.AggregateGroups); err != nil {
+		return PurchaseOrder{}, err
+	}
 
 	stored, err := getPurchaseOrder(ctx, tx, schema, org.ID, input.ID)
 	if err != nil {
+		return PurchaseOrder{}, err
+	}
+	// #658: a correction of a pre-cutover record keeps its historical free line
+	// and row discount; anything new or changed is refused before the snapshot.
+	if err := s.enforceStrictPurchaseOrderSave(ctx, tx, org.ID, input.ID, input.PurchaseOrderUpdate); err != nil {
 		return PurchaseOrder{}, err
 	}
 	source, err := loadPurchaseOrderSourceDetail(ctx, tx, schema, lock.QuotationID, lock.SourceRevision)
@@ -398,6 +436,10 @@ func (s *Store) CorrectPurchaseOrder(ctx context.Context, input PurchaseOrderCor
 	if err != nil {
 		return PurchaseOrder{}, err
 	}
+	if err := replacePurchaseOrderItemGroups(
+		ctx, tx, schema, org.ID, input.ID, input.AggregateGroups, kept); err != nil {
+		return PurchaseOrder{}, err
+	}
 	if err := replacePurchaseOrderAllocations(ctx, tx, schema, org.ID, input.ID, source, kept, false); err != nil {
 		return PurchaseOrder{}, err
 	}
@@ -426,6 +468,16 @@ func validatePurchaseOrderUpdateInput(input PurchaseOrderUpdate) error {
 		return err
 	}
 	for index, item := range input.Items {
+		kind, err := normalizePurchaseOrderLineKind(item.LineKind)
+		if err != nil {
+			return fmt.Errorf("%w: line %d", err, index+1)
+		}
+		if kind == PurchaseOrderLineKindExtra &&
+			(item.QuotationItemNo != nil || item.QuotationSubNo != nil) {
+			return fmt.Errorf(
+				"%w: line %d is an extra line and cannot name a quotation reference",
+				ErrPurchaseOrderLineKindInvalid, index+1)
+		}
 		if item.QuantityScaled <= 0 {
 			return fmt.Errorf("%w: line %d quantity must be positive", ErrPurchaseOrderInvalid, index+1)
 		}
@@ -588,6 +640,17 @@ func basisFromLock(lock purchaseOrderWriteLock) purchaseOrderBasis {
 	}
 }
 
+// snapshotLineKind is the read value written into an immutable snapshot. A row
+// read from the database can only be quotation or extra (its CHECK enforces
+// it); anything else -- a hand-built order in a test or a future caller -- is
+// recorded as the compatibility value rather than failing a history write.
+func snapshotLineKind(kind string) string {
+	if kind == PurchaseOrderLineKindExtra {
+		return PurchaseOrderLineKindExtra
+	}
+	return PurchaseOrderLineKindQuotation
+}
+
 // insertPurchaseOrderCorrection writes one immutable snapshot of the values a
 // write is about to replace, including the attachment version that was active.
 // It runs in the writer's transaction, so a failed write leaves no snapshot.
@@ -663,24 +726,52 @@ func insertPurchaseOrderCorrection(
 	if err != nil {
 		return 0, fmt.Errorf("store purchase order correction snapshot: %w", err)
 	}
+	// #654: freeze the group headers before the lines, because every snapshot
+	// line's group order is a composite foreign key into this set. Group ids are
+	// not stable across saves, so the snapshot uses the read display order.
+	groupOrder := make(map[int64]int, len(order.AggregateGroups))
+	for _, group := range order.AggregateGroups {
+		if _, err := q.Exec(ctx, fmt.Sprintf(`
+			INSERT INTO %s.purchase_order_correction_item_groups (
+				correction_id, display_order, title, ordered_quantity_scaled,
+				ordered_uom, show_children_to_customer
+			) VALUES ($1,$2,$3,$4,$5,$6)`, schema),
+			correctionID, group.DisplayOrder, group.Title,
+			group.OrderedQuantityScaled, group.OrderedUoM,
+			group.ShowChildrenToCustomer,
+		); err != nil {
+			return 0, fmt.Errorf("store purchase order correction group %d: %w",
+				group.DisplayOrder, err)
+		}
+		groupOrder[group.ID] = group.DisplayOrder
+	}
 	for index, item := range order.Items {
 		lineNumber := item.LineNumber
 		if lineNumber < 1 {
 			lineNumber = index + 1
+		}
+		var aggregateGroupOrder any
+		if item.AggregateGroupID != 0 {
+			if displayOrder, known := groupOrder[item.AggregateGroupID]; known {
+				aggregateGroupOrder = displayOrder
+			}
 		}
 		if _, err := q.Exec(ctx, fmt.Sprintf(`
 			INSERT INTO %s.purchase_order_correction_items (
 				correction_id, line_number, description, quotation_item_no,
 				quotation_sub_no, quantity_scaled, uom, unit_price_minor,
 				discount_enabled, discount_percent, gross_minor, discount_minor,
-				net_minor, group_key, parent_description, description_lines
-			) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)`, schema),
+				net_minor, group_key, parent_description, description_lines,
+				aggregate_group_order, line_kind
+			) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18)`, schema),
 			correctionID, lineNumber, item.Description, item.QuotationItemNo,
 			item.QuotationSubNo, item.QuantityScaled, item.UoM,
 			item.UnitPriceMinor, item.DiscountEnabled, item.DiscountPercent,
 			item.GrossMinor, item.DiscountMinor, item.NetMinor,
 			item.GroupKey, item.ParentDescription,
 			encodeDescriptionLines(item.DescriptionLines),
+			aggregateGroupOrder,
+			snapshotLineKind(item.LineKind),
 		); err != nil {
 			return 0, fmt.Errorf("store purchase order correction line %d: %w", lineNumber, err)
 		}
@@ -819,7 +910,8 @@ func (s *Store) GetPurchaseOrderHistory(ctx context.Context, id int64) ([]Purcha
 		SELECT correction_id, line_number, description, quotation_item_no,
 		       quotation_sub_no, quantity_scaled, uom, unit_price_minor,
 		       discount_enabled, discount_percent, gross_minor, discount_minor,
-		       net_minor, group_key, parent_description, description_lines
+		       net_minor, group_key, parent_description, description_lines,
+		       aggregate_group_order, line_kind
 		FROM %s.purchase_order_correction_items
 		WHERE correction_id = ANY($1)
 		ORDER BY correction_id, line_number`, schema), ids)
@@ -832,15 +924,20 @@ func (s *Store) GetPurchaseOrderHistory(ctx context.Context, id int64) ([]Purcha
 		var correctionID int64
 		var item PurchaseOrderCorrectionItem
 		var itemNo, subNo pgtype.Int4
+		var groupOrder pgtype.Int4
 		var descriptionLines []byte
 		if err := itemRows.Scan(&correctionID, &item.LineNumber, &item.Description,
 			&itemNo, &subNo, &item.QuantityScaled, &item.UoM, &item.UnitPriceMinor,
 			&item.DiscountEnabled, &item.DiscountPercent, &item.GrossMinor,
 			&item.DiscountMinor, &item.NetMinor, &item.GroupKey,
-			&item.ParentDescription, &descriptionLines); err != nil {
+			&item.ParentDescription, &descriptionLines, &groupOrder,
+			&item.LineKind); err != nil {
 			return nil, fmt.Errorf("scan purchase order %d correction line: %w", id, err)
 		}
 		item.DescriptionLines = decodeDescriptionLines(descriptionLines)
+		if groupOrder.Valid {
+			item.AggregateGroupOrder = int(groupOrder.Int32)
+		}
 		if itemNo.Valid {
 			value := int(itemNo.Int32)
 			item.QuotationItemNo = &value
@@ -858,6 +955,37 @@ func (s *Store) GetPurchaseOrderHistory(ctx context.Context, id int64) ([]Purcha
 		if items, ok := byCorrection[history[index].ID]; ok {
 			history[index].Items = items
 		}
+	}
+
+	// #654: the aggregate layout of each snapshot, read for all rows in one
+	// query. A snapshot without groups pays one empty query, like the repair
+	// satellite below.
+	groupRows, err := pool.Query(ctx, fmt.Sprintf(`
+		SELECT correction_id, display_order, title, ordered_quantity_scaled,
+		       ordered_uom, show_children_to_customer
+		FROM %s.purchase_order_correction_item_groups
+		WHERE correction_id = ANY($1)
+		ORDER BY correction_id, display_order`, schema), ids)
+	if err != nil {
+		return nil, fmt.Errorf("load purchase order %d correction groups: %w", id, err)
+	}
+	defer groupRows.Close()
+	groupsByCorrection := make(map[int64][]PurchaseOrderCorrectionGroup, len(history))
+	for groupRows.Next() {
+		var correctionID int64
+		var group PurchaseOrderCorrectionGroup
+		if err := groupRows.Scan(&correctionID, &group.DisplayOrder, &group.Title,
+			&group.OrderedQuantityScaled, &group.OrderedUoM,
+			&group.ShowChildrenToCustomer); err != nil {
+			return nil, fmt.Errorf("scan purchase order %d correction group: %w", id, err)
+		}
+		groupsByCorrection[correctionID] = append(groupsByCorrection[correctionID], group)
+	}
+	if err := groupRows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate purchase order %d correction groups: %w", id, err)
+	}
+	for index := range history {
+		history[index].Groups = groupsByCorrection[history[index].ID]
 	}
 
 	// #475: the old/new source and the choices a repair recorded. The rows are

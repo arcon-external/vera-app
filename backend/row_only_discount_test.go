@@ -136,7 +136,7 @@ func TestRowOnlyTotalsAndMarginsEqualTheSumOfRows(t *testing.T) {
 // of #652: an already-issued revision keeps its discount and printed totals,
 // so the builder must still compute them when a legacy draft is re-read.
 func TestBuildPricingStillReadsAStoredLegacyHeaderDiscount(t *testing.T) {
-	items := buildItems([]QuotationItemInput{
+	items := mustBuildItems(t, []QuotationItemInput{
 		{Description: "Plain", Qty: 1, UoM: "Lot", UnitPrice: 1000},
 		{Description: "Row discounted", Qty: 1, UoM: "Lot", UnitPrice: 2000,
 			DiscountEnabled: true, DiscountPercent: 10},

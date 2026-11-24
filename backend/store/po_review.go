@@ -544,6 +544,18 @@ func (s *Store) FinalizePurchaseOrder(ctx context.Context, input PurchaseOrderFi
 	if err := requirePurchaseOrderSource(lock); err != nil {
 		return PurchaseOrder{}, err
 	}
+	// #654: the final save cannot silently ungroup a record saved by a newer
+	// client. Refuse before the overwrite snapshot or any other write.
+	if err := refuseLegacyAggregateOverwrite(
+		ctx, tx, schema, org.ID, input.ID, input.AggregateGroups); err != nil {
+		return PurchaseOrder{}, err
+	}
+	// #658: the cutover gates run before the source load, the availability read
+	// and the overwrite snapshot. A stored legacy line passes only because it is
+	// unchanged; a new one is refused.
+	if err := s.enforceStrictPurchaseOrderSave(ctx, tx, org.ID, input.ID, input.PurchaseOrderUpdate); err != nil {
+		return PurchaseOrder{}, err
+	}
 	quotationID = lock.QuotationID
 	sourceRevision = lock.SourceRevision
 	customerID = lock.CustomerID
@@ -568,6 +580,13 @@ func (s *Store) FinalizePurchaseOrder(ctx context.Context, input PurchaseOrderFi
 		ctx, tx, schema, org.ID, quotationID, sourceRevision)
 	if err != nil {
 		return PurchaseOrder{}, err
+	}
+	// #656: a draft opened before the close must not be finalizable after it,
+	// or a stale tab would silently buy back part of the Closed Loss. The read
+	// is under the quotation lock, so a close cannot slip between the check and
+	// the save.
+	if availability.Closed {
+		return PurchaseOrder{}, ErrQuotationClosed
 	}
 	for index, item := range input.Items {
 		if item.QuotationItemNo == nil {
@@ -614,6 +633,9 @@ func (s *Store) FinalizePurchaseOrder(ctx context.Context, input PurchaseOrderFi
 		input.Items[index].LineNumber = index + 1
 	}
 	if err := validateSavedPurchaseOrderUpdateInput(input.PurchaseOrderUpdate, true); err != nil {
+		return PurchaseOrder{}, err
+	}
+	if err := validatePurchaseOrderAggregatePlacement(input.AggregateGroups, input.Items); err != nil {
 		return PurchaseOrder{}, err
 	}
 	if err := validatePurchaseOrderReferences(ctx, tx, schema, quotationID, sourceRevision, input.Items); err != nil {
@@ -746,6 +768,10 @@ func (s *Store) FinalizePurchaseOrder(ctx context.Context, input PurchaseOrderFi
 	}
 	kept, _, err := replacePurchaseOrderItems(ctx, tx, schema, org.ID, input.ID, lines)
 	if err != nil {
+		return PurchaseOrder{}, err
+	}
+	if err := replacePurchaseOrderItemGroups(
+		ctx, tx, schema, org.ID, input.ID, input.AggregateGroups, kept); err != nil {
 		return PurchaseOrder{}, err
 	}
 	if err := replacePurchaseOrderAllocations(ctx, tx, schema, org.ID, input.ID, source, kept, false); err != nil {

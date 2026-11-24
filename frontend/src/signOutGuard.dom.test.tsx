@@ -42,6 +42,15 @@ const mocks = vi.hoisted(() => ({
   version: vi.fn(async (..._args: unknown[]) => ""),
   getChangelog: vi.fn(async (..._args: unknown[]) => ""),
   checkForUpdates: vi.fn(async (..._args: unknown[]) => ({ UpdateAvailable: false })),
+  listPurchaseOrders: vi.fn(async (..._args: unknown[]) => ({
+    PurchaseOrders: [] as unknown[],
+    Customers: [] as unknown[],
+    Page: 1,
+    PageSize: 15,
+    Total: 0,
+    TotalPages: 1,
+  })),
+  getPurchaseOrder: vi.fn((..._args: unknown[]): unknown => undefined),
 }));
 
 vi.mock("@backend/backend/AuthAPI", async (importOriginal) => {
@@ -79,6 +88,8 @@ vi.mock("@backend/backend/Quotation", async (importOriginal) => {
     ...actual,
     ListDrafts: (...args: unknown[]) => mocks.listDrafts(...args),
     ListCustomers: (...args: unknown[]) => mocks.listCustomers(...args),
+    ListPurchaseOrders: (...args: unknown[]) => mocks.listPurchaseOrders(...args),
+    GetPurchaseOrder: (...args: unknown[]) => mocks.getPurchaseOrder(...args),
     ClearDraftContext: vi.fn(async () => {}),
     ClearRevisionContext: vi.fn(async () => {}),
     SetDraftContext: vi.fn(async () => {}),
@@ -173,6 +184,97 @@ function navTab(label: string): HTMLButtonElement {
   ).find((node) => node.textContent?.trim() === label);
   if (found === undefined) throw new Error(`no tab labelled ${label}`);
   return found;
+}
+
+/**
+ * Opens a stored draft through the Drafts list. #655 retired the source-less
+ * Editor-tab form, so PO work in this suite starts from an existing record.
+ */
+async function openStoredDraft(): Promise<void> {
+  mocks.listPurchaseOrders.mockResolvedValue({
+    PurchaseOrders: [
+      {
+        UUID: "po-uuid-guard",
+        State: "draft",
+        PONumber: "PO-GUARD-655",
+        QuoteNumber: "1502260012",
+        CustomerName: "PT. Buyer",
+        ReceivedDate: "2026-10-22",
+        Currency: "IDR",
+        ID: 21,
+        CustomerID: 2,
+        SourceRevision: 0,
+        SourceMissing: false,
+        SourceState: "live",
+      },
+    ],
+    Customers: [{ Name: "PT. Buyer", ID: 2 }],
+    Page: 1,
+    PageSize: 15,
+    Total: 1,
+    TotalPages: 1,
+  });
+  mocks.getPurchaseOrder.mockResolvedValue({
+    PODate: null,
+    RequestedDeliveryDate: null,
+    UUID: "po-uuid-guard",
+    State: "draft",
+    QuoteNumber: "1502260012",
+    CustomerName: "PT. Buyer",
+    BillingAddress: "Jl. Billing",
+    DeliveryAddress: "",
+    ShipToCode: "",
+    ContactEmail: "",
+    ContactPhone: "",
+    PONumber: "PO-GUARD-655",
+    ReceivedDate: "2026-10-22",
+    Incoterms: "EXW",
+    Currency: "IDR",
+    TaxZone: "FTZ",
+    TaxCategory: "SupplyOnly",
+    BusinessCategory: "OTHERS",
+    TaxType: "Goods",
+    ServiceCategory: "",
+    AdjustmentReason: "",
+    CreatedAt: "2026-10-22T03:00:00Z",
+    UpdatedAt: "2026-10-22T03:00:00Z",
+    Items: [],
+    ID: 21,
+    QuotationID: 12,
+    SourceRevision: 0,
+    SourceMissing: false,
+    SourceState: "live",
+    PrintedTotalsKnown: true,
+    CustomerID: 2,
+    PaymentTerms: "30 days",
+    DiscountPercent: 0,
+    PpnBps: 0,
+    SubtotalMinor: 0,
+    DiscountMinor: 0,
+    PpnMinor: 0,
+    AdjustmentMinor: 0,
+    GrandTotalMinor: 0,
+    PrintedSubtotalMinor: 0,
+    PrintedDiscountMinor: 0,
+    PrintedPpnMinor: 0,
+    PrintedGrandTotalMinor: 0,
+    Version: 1,
+  });
+  await renderApp();
+  await act(async () => {
+    button("Open Purchase Orders").click();
+  });
+  await flush();
+  await act(async () => {
+    navTab("Drafts").click();
+  });
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 300));
+  });
+  await act(async () => {
+    button("Open purchase order PO-GUARD-655").click();
+  });
+  await flush();
 }
 
 function signInButton(): HTMLButtonElement | null {
@@ -307,13 +409,11 @@ describe("Sign out is guarded (issue #491 follow-up)", () => {
     expect(signInButton()).not.toBeNull();
   });
 
-  it("signs out an untouched PO-first editor without a prompt", async () => {
-    await renderApp();
-    await act(async () => {
-      button("Open Purchase Orders").click();
-    });
-    await flush();
-    expect(document.body.textContent).toContain("New purchase order");
+  it("signs out an untouched stored PO draft without a prompt", async () => {
+    await openStoredDraft();
+    expect(
+      document.querySelector('input[aria-label="Customer PO number"]')
+    ).not.toBeNull();
 
     await openMenuAndSignOut();
     await flush();
@@ -322,12 +422,8 @@ describe("Sign out is guarded (issue #491 follow-up)", () => {
     expect(mocks.logout).toHaveBeenCalledTimes(1);
   });
 
-  it("guards a dirty PO-first editor and keeps its values on Keep editing", async () => {
-    await renderApp();
-    await act(async () => {
-      button("Open Purchase Orders").click();
-    });
-    await flush();
+  it("guards a dirty PO draft and keeps its values on Keep editing", async () => {
+    await openStoredDraft();
     const poNumber = document.querySelector<HTMLInputElement>(
       'input[aria-label="Customer PO number"]'
     );

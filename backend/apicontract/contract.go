@@ -101,6 +101,9 @@ type QuotationSummaryRow struct {
 	ID             int64  `json:"id"`
 	GrandTotal     int64  `json:"grandTotal"`
 	RevisionNumber int16  `json:"revision"`
+	// Closed is the archive badge (#656). Closure is quotation-level, so every
+	// revision of a closed quotation reads closed.
+	Closed bool `json:"closed"`
 }
 
 // POSourceActivePORow is the active Purchase Order occupying a Quotation
@@ -130,6 +133,14 @@ type POSourceQuotationRow struct {
 	SavedPOCount         int  `json:"savedPoCount"`
 	DraftPOCount         int  `json:"draftPoCount"`
 	LegacyHeaderDiscount bool `json:"legacyHeaderDiscount"`
+	// Closure and expiry (#656). A closed row stays visible and disabled; its
+	// unbought remainder is Closed Loss, not Unsold. ExpiredUnclosed is an
+	// advisory badge only: expiry alone never becomes a loss.
+	Closed          bool    `json:"closed"`
+	ClosedAt        *string `json:"closedAt"`
+	ClosedReason    string  `json:"closedReason"`
+	ValidUntil      *string `json:"validUntil"`
+	ExpiredUnclosed bool    `json:"expiredUnclosed"`
 }
 
 // POSourceListResponse is one page of the selector's first step. PageSize is
@@ -194,6 +205,14 @@ type POSourceOccupancyResponse struct {
 	SavedPOCount         int                  `json:"savedPoCount"`
 	DraftPOCount         int                  `json:"draftPoCount"`
 	LegacyHeaderDiscount bool                 `json:"legacyHeaderDiscount"`
+	// Closure and expiry (#656). Closed disables creation; ClosedByName is the
+	// detail page's "who", which the selector rows do not need.
+	Closed          bool    `json:"closed"`
+	ClosedAt        *string `json:"closedAt"`
+	ClosedReason    string  `json:"closedReason"`
+	ClosedByName    string  `json:"closedByName"`
+	ValidUntil      *string `json:"validUntil"`
+	ExpiredUnclosed bool    `json:"expiredUnclosed"`
 }
 
 // POSourceAvailabilityItemRow is one priced leaf of the selected revision.
@@ -220,14 +239,21 @@ type POSourceAvailabilityItemRow struct {
 // quotation revision. AllBought is derived from the listed leaves; a draft
 // quantity is advisory and never reduces RemainingQuantityScaled.
 type POSourceAvailabilityResponse struct {
-	QuotationID          int64                         `json:"quotationId"`
-	RevisionNumber       int16                         `json:"revisionNumber"`
-	LatestRevision       int16                         `json:"latestRevision"`
-	AllBought            bool                          `json:"allBought"`
-	LegacyHeaderDiscount bool                          `json:"legacyHeaderDiscount"`
-	SavedPOCount         int                           `json:"savedPoCount"`
-	DraftPOCount         int                           `json:"draftPoCount"`
-	Items                []POSourceAvailabilityItemRow `json:"items"`
+	QuotationID          int64 `json:"quotationId"`
+	RevisionNumber       int16 `json:"revisionNumber"`
+	LatestRevision       int16 `json:"latestRevision"`
+	AllBought            bool  `json:"allBought"`
+	LegacyHeaderDiscount bool  `json:"legacyHeaderDiscount"`
+	SavedPOCount         int   `json:"savedPoCount"`
+	DraftPOCount         int   `json:"draftPoCount"`
+	// Closure and expiry (#656). A closed revision's remaining leaves are
+	// Closed Loss; the workspace disables ordering rather than hiding them.
+	Closed          bool                          `json:"closed"`
+	ClosedAt        *string                       `json:"closedAt"`
+	ClosedReason    string                        `json:"closedReason"`
+	ValidUntil      *string                       `json:"validUntil"`
+	ExpiredUnclosed bool                          `json:"expiredUnclosed"`
+	Items           []POSourceAvailabilityItemRow `json:"items"`
 }
 
 // PurchaseOrderItemRow is one entered PO line. QuotationItemNo and
@@ -239,8 +265,14 @@ type POSourceAvailabilityResponse struct {
 // own calculation. They are returned, not recomputed, so a reopened order shows
 // the arithmetic it was saved with.
 type PurchaseOrderItemRow struct {
-	QuotationItemNo   *int     `json:"quotationItemNo"`
-	QuotationSubNo    *int     `json:"quotationSubNo"`
+	QuotationItemNo *int `json:"quotationItemNo"`
+	QuotationSubNo  *int `json:"quotationSubNo"`
+	// LineKind is quotation or extra (#655). A quotation line fulfils a leaf of
+	// the source revision and owns an allocation; an extra was never on the
+	// quotation, carries no reference and no allocation, and reports as a
+	// pass-through expense. The read always names it, so an older server's
+	// empty value is the only "absent quotation" a reader ever sees.
+	LineKind          string   `json:"lineKind"`
 	ID                int64    `json:"id"`
 	ClientKey         *string  `json:"clientKey"`
 	LineNumber        int      `json:"lineNumber"`
@@ -263,6 +295,38 @@ type PurchaseOrderItemRow struct {
 	// RemainingQuantityScaled is what is still orderable on this leaf after
 	// other saved purchase orders. Absent when there is no live source answer.
 	RemainingQuantityScaled *int64 `json:"remainingQuantityScaled,omitempty"`
+	// AggregateGroupID names the aggregate presentation group this line belongs
+	// to. Null means the line is ungrouped. The id is internal and not stable
+	// across saves; the correction snapshot keys groups by display order.
+	AggregateGroupID *int64 `json:"aggregateGroupId,omitempty"`
+}
+
+// PurchaseOrderAggregateGroupRow is one PO-only presentation group. It groups
+// one or more existing PO lines for the customer document; the lines remain the
+// priced truth and carry their own allocations. TotalMinor and
+// DisplayUnitPriceMinor are derived on read, never stored, and no group row
+// carries cost, margin or variance (Story 42).
+type PurchaseOrderAggregateGroupRow struct {
+	ID                     int64  `json:"id"`
+	DisplayOrder           int    `json:"displayOrder"`
+	Title                  string `json:"title"`
+	OrderedQuantityScaled  int64  `json:"orderedQuantityScaled"`
+	OrderedUoM             string `json:"orderedUom"`
+	ShowChildrenToCustomer bool   `json:"showChildrenToCustomer"`
+	TotalMinor             int64  `json:"totalMinor"`
+	// DisplayUnitPriceMinor is round_half_away(TotalMinor/qty). Null when the
+	// exact value cannot be represented safely; the total stays authoritative.
+	DisplayUnitPriceMinor *int64 `json:"displayUnitPriceMinor"`
+}
+
+// PurchaseOrderAggregateGroupInput is one submitted group. Its position in the
+// request slice is the handle items reference through AggregateGroupIndex;
+// display order is derived from the first child's line number by the server.
+type PurchaseOrderAggregateGroupInput struct {
+	Title                  string `json:"title"`
+	OrderedQuantityScaled  int64  `json:"orderedQuantityScaled"`
+	OrderedUoM             string `json:"orderedUom"`
+	ShowChildrenToCustomer bool   `json:"showChildrenToCustomer"`
 }
 
 // PurchaseOrderRow is one PO draft or saved record. Dates are plain
@@ -274,45 +338,49 @@ type PurchaseOrderItemRow struct {
 // the second is what the issued quotation printed. A PO never overwrites the
 // evidence it is checked against.
 type PurchaseOrderRow struct {
-	PODate                 *string                `json:"poDate"`
-	RequestedDeliveryDate  *string                `json:"requestedDeliveryDate"`
-	UUID                   string                 `json:"uuid"`
-	State                  string                 `json:"state"`
-	QuoteNumber            string                 `json:"quoteNumber"`
-	CustomerName           string                 `json:"customerName"`
-	BillingAddress         string                 `json:"billingAddress"`
-	DeliveryAddress        string                 `json:"deliveryAddress"`
-	ShipToCode             string                 `json:"shipToCode"`
-	ContactEmail           string                 `json:"contactEmail"`
-	ContactPhone           string                 `json:"contactPhone"`
-	PONumber               string                 `json:"poNumber"`
-	ReceivedDate           string                 `json:"receivedDate"`
-	Incoterms              string                 `json:"incoterms"`
-	Currency               string                 `json:"currency"`
-	TaxZone                string                 `json:"taxZone,omitempty"`
-	TaxType                string                 `json:"taxType,omitempty"`
-	ServiceCategory        string                 `json:"serviceCategory,omitempty"`
-	TaxCategory            string                 `json:"taxCategory,omitempty"`
-	AdjustmentReason       string                 `json:"adjustmentReason"`
-	CreatedAt              string                 `json:"createdAt"`
-	UpdatedAt              string                 `json:"updatedAt"`
-	Items                  []PurchaseOrderItemRow `json:"items"`
-	ID                     int64                  `json:"id"`
-	QuotationID            int64                  `json:"quotationId"`
-	SourceRevision         int16                  `json:"sourceRevision,omitempty"`
-	CustomerID             int64                  `json:"customerId"`
-	PaymentTerms           string                 `json:"paymentTerms"`
-	DiscountPercent        int16                  `json:"discountPercent"`
-	PpnBps                 int16                  `json:"ppnBps"`
-	SubtotalMinor          int64                  `json:"subtotalMinor"`
-	DiscountMinor          int64                  `json:"discountMinor"`
-	PpnMinor               int64                  `json:"ppnMinor"`
-	AdjustmentMinor        int64                  `json:"adjustmentMinor"`
-	GrandTotalMinor        int64                  `json:"grandTotalMinor"`
-	PrintedSubtotalMinor   int64                  `json:"printedSubtotalMinor"`
-	PrintedDiscountMinor   int64                  `json:"printedDiscountMinor"`
-	PrintedPpnMinor        int64                  `json:"printedPpnMinor"`
-	PrintedGrandTotalMinor int64                  `json:"printedGrandTotalMinor"`
+	PODate                *string                `json:"poDate"`
+	RequestedDeliveryDate *string                `json:"requestedDeliveryDate"`
+	UUID                  string                 `json:"uuid"`
+	State                 string                 `json:"state"`
+	QuoteNumber           string                 `json:"quoteNumber"`
+	CustomerName          string                 `json:"customerName"`
+	BillingAddress        string                 `json:"billingAddress"`
+	DeliveryAddress       string                 `json:"deliveryAddress"`
+	ShipToCode            string                 `json:"shipToCode"`
+	ContactEmail          string                 `json:"contactEmail"`
+	ContactPhone          string                 `json:"contactPhone"`
+	PONumber              string                 `json:"poNumber"`
+	ReceivedDate          string                 `json:"receivedDate"`
+	Incoterms             string                 `json:"incoterms"`
+	Currency              string                 `json:"currency"`
+	TaxZone               string                 `json:"taxZone,omitempty"`
+	TaxType               string                 `json:"taxType,omitempty"`
+	ServiceCategory       string                 `json:"serviceCategory,omitempty"`
+	TaxCategory           string                 `json:"taxCategory,omitempty"`
+	AdjustmentReason      string                 `json:"adjustmentReason"`
+	CreatedAt             string                 `json:"createdAt"`
+	UpdatedAt             string                 `json:"updatedAt"`
+	Items                 []PurchaseOrderItemRow `json:"items"`
+	// AggregateGroups are the record's PO-only presentation headers, ordered by
+	// display order. Absent on a record with no groups, so an old reader sees
+	// exactly the payload it always did.
+	AggregateGroups        []PurchaseOrderAggregateGroupRow `json:"aggregateGroups,omitempty"`
+	ID                     int64                            `json:"id"`
+	QuotationID            int64                            `json:"quotationId"`
+	SourceRevision         int16                            `json:"sourceRevision,omitempty"`
+	CustomerID             int64                            `json:"customerId"`
+	PaymentTerms           string                           `json:"paymentTerms"`
+	DiscountPercent        int16                            `json:"discountPercent"`
+	PpnBps                 int16                            `json:"ppnBps"`
+	SubtotalMinor          int64                            `json:"subtotalMinor"`
+	DiscountMinor          int64                            `json:"discountMinor"`
+	PpnMinor               int64                            `json:"ppnMinor"`
+	AdjustmentMinor        int64                            `json:"adjustmentMinor"`
+	GrandTotalMinor        int64                            `json:"grandTotalMinor"`
+	PrintedSubtotalMinor   int64                            `json:"printedSubtotalMinor"`
+	PrintedDiscountMinor   int64                            `json:"printedDiscountMinor"`
+	PrintedPpnMinor        int64                            `json:"printedPpnMinor"`
+	PrintedGrandTotalMinor int64                            `json:"printedGrandTotalMinor"`
 	// Finalization (#471). SavedAt/SavedBy are null on a draft; they are set
 	// exactly once by the draft -> saved transition. PdfAbsentConfirmed records
 	// the deliberate confirmation a save needs while no customer PDF exists.
@@ -506,8 +574,12 @@ type PurchaseOrderCreateItemRow struct {
 // the server from array order, so drafts always carry 1..n without gaps. A row
 // discount mirrors the quotation's: a flag plus a 0-100 percentage.
 type PurchaseOrderItemInput struct {
-	QuotationItemNo   *int     `json:"quotationItemNo"`
-	QuotationSubNo    *int     `json:"quotationSubNo"`
+	QuotationItemNo *int `json:"quotationItemNo"`
+	QuotationSubNo  *int `json:"quotationSubNo"`
+	// LineKind is quotation or extra (#655). It is omitempty on purpose: an
+	// absent value is the compatibility quotation, so a client that predates
+	// #655 keeps writing exactly the payload it always did.
+	LineKind          string   `json:"lineKind,omitempty"`
 	ID                *int64   `json:"id"`
 	ClientKey         *string  `json:"clientKey"`
 	Description       string   `json:"description"`
@@ -519,6 +591,10 @@ type PurchaseOrderItemInput struct {
 	GroupKey          string   `json:"groupKey"`
 	ParentDescription string   `json:"parentDescription"`
 	DescriptionLines  []string `json:"descriptionLines"`
+	// AggregateGroupIndex is the 1-based position of the line's group in the
+	// request's AggregateGroups; 0 or absent means ungrouped. It is an input
+	// handle only and is never persisted.
+	AggregateGroupIndex int `json:"aggregateGroupIndex,omitempty"`
 }
 
 // PurchaseOrderEditableRequest is the editable payload every replace-style
@@ -539,11 +615,18 @@ type PurchaseOrderEditableRequest struct {
 	Incoterms             string                   `json:"incoterms"`
 	AdjustmentReason      string                   `json:"adjustmentReason"`
 	Items                 []PurchaseOrderItemInput `json:"items"`
-	PaymentTerms          string                   `json:"paymentTerms"`
-	DiscountPercent       int16                    `json:"discountPercent"`
-	AdjustmentMinor       int64                    `json:"adjustmentMinor"`
-	ExpectedVersion       int64                    `json:"expectedVersion"`
-	Overwrite             bool                     `json:"overwrite"`
+	// AggregateGroups is the submitted aggregate presentation. It has no
+	// omitempty on purpose: a client that understands groups always sends an
+	// array (empty when the record has none), while a client that predates
+	// #654 sends nothing and decodes to nil. The server refuses nil on a
+	// grouped record (409 po_client_outdated) instead of silently ungrouping
+	// it, so nil and empty are different contracts, not the same one.
+	AggregateGroups []PurchaseOrderAggregateGroupInput `json:"aggregateGroups"`
+	PaymentTerms    string                             `json:"paymentTerms"`
+	DiscountPercent int16                              `json:"discountPercent"`
+	AdjustmentMinor int64                              `json:"adjustmentMinor"`
+	ExpectedVersion int64                              `json:"expectedVersion"`
+	Overwrite       bool                               `json:"overwrite"`
 
 	// BusinessCategory is the #628 reporting category. It is editable on a
 	// draft and on a saved-record correction; a source repair preserves the
@@ -787,8 +870,12 @@ type PurchaseOrderCorrectionAttachmentRow struct {
 
 // PurchaseOrderCorrectionItemRow is one line of a retained snapshot.
 type PurchaseOrderCorrectionItemRow struct {
-	QuotationItemNo   *int     `json:"quotationItemNo"`
-	QuotationSubNo    *int     `json:"quotationSubNo"`
+	QuotationItemNo *int `json:"quotationItemNo"`
+	QuotationSubNo  *int `json:"quotationSubNo"`
+	// LineKind is the kind the snapshot line carried (#655). A snapshot taken
+	// before the column existed reads quotation, so history can always tell an
+	// intentional extra from a legacy free line.
+	LineKind          string   `json:"lineKind"`
 	LineNumber        int      `json:"lineNumber"`
 	Description       string   `json:"description"`
 	QuantityScaled    int64    `json:"quantityScaled"`
@@ -802,6 +889,21 @@ type PurchaseOrderCorrectionItemRow struct {
 	GroupKey          string   `json:"groupKey"`
 	ParentDescription string   `json:"parentDescription"`
 	DescriptionLines  []string `json:"descriptionLines"`
+	// AggregateGroupOrder is the snapshot group's display order this line
+	// belonged to; 0 means ungrouped. Group ids churn across saves, so the
+	// snapshot keys membership by the derived order instead.
+	AggregateGroupOrder int `json:"aggregateGroupOrder,omitempty"`
+}
+
+// PurchaseOrderCorrectionGroupRow is one aggregate header frozen into a
+// retained snapshot. The snapshot total is derived from the snapshot lines with
+// the same display order and is never stored.
+type PurchaseOrderCorrectionGroupRow struct {
+	DisplayOrder           int    `json:"displayOrder"`
+	Title                  string `json:"title"`
+	OrderedQuantityScaled  int64  `json:"orderedQuantityScaled"`
+	OrderedUoM             string `json:"orderedUom"`
+	ShowChildrenToCustomer bool   `json:"showChildrenToCustomer"`
 }
 
 // PurchaseOrderCorrectionRow is one immutable snapshot in a record's history:
@@ -846,20 +948,23 @@ type PurchaseOrderCorrectionRow struct {
 	ReceivedDate     string                           `json:"receivedDate"`
 	CreatedAt        string                           `json:"createdAt"`
 	Items            []PurchaseOrderCorrectionItemRow `json:"items"`
-	ID               int64                            `json:"id"`
-	QuotationID      int64                            `json:"quotationId"`
-	SourceRevision   int16                            `json:"sourceRevision"`
-	CustomerID       int64                            `json:"customerId"`
-	PreviousVersion  int64                            `json:"previousVersion"`
-	ResultingVersion int64                            `json:"resultingVersion"`
-	ActorID          int64                            `json:"actorId"`
-	DiscountPercent  int16                            `json:"discountPercent"`
-	SubtotalMinor    int64                            `json:"subtotalMinor"`
-	DiscountMinor    int64                            `json:"discountMinor"`
-	PpnBps           int16                            `json:"ppnBps"`
-	PpnMinor         int64                            `json:"ppnMinor"`
-	AdjustmentMinor  int64                            `json:"adjustmentMinor"`
-	GrandTotalMinor  int64                            `json:"grandTotalMinor"`
+	// Groups are the aggregate headers the snapshot record carried, ordered by
+	// display order. Absent on a snapshot taken before #654.
+	Groups           []PurchaseOrderCorrectionGroupRow `json:"groups,omitempty"`
+	ID               int64                             `json:"id"`
+	QuotationID      int64                             `json:"quotationId"`
+	SourceRevision   int16                             `json:"sourceRevision"`
+	CustomerID       int64                             `json:"customerId"`
+	PreviousVersion  int64                             `json:"previousVersion"`
+	ResultingVersion int64                             `json:"resultingVersion"`
+	ActorID          int64                             `json:"actorId"`
+	DiscountPercent  int16                             `json:"discountPercent"`
+	SubtotalMinor    int64                             `json:"subtotalMinor"`
+	DiscountMinor    int64                             `json:"discountMinor"`
+	PpnBps           int16                             `json:"ppnBps"`
+	PpnMinor         int64                             `json:"ppnMinor"`
+	AdjustmentMinor  int64                             `json:"adjustmentMinor"`
+	GrandTotalMinor  int64                             `json:"grandTotalMinor"`
 }
 
 // QuotationItemRow mirrors one internal line. PDF bytes are never included.
@@ -990,6 +1095,22 @@ type QuotationDetail struct {
 	DisplayLeadTime string `json:"displayLeadTime"`
 	Revision        int16  `json:"revision"`
 	HasPDF          bool   `json:"hasPdf"`
+	// Closure and expiry (#656). Closure is quotation-level, so every revision
+	// of a closed quotation reads closed. ValidUntil follows the latest issued
+	// revision even when an older revision is requested; ExpiredUnclosed is
+	// false while closed.
+	Closed          bool    `json:"closed"`
+	ClosedAt        *string `json:"closedAt"`
+	ClosedReason    string  `json:"closedReason"`
+	ClosedByName    string  `json:"closedByName"`
+	ValidUntil      *string `json:"validUntil"`
+	ExpiredUnclosed bool    `json:"expiredUnclosed"`
+}
+
+// QuotationCloseRequest carries the mandatory reason for closing a quotation
+// (#656). The bound is 500 characters; the store trims and validates it again.
+type QuotationCloseRequest struct {
+	Reason string `json:"reason"`
 }
 
 // AttachDocumentRequest uploads locally rendered PDF bytes for a revision.

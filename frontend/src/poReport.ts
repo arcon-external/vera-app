@@ -30,6 +30,12 @@ export interface PurchaseOrderReportPopulation {
   availableCurrencies: string[];
   hasUnassigned: boolean;
   sourceMissingPoCount: number;
+  /** POs no allocation could place (#648). Typed; not rendered today. */
+  unallocatedPoCount: number;
+  /** POs still served by the legacy allocation fallback (#648). */
+  legacyFallbackPoCount: number;
+  /** Quotations whose validity lapsed without an explicit close (#648). */
+  expiredUnclosedQuotationCount: number;
 }
 
 export interface PurchaseOrderReportMetrics {
@@ -37,6 +43,13 @@ export interface PurchaseOrderReportMetrics {
   amountMinor: number;
   costedMinor: number;
   uncostedMinor: number;
+  /**
+   * Pass-through expense (#655). It is real amount on the purchase order but
+   * carries no supplier cost and no margin, so it is its own bucket:
+   * `amount = costed + uncosted + extra`, and coverage is
+   * `costed / (amount - extra)`.
+   */
+  extraExpenseMinor: number;
   capitalMinor: number;
   marginMinor: number;
   /** Null when capital is zero; 0 is a real measured percentage. */
@@ -52,12 +65,21 @@ export interface PurchaseOrderReportMetrics {
 export interface PurchaseOrderReportPipeline {
   unsoldAmountMinor: number;
   unsoldMarginMinor: number;
+  /**
+   * The bought share of the quoted quantity (#648), basis points:
+   * `bought / quoted * 10000`, 0 when the quoted quantity is 0. It is a
+   * quantity-coverage ratio, deliberately separate from cost coverage and
+   * never folded into margin; it may exceed 10000 when the customer bought
+   * more than the quotation offered.
+   */
+  fulfillmentBps: number;
 }
 
 /**
  * Realized commercial variance (#653). It is a comparison, not revenue: open
  * Unsold is mirrored for the screen but excluded from the net. Closed loss is
- * the zero placeholder until #656 implements quotation closure.
+ * the unbought remainder of an explicitly closed quotation (#656); it is
+ * subtracted from the net, and reopening the quotation restores Unsold.
  */
 export interface PurchaseOrderReportVariance {
   quantityExtraIncomeAmountMinor: number;
@@ -258,12 +280,58 @@ function nullableRatio(value: number | null | undefined): number | null {
   return typeof value === "number" ? value : null;
 }
 
+/**
+ * The pass-through bucket (#655), declared on the generated model. The numeric
+ * guard stays because the desktop and the API deploy separately: a payload from
+ * a server older than #655 has no extra line kind at all, so an absent value is
+ * a real zero rather than an unknown.
+ */
+function readExtraExpenseMinor(metrics: poreport.Metrics): number {
+  const value = metrics.extraExpenseMinor;
+  return typeof value === "number" && Number.isFinite(value) ? value : 0;
+}
+
+/**
+ * The population counters added with #648. The generated Wails model predates
+ * them until the bindings are regenerated, so they are read by name. An API
+ * older than #648 has no such count, so it reads as zero; the fields are typed
+ * for the report contract and not rendered today, so that fallback is never
+ * presented as a measured figure.
+ */
+function readPopulationCount(
+  population: poreport.Population,
+  field:
+    | "unallocatedPoCount"
+    | "legacyFallbackPoCount"
+    | "expiredUnclosedQuotationCount"
+): number {
+  const value = (population as unknown as Record<string, unknown>)[field];
+  return typeof value === "number" && Number.isFinite(value) ? value : 0;
+}
+
+/**
+ * Fulfillment coverage (#648): the bought share of the quoted quantity, basis
+ * points, with 0 meaning "nothing quoted" exactly as the server defines it. It
+ * is a pipeline ratio, never cost coverage and never margin. The generated
+ * model predates the field until the bindings are regenerated; a pre-#648 API
+ * omits it, and 0 is the same fallback the rest of the pipeline uses.
+ */
+function readFulfillmentBps(
+  pipeline: poreport.PipelineSummary | null | undefined
+): number {
+  const value = (
+    pipeline as { fulfillmentBps?: unknown } | null | undefined
+  )?.fulfillmentBps;
+  return typeof value === "number" && Number.isFinite(value) ? value : 0;
+}
+
 function normalizeMetrics(metrics: poreport.Metrics): PurchaseOrderReportMetrics {
   return {
     poCount: metrics.poCount,
     amountMinor: metrics.amountMinor,
     costedMinor: metrics.costedMinor,
     uncostedMinor: metrics.uncostedMinor,
+    extraExpenseMinor: readExtraExpenseMinor(metrics),
     capitalMinor: metrics.capitalMinor,
     marginMinor: metrics.marginMinor,
     marginBps: nullableRatio(metrics.marginBps),
@@ -509,11 +577,24 @@ export function normalizePurchaseOrderReport(input: poreport.Report): PurchaseOr
       availableCurrencies: [...input.population.availableCurrencies],
       hasUnassigned: input.population.hasUnassigned,
       sourceMissingPoCount: input.population.sourceMissingPoCount,
+      unallocatedPoCount: readPopulationCount(
+        input.population,
+        "unallocatedPoCount"
+      ),
+      legacyFallbackPoCount: readPopulationCount(
+        input.population,
+        "legacyFallbackPoCount"
+      ),
+      expiredUnclosedQuotationCount: readPopulationCount(
+        input.population,
+        "expiredUnclosedQuotationCount"
+      ),
     },
     totals: normalizeMetrics(input.totals),
     pipeline: {
       unsoldAmountMinor: input.pipeline?.unsoldAmountMinor ?? 0,
       unsoldMarginMinor: input.pipeline?.unsoldMarginMinor ?? 0,
+      fulfillmentBps: readFulfillmentBps(input.pipeline),
     },
     variance: {
       quantityExtraIncomeAmountMinor:

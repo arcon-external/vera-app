@@ -6,6 +6,7 @@ import {
   buildPOListQuery,
   canOpenRow,
   customerCellLabel,
+  formatReceivedDate,
   initialPOListState,
   initialPOListStateFor,
   modeState,
@@ -117,44 +118,6 @@ function SourceMissingBadge() {
       Source missing
     </span>
   );
-}
-
-const RECEIVED_MONTHS = [
-  "Jan",
-  "Feb",
-  "Mar",
-  "Apr",
-  "May",
-  "Jun",
-  "Jul",
-  "Aug",
-  "Sep",
-  "Oct",
-  "Nov",
-  "Dec",
-] as const;
-
-/**
- * Ticket 03: the docket's received date. A real YYYY-MM-DD calendar date
- * reads `2 Oct 2026`; anything else (blank, unparsable) renders as-is so a
- * missing date is never invented. Exported for the list suite.
- */
-export function formatReceivedDate(raw: string): string {
-  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(raw.trim());
-  if (match === null) return raw;
-  const year = Number(match[1]);
-  const month = Number(match[2]);
-  const day = Number(match[3]);
-  if (month < 1 || month > 12 || day < 1 || day > 31) return raw;
-  const date = new Date(Date.UTC(year, month - 1, day));
-  if (
-    date.getUTCFullYear() !== year ||
-    date.getUTCMonth() !== month - 1 ||
-    date.getUTCDate() !== day
-  ) {
-    return raw;
-  }
-  return `${day} ${RECEIVED_MONTHS[month - 1]} ${year}`;
 }
 
 /**

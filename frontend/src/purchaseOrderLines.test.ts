@@ -37,9 +37,11 @@ function line(overrides: Partial<PurchaseOrderLine> = {}): PurchaseOrderLine {
     discountPercent: "0",
     quotationItemNo: null,
     quotationSubNo: null,
+    lineKind: "quotation",
     groupKey: "",
     parentDescription: "",
     descriptionLines: [],
+    aggregateKey: null,
     ...overrides,
   };
 }
@@ -257,5 +259,66 @@ describe("PO line transforms (#573)", () => {
     expect(patched[0].parentDescription).toBe("New title");
     expect(patched[1].parentDescription).toBe("New title");
     expect(patched[2].parentDescription).toBe("");
+  });
+});
+
+// Issue #654: an aggregate wraps display groups, so every line-creation path
+// must carry the membership of the group it joins, and grouping must never
+// split one split package.
+describe("aggregate membership in the display grouping (#654)", () => {
+  it("keeps a split package whole and its children at depth 1/2/3", () => {
+    const lines = [
+      line({
+        key: 1,
+        groupKey: "q:2",
+        quotationItemNo: 2,
+        quotationSubNo: 1,
+        parentDescription: "Panel package",
+        aggregateKey: 6,
+        descriptionLines: ["Cable tray", "Busbar"],
+      }),
+      line({ key: 2, description: "Plain", aggregateKey: null }),
+      line({
+        key: 3,
+        groupKey: "q:2",
+        quotationItemNo: 2,
+        quotationSubNo: 2,
+        parentDescription: "Panel package",
+        aggregateKey: 6,
+      }),
+    ];
+    const groups = groupPurchaseOrderLines(lines);
+    expect(groups.map((group) => group.lines.map((row) => row.key))).toEqual([[1, 3], [2]]);
+    const items = editorItemsFromGroups(groups, USD);
+    // Depth 2: the package is one parent presentation of its priced parts.
+    expect(items[0].subItems.map((sub) => sub.id)).toEqual([1, 3]);
+    // Depth 3: the first part keeps its sub-sub description lines.
+    expect(items[0].subItems[0].bullets).toEqual(["Cable tray", "Busbar"]);
+    // Depth 1: the plain line stays its own item with its own bullets.
+    expect(items[1].description).toBe("Plain");
+    expect(items[1].subItems).toEqual([]);
+  });
+
+  it("copies the parent's aggregate membership onto a split sibling", () => {
+    const lines = [line({ key: 1, description: "Panel", aggregateKey: 7 })];
+    const sibling = line({ key: 2, clientKey: "client:2", description: "Part" });
+    const split = splitPlainLine(lines, 1, "g:panel", sibling);
+    expect(split.map((row) => [row.key, row.aggregateKey])).toEqual([
+      [1, 7],
+      [2, 7],
+    ]);
+  });
+
+  it("copies the group's aggregate membership onto an added sub-item", () => {
+    const lines = [
+      line({ key: 1, groupKey: "g:panel", parentDescription: "Panel", aggregateKey: 7 }),
+      line({ key: 2, groupKey: "g:panel", parentDescription: "Panel", aggregateKey: 7 }),
+    ];
+    const added = addSubLine(lines, "g:panel", line({ key: 3, clientKey: "client:3" }));
+    expect(added.map((row) => [row.key, row.aggregateKey])).toEqual([
+      [1, 7],
+      [2, 7],
+      [3, 7],
+    ]);
   });
 });

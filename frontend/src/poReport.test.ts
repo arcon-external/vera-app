@@ -27,20 +27,26 @@ function reportFixture(): poreport.Report {
       availableCurrencies: ["IDR", "USD"],
       hasUnassigned: true,
       sourceMissingPoCount: 0,
+      unallocatedPoCount: 2,
+      legacyFallbackPoCount: 1,
+      expiredUnclosedQuotationCount: 3,
     },
     totals: {
       poCount: 3,
-      amountMinor: 900,
+      amountMinor: 1050,
       costedMinor: 600,
       uncostedMinor: 300,
+      extraExpenseMinor: 150,
       capitalMinor: 600,
       marginMinor: 0,
       marginBps: 0,
+      // Costed / (amount - extra) = 600 / 900.
       coverageBps: 6667,
     },
     pipeline: {
       unsoldAmountMinor: 0,
       unsoldMarginMinor: 0,
+      fulfillmentBps: 6000,
     },
     variance: {
       quantityExtraIncomeAmountMinor: 0,
@@ -62,9 +68,10 @@ function reportFixture(): poreport.Report {
         partial: false,
         inProgress: false,
         poCount: 1,
-        amountMinor: 300,
+        amountMinor: 340,
         costedMinor: 200,
         uncostedMinor: 100,
+        extraExpenseMinor: 40,
         capitalMinor: 200,
         marginMinor: 0,
         marginBps: 0,
@@ -76,9 +83,10 @@ function reportFixture(): poreport.Report {
         businessCategory: "FM",
         label: "Facility Management",
         poCount: 1,
-        amountMinor: 300,
+        amountMinor: 340,
         costedMinor: 200,
         uncostedMinor: 100,
+        extraExpenseMinor: 40,
         capitalMinor: 200,
         marginMinor: 0,
         marginBps: 0,
@@ -187,6 +195,57 @@ describe("normalizePurchaseOrderReport (issue #629)", () => {
     expect(report.projection.monthly.buckets[0].marginBps).toBeNull();
   });
 
+  it("copies extra expense as its own pass-through bucket (issue #655)", () => {    const report = normalizePurchaseOrderReport(reportFixture());
+
+    expect(report.totals.extraExpenseMinor).toBe(150);
+    expect(report.periods[0].extraExpenseMinor).toBe(40);
+    expect(report.categories[0].extraExpenseMinor).toBe(40);
+    // The extra is neither costed nor uncosted: it is its own bucket, so the
+    // amount identity only foots when it is named separately.
+    expect(report.totals.amountMinor).toBe(
+      report.totals.costedMinor +
+        report.totals.uncostedMinor +
+        report.totals.extraExpenseMinor
+    );
+  });
+
+  it("reads an older server's absent extra expense as zero, never a nonzero stand-in (#655)", () => {
+    // The generated model declares the field; the desktop and the API deploy
+    // separately, so a server older than #655 omits it entirely.
+    const input = reportFixture();
+    const omitExtraExpense = (metrics: object): void => {
+      delete (metrics as { extraExpenseMinor?: number }).extraExpenseMinor;
+    };
+    omitExtraExpense(input.totals);
+    omitExtraExpense(input.periods[0]);
+    omitExtraExpense(input.categories[0]);
+
+    const report = normalizePurchaseOrderReport(input);
+
+    expect(report.totals.extraExpenseMinor).toBe(0);
+    expect(report.periods[0].extraExpenseMinor).toBe(0);
+    expect(report.categories[0].extraExpenseMinor).toBe(0);
+  });
+
+  it("copies fulfillment coverage and the population counters (#648)", () => {
+    const report = normalizePurchaseOrderReport(reportFixture());
+
+    expect(report.pipeline.fulfillmentBps).toBe(6000);
+    expect(report.population.unallocatedPoCount).toBe(2);
+    expect(report.population.legacyFallbackPoCount).toBe(1);
+    expect(report.population.expiredUnclosedQuotationCount).toBe(3);
+  });
+
+  it("reads an absent fulfillment ratio as zero, matching the pipeline fallbacks (#648)", () => {
+    const input = reportFixture();
+    delete (input.pipeline as { fulfillmentBps?: number }).fulfillmentBps;
+
+    const report = normalizePurchaseOrderReport(input);
+
+    expect(report.pipeline.fulfillmentBps).toBe(0);
+    expect(report.pipeline.unsoldAmountMinor).toBe(0);
+  });
+
   it("preserves every field, keeps an absent reason absent, and serializes faithfully", () => {
     const input = reportFixture();
     const report = normalizePurchaseOrderReport(input);
@@ -290,6 +349,7 @@ describe("monthSummary normalization (issue #641)", () => {
         amountMinor: 500,
         costedMinor: 450,
         uncostedMinor: 50,
+        extraExpenseMinor: 25,
         capitalMinor: 400,
         marginMinor: 50,
         marginBps: 1250,
@@ -324,6 +384,7 @@ describe("monthSummary normalization (issue #641)", () => {
         amountMinor: 500,
         costedMinor: 450,
         uncostedMinor: 50,
+        extraExpenseMinor: 25,
         capitalMinor: 400,
         marginMinor: 50,
         marginBps: 1250,

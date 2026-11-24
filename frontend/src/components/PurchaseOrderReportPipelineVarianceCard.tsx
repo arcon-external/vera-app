@@ -1,6 +1,7 @@
 import type { CurrencyInfo } from "../format";
 import { formatMoney } from "../format";
 import type { PurchaseOrderReportData } from "../poReport";
+import { formatReportBps } from "../poReportPage";
 import { Card } from "./ui";
 
 /**
@@ -8,8 +9,9 @@ import { Card } from "./ui";
  *
  * Pipeline is open Unsold, still orderable, never added to Actual and never a
  * loss. Realized Variance is the commercial comparison against the quotation;
- * open Unsold is shown beside it but excluded from the net. Closed loss is a
- * zero placeholder until #656 implements quotation closure.
+ * open Unsold is shown beside it but excluded from the net. Closed loss is the
+ * unbought remainder of an explicitly closed quotation (#656): it is
+ * subtracted from the net, and reopening restores Unsold.
  */
 export interface PurchaseOrderReportPipelineVarianceCardsProps {
   report: PurchaseOrderReportData;
@@ -67,6 +69,10 @@ export function PurchaseOrderReportPipelineVarianceCards({
         <p className="mt-1.5 text-small leading-relaxed text-ink-500">
           Unsold is not a loss and is not added to Actual.
         </p>
+        <p className="mt-1 text-small leading-relaxed text-ink-500">
+          Fulfillment is the bought share of the quoted quantity: its own
+          ratio, not cost coverage and never part of margin.
+        </p>
         <dl className="mt-3 space-y-1.5">
           <AmountRow
             label="Unsold amount"
@@ -76,6 +82,10 @@ export function PurchaseOrderReportPipelineVarianceCards({
             label="Unsold margin"
             value={money(currency, pipeline.unsoldMarginMinor)}
             negative={pipeline.unsoldMarginMinor < 0}
+          />
+          <AmountRow
+            label="Fulfillment"
+            value={formatReportBps(pipeline.fulfillmentBps)}
           />
         </dl>
       </Card>

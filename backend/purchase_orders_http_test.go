@@ -360,8 +360,10 @@ func TestPurchaseOrderBindingsModelCarriesEveryField(t *testing.T) {
 	}{
 		{"PurchaseOrderDTO", PurchaseOrderDTO{}},
 		{"PurchaseOrderItemDTO", PurchaseOrderItemDTO{}},
+		{"PurchaseOrderAggregateGroupDTO", PurchaseOrderAggregateGroupDTO{}},
 		{"PurchaseOrderCreateInput", PurchaseOrderCreateInput{}},
 		{"PurchaseOrderItemInput", PurchaseOrderItemInput{}},
+		{"PurchaseOrderAggregateGroupInput", PurchaseOrderAggregateGroupInput{}},
 		{"PurchaseOrderUpdateInput", PurchaseOrderUpdateInput{}},
 		{"PurchaseOrderFinalizeInput", PurchaseOrderFinalizeInput{}},
 		{"PurchaseOrderWriteResult", PurchaseOrderWriteResult{}},
@@ -369,6 +371,7 @@ func TestPurchaseOrderBindingsModelCarriesEveryField(t *testing.T) {
 		{"PurchaseOrderCorrectionInput", PurchaseOrderCorrectionInput{}},
 		{"PurchaseOrderCorrectionDTO", PurchaseOrderCorrectionDTO{}},
 		{"PurchaseOrderCorrectionItemDTO", PurchaseOrderCorrectionItemDTO{}},
+		{"PurchaseOrderCorrectionGroupDTO", PurchaseOrderCorrectionGroupDTO{}},
 		{"PurchaseOrderCorrectionAttachmentDTO", PurchaseOrderCorrectionAttachmentDTO{}},
 	}
 	for _, target := range targets {
@@ -408,16 +411,23 @@ func TestPurchaseOrderBindingsModelCarriesEveryField(t *testing.T) {
 // margin, PPH23 and profit must never appear on any PO surface a customer
 // comparison could read. A field added with one of those names fails here.
 func TestPurchaseOrderSurfacesCarryNoInternalEconomics(t *testing.T) {
-	forbidden := []string{"cost", "margin", "pph23", "profit", "nett"}
+	forbidden := []string{"cost", "margin", "pph23", "profit", "nett", "variance", "supplier"}
 	surfaces := []reflect.Type{
 		reflect.TypeOf(store.PurchaseOrder{}),
 		reflect.TypeOf(store.PurchaseOrderItem{}),
 		reflect.TypeOf(store.PurchaseOrderCalcInput{}),
 		reflect.TypeOf(store.PurchaseOrderCalc{}),
+		reflect.TypeOf(store.PurchaseOrderAggregateGroup{}),
 		reflect.TypeOf(apicontract.PurchaseOrderRow{}),
 		reflect.TypeOf(apicontract.PurchaseOrderItemRow{}),
+		reflect.TypeOf(apicontract.PurchaseOrderItemInput{}),
+		reflect.TypeOf(apicontract.PurchaseOrderAggregateGroupRow{}),
+		reflect.TypeOf(apicontract.PurchaseOrderCorrectionGroupRow{}),
+		reflect.TypeOf(apicontract.PurchaseOrderCorrectionItemRow{}),
 		reflect.TypeOf(PurchaseOrderDTO{}),
 		reflect.TypeOf(PurchaseOrderItemDTO{}),
+		reflect.TypeOf(PurchaseOrderAggregateGroupDTO{}),
+		reflect.TypeOf(PurchaseOrderCorrectionGroupDTO{}),
 		reflect.TypeOf(PurchaseOrderCorrectionDTO{}),
 		reflect.TypeOf(PurchaseOrderCorrectionItemDTO{}),
 		reflect.TypeOf(PurchaseOrderConflictDTO{}),
@@ -609,5 +619,267 @@ func TestGetPurchaseOrderHistoryMapsTheSnapshot(t *testing.T) {
 	}
 	if len(entry.Items) != 1 || entry.Items[0].LineNumber != 1 || entry.Items[0].NetMinor != 200 {
 		t.Errorf("items = %+v; want the retained line", entry.Items)
+	}
+}
+
+// #654: an aggregate group is a presentation header over existing PO lines.
+// The desktop wrapper must send the submitted groups and per-line index
+// unchanged, and map the server's derived total and per-line membership back,
+// or the editor would save one layout and reopen another.
+func TestUpdatePurchaseOrderDraftCarriesAggregateGroupsAndMapsThemBack(t *testing.T) {
+	stubAPIClient(t, func(writer http.ResponseWriter, request *http.Request) {
+		if request.Method != http.MethodPut || request.URL.Path != "/v1/purchase-orders/7" {
+			t.Errorf("request = %s %s; want PUT /v1/purchase-orders/7", request.Method, request.URL.Path)
+		}
+		var body map[string]any
+		if err := json.NewDecoder(request.Body).Decode(&body); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		groups, ok := body["aggregateGroups"].([]any)
+		if !ok || len(groups) != 1 {
+			t.Fatalf("aggregateGroups = %v; want one submitted group", body["aggregateGroups"])
+		}
+		group, _ := groups[0].(map[string]any)
+		if group["title"] != "Combined items" ||
+			group["orderedQuantityScaled"] != float64(10000) ||
+			group["orderedUom"] != "Lot" ||
+			group["showChildrenToCustomer"] != true {
+			t.Errorf("group payload = %v; want the submitted fields under their JSON names", group)
+		}
+		if _, exists := group["id"]; exists {
+			t.Errorf("group payload = %v; the desktop must not send a read-only id", group)
+		}
+		items, _ := body["items"].([]any)
+		if len(items) != 2 {
+			t.Fatalf("items = %d; want 2", len(items))
+		}
+		for index, raw := range items {
+			item, _ := raw.(map[string]any)
+			if item["aggregateGroupIndex"] != float64(1) {
+				t.Errorf("line %d aggregateGroupIndex = %v; want 1",
+					index+1, item["aggregateGroupIndex"])
+			}
+		}
+		_ = json.NewEncoder(writer).Encode(apicontract.PurchaseOrderRow{
+			ID: 7, State: "draft", Version: 4,
+			AggregateGroups: []apicontract.PurchaseOrderAggregateGroupRow{{
+				ID: 11, DisplayOrder: 1, Title: "Combined items",
+				OrderedQuantityScaled: 10000, OrderedUoM: "Lot",
+				ShowChildrenToCustomer: true, TotalMinor: 261000,
+				DisplayUnitPriceMinor: int64Pointer(261000),
+			}},
+			Items: []apicontract.PurchaseOrderItemRow{
+				{
+					LineNumber: 1, Description: "Widget", QuantityScaled: 20000,
+					UoM: "Lot", UnitPriceMinor: 108000, NetMinor: 216000,
+					AggregateGroupID: int64Pointer(11),
+				},
+				{
+					LineNumber: 2, Description: "Plain", QuantityScaled: 10000,
+					UoM: "Unit", UnitPriceMinor: 45000, NetMinor: 45000,
+					AggregateGroupID: int64Pointer(11),
+				},
+			},
+		})
+	})
+
+	result, err := newTestQuotation().UpdatePurchaseOrderDraft(PurchaseOrderUpdateInput{
+		ID: 7, ExpectedVersion: 3,
+		Items: []PurchaseOrderItemInput{
+			{Description: "Widget", QuantityScaled: 20000, UoM: "Lot",
+				UnitPriceMinor: 108000, AggregateGroupIndex: 1},
+			{Description: "Plain", QuantityScaled: 10000, UoM: "Unit",
+				UnitPriceMinor: 45000, AggregateGroupIndex: 1},
+		},
+		AggregateGroups: []PurchaseOrderAggregateGroupInput{{
+			Title: "Combined items", OrderedQuantityScaled: 10000,
+			OrderedUoM: "Lot", ShowChildrenToCustomer: true,
+		}},
+	})
+	if err != nil {
+		t.Fatalf("UpdatePurchaseOrderDraft failed: %v", err)
+	}
+	if result.Order == nil {
+		t.Fatalf("result = %+v; want the saved order", result)
+	}
+	order := result.Order
+	if len(order.AggregateGroups) != 1 {
+		t.Fatalf("mapped groups = %d; want 1", len(order.AggregateGroups))
+	}
+	group := order.AggregateGroups[0]
+	if group.ID != 11 || group.DisplayOrder != 1 || group.Title != "Combined items" ||
+		group.OrderedQuantityScaled != 10000 || group.OrderedUoM != "Lot" ||
+		!group.ShowChildrenToCustomer || group.TotalMinor != 261000 ||
+		group.DisplayUnitPriceMinor == nil || *group.DisplayUnitPriceMinor != 261000 {
+		t.Errorf("mapped group = %+v; want the derived header intact", group)
+	}
+	if len(order.Items) != 2 || order.Items[0].AggregateGroupID != 11 ||
+		order.Items[1].AggregateGroupID != 11 {
+		t.Errorf("mapped membership = %+v; want group 11 on both lines", order.Items)
+	}
+}
+
+// TestUpdatePurchaseOrderDraftKeepsNilAndEmptyAggregateGroupsDistinct is the
+// compatibility contract at the desktop boundary: nil means "this caller does
+// not model aggregates" and must reach the server as null, while an empty slice
+// is the deliberate ungroup and must reach it as []. Normalizing either into
+// the other would make one of the two paths impossible.
+func TestUpdatePurchaseOrderDraftKeepsNilAndEmptyAggregateGroupsDistinct(t *testing.T) {
+	var bodies []map[string]json.RawMessage
+	stubAPIClient(t, func(writer http.ResponseWriter, request *http.Request) {
+		var body map[string]json.RawMessage
+		if err := json.NewDecoder(request.Body).Decode(&body); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		bodies = append(bodies, body)
+		_ = json.NewEncoder(writer).Encode(apicontract.PurchaseOrderRow{ID: 7, State: "draft"})
+	})
+
+	q := newTestQuotation()
+	if _, err := q.UpdatePurchaseOrderDraft(PurchaseOrderUpdateInput{
+		ID: 7, ExpectedVersion: 1,
+	}); err != nil {
+		t.Fatalf("nil-group save failed: %v", err)
+	}
+	if _, err := q.UpdatePurchaseOrderDraft(PurchaseOrderUpdateInput{
+		ID: 7, ExpectedVersion: 2,
+		AggregateGroups: []PurchaseOrderAggregateGroupInput{},
+	}); err != nil {
+		t.Fatalf("empty-group save failed: %v", err)
+	}
+	if len(bodies) != 2 {
+		t.Fatalf("requests = %d; want 2", len(bodies))
+	}
+	legacy, present := bodies[0]["aggregateGroups"]
+	if !present {
+		t.Fatal("a nil group slice was dropped from the payload; the server cannot tell legacy from ungroup")
+	}
+	if string(legacy) != "null" {
+		t.Errorf("nil group slice = %s; want null (the legacy-client shape)", legacy)
+	}
+	deliberate, present := bodies[1]["aggregateGroups"]
+	if !present || string(deliberate) != "[]" {
+		t.Errorf("empty group slice = %s (present %v); want [] (the deliberate ungroup)",
+			deliberate, present)
+	}
+}
+
+// TestPurchaseOrderAggregateGroupSurfacesCarryNoInternalEconomics is Story 42
+// for #654: a group header is customer-facing presentation, so no cost, margin,
+// PPH, variance or supplier field may appear on it — on the wire, in the
+// snapshot, or in the desktop DTO. The JSON scan catches a field that a
+// reflection-only check would miss if it were renamed into a nested shape.
+func TestPurchaseOrderAggregateGroupSurfacesCarryNoInternalEconomics(t *testing.T) {
+	price := int64(261000)
+	wire := apicontract.PurchaseOrderRow{
+		ID: 7, State: "saved",
+		AggregateGroups: []apicontract.PurchaseOrderAggregateGroupRow{{
+			ID: 11, DisplayOrder: 1, Title: "Combined items",
+			OrderedQuantityScaled: 10000, OrderedUoM: "Lot",
+			TotalMinor: 261000, DisplayUnitPriceMinor: &price,
+		}},
+		Items: []apicontract.PurchaseOrderItemRow{{
+			LineNumber: 1, Description: "Widget", AggregateGroupID: int64Pointer(11),
+		}},
+	}
+	surfaces := map[string]any{
+		"PurchaseOrderRow": wire,
+		"PurchaseOrderDTO": mapPurchaseOrderDTO(wire),
+		"PurchaseOrderCorrectionRow": apicontract.PurchaseOrderCorrectionRow{
+			ID: 9,
+			Groups: []apicontract.PurchaseOrderCorrectionGroupRow{{
+				DisplayOrder: 1, Title: "Combined items",
+				OrderedQuantityScaled: 10000, OrderedUoM: "Lot",
+			}},
+		},
+	}
+	forbidden := []string{
+		"costunit", "costminor", "cost_unit", "marginminor", "margin",
+		"pph", "variance", "supplier", "profit", "nett",
+	}
+	for name, surface := range surfaces {
+		encoded, err := json.Marshal(surface)
+		if err != nil {
+			t.Fatalf("marshal %s: %v", name, err)
+		}
+		lower := strings.ToLower(string(encoded))
+		for _, word := range forbidden {
+			if strings.Contains(lower, word) {
+				t.Errorf("%s JSON contains %q: %s", name, word, encoded)
+			}
+		}
+	}
+}
+
+// TestPurchaseOrderAggregateWireNamesAreFrozen pins the #654 JSON names. A
+// round trip would still pass after a rename, because both sides would move
+// together; this asserts the keys themselves. It also pins the ungrouped
+// shapes: a record with no groups carries no aggregateGroups key, an ungrouped
+// line carries no aggregateGroupId, an index of zero is absent from an input
+// row, and the submitted request always carries the array (null when the
+// caller does not model groups) so the server can tell a legacy client from a
+// deliberate ungroup.
+func TestPurchaseOrderAggregateWireNamesAreFrozen(t *testing.T) {
+	price := int64(261000)
+	encoded, err := json.Marshal(apicontract.PurchaseOrderAggregateGroupRow{
+		ID: 1, DisplayOrder: 1, Title: "Combined items",
+		OrderedQuantityScaled: 10000, OrderedUoM: "Lot",
+		ShowChildrenToCustomer: true, TotalMinor: 261000,
+		DisplayUnitPriceMinor: &price,
+	})
+	if err != nil {
+		t.Fatalf("marshal group row: %v", err)
+	}
+	var group map[string]json.RawMessage
+	if err := json.Unmarshal(encoded, &group); err != nil {
+		t.Fatalf("decode group row: %v", err)
+	}
+	frozen := []string{
+		"id", "displayOrder", "title", "orderedQuantityScaled", "orderedUom",
+		"showChildrenToCustomer", "totalMinor", "displayUnitPriceMinor",
+	}
+	if len(group) != len(frozen) {
+		t.Errorf("group keys = %v; want exactly %v", group, frozen)
+	}
+	for _, key := range frozen {
+		if _, present := group[key]; !present {
+			t.Errorf("group JSON is missing the frozen key %q: %s", key, encoded)
+		}
+	}
+
+	encoded, err = json.Marshal(apicontract.PurchaseOrderItemRow{LineNumber: 1})
+	if err != nil {
+		t.Fatalf("marshal ungrouped line: %v", err)
+	}
+	if strings.Contains(string(encoded), "aggregateGroupId") {
+		t.Errorf("an ungrouped line carries a membership key: %s", encoded)
+	}
+	encoded, err = json.Marshal(apicontract.PurchaseOrderItemInput{Description: "Widget"})
+	if err != nil {
+		t.Fatalf("marshal ungrouped input: %v", err)
+	}
+	if strings.Contains(string(encoded), "aggregateGroupIndex") {
+		t.Errorf("an input row at index zero carries the handle: %s", encoded)
+	}
+
+	encoded, err = json.Marshal(apicontract.PurchaseOrderRow{ID: 7})
+	if err != nil {
+		t.Fatalf("marshal ungrouped record: %v", err)
+	}
+	if strings.Contains(string(encoded), "aggregateGroups") {
+		t.Errorf("a record with no groups carries the key: %s", encoded)
+	}
+
+	encoded, err = json.Marshal(apicontract.PurchaseOrderEditableRequest{})
+	if err != nil {
+		t.Fatalf("marshal empty editable request: %v", err)
+	}
+	var request map[string]json.RawMessage
+	if err := json.Unmarshal(encoded, &request); err != nil {
+		t.Fatalf("decode editable request: %v", err)
+	}
+	raw, present := request["aggregateGroups"]
+	if !present || string(raw) != "null" {
+		t.Errorf("request aggregateGroups = %s (present %v); want a null key", raw, present)
 	}
 }

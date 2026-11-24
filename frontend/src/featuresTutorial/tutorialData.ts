@@ -288,6 +288,11 @@ const TUTORIAL_ROW: POSourceQuotation = {
   savedPoCount: 0,
   draftPoCount: 0,
   legacyHeaderDiscount: false,
+  closed: false,
+  closedAt: null,
+  closedReason: "",
+  validUntil: null,
+  expiredUnclosed: false,
 };
 
 export const TUTORIAL_SELECTOR_AVAILABILITY: POSourceAvailability = {
@@ -296,6 +301,11 @@ export const TUTORIAL_SELECTOR_AVAILABILITY: POSourceAvailability = {
   latestRevision: 0,
   allBought: false,
   legacyHeaderDiscount: false,
+  closed: false,
+  closedAt: null,
+  closedReason: "",
+  validUntil: null,
+  expiredUnclosed: false,
   savedPoCount: 0,
   draftPoCount: 0,
   items: [

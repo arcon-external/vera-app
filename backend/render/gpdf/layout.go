@@ -612,6 +612,13 @@ type rowBlock struct {
 	subs   []subLine
 	height float64
 	kind   rowKind
+	// stripe is the row band, decided per item rather than per row: the
+	// template's tbody.item:nth-of-type(even) bands every item and its parts
+	// together. It follows the item's position in the document, not its
+	// number, because numbers are stable identity and may contain gaps after
+	// a removal (#648); parity of the number would band two adjacent items
+	// alike.
+	stripe bool
 }
 
 // rowKind selects how a row paints. A modular line contributes several blocks:
@@ -732,9 +739,9 @@ func (e *Engine) compose(in Input) ([]*page, error) {
 				// description-only continuation.
 				clip := tableClip(m, tableTop, bottom, pageFirst)
 				if cont {
-					e.drawTableRowCont(cur, m, clip, tableTop+used, rb, (rb.item.No-1)%2 == 1)
+					e.drawTableRowCont(cur, m, clip, tableTop+used, rb, rb.stripe)
 				} else {
-					e.drawTableRow(cur, m, clip, tableTop+used, rb, (rb.item.No-1)%2 == 1)
+					e.drawTableRow(cur, m, clip, tableTop+used, rb, rb.stripe)
 				}
 				used += rb.height
 				first++
@@ -761,14 +768,14 @@ func (e *Engine) compose(in Input) ([]*page, error) {
 				return nil, fmt.Errorf("layout: row %d cannot fit on an empty page", first+1)
 			}
 			frag := rowBlock{
-				item: rb.item, part: rb.part, kind: rb.kind,
+				item: rb.item, part: rb.part, kind: rb.kind, stripe: rb.stripe,
 				lines: rb.lines[:nl], subs: rb.subs[:ns], height: fh,
 			}
 			clip := tableClip(m, tableTop, bottom, pageFirst)
 			if cont {
-				e.drawTableRowCont(cur, m, clip, tableTop+used, frag, (rb.item.No-1)%2 == 1)
+				e.drawTableRowCont(cur, m, clip, tableTop+used, frag, rb.stripe)
 			} else {
-				e.drawTableRow(cur, m, clip, tableTop+used, frag, (rb.item.No-1)%2 == 1)
+				e.drawTableRow(cur, m, clip, tableTop+used, frag, rb.stripe)
 			}
 			used += fh
 			// What remains is description only: the head fragment
@@ -779,7 +786,7 @@ func (e *Engine) compose(in Input) ([]*page, error) {
 			remLines := rb.lines[nl:]
 			remSubs := rb.subs[ns:]
 			rows[first] = rowBlock{
-				item: rb.item, part: rb.part, kind: rb.kind,
+				item: rb.item, part: rb.part, kind: rb.kind, stripe: rb.stripe,
 				lines: remLines, subs: remSubs,
 				height: rowHeightWithMin(remLines, remSubs, remPadY, remMin),
 			}
@@ -1021,7 +1028,8 @@ func (e *Engine) measureRows(in Input, m metrics) []rowBlock {
 	parentPadY := px(parentPadTopPx) + px(parentPadBotPx)
 
 	out := make([]rowBlock, 0, len(in.Items))
-	for _, it := range in.Items {
+	for index, it := range in.Items {
+		stripe := index%2 == 1
 		lines := e.Wrap(it.DescMain, px(bodyPx), descW, false)
 		var subs []subLine
 		for _, s := range it.SubItems {
@@ -1038,14 +1046,14 @@ func (e *Engine) measureRows(in Input, m metrics) []rowBlock {
 			// and the main row keeps its own values, never a sum of the
 			// lines.
 			out = append(out, rowBlock{
-				item: it, kind: rowMain, lines: lines, subs: subs,
+				item: it, stripe: stripe, kind: rowMain, lines: lines, subs: subs,
 				height: rowHeightWithMin(lines, subs, padY, afterCellPx),
 			})
 			for _, dl := range it.DescLines {
 				plines := e.Wrap(dl.Text, px(bodyPx), scopeW, false)
 				part := &Part{SubNo: dl.No, Desc: dl.Text}
 				out = append(out, rowBlock{
-					item: it, part: part, kind: rowScope, lines: plines,
+					item: it, stripe: stripe, part: part, kind: rowScope, lines: plines,
 					height: rowHeight(plines, nil, subPadY),
 				})
 			}
@@ -1059,7 +1067,7 @@ func (e *Engine) measureRows(in Input, m metrics) []rowBlock {
 			// inside the description column.
 			titleLines := e.Wrap(it.DescMain, px(bodyPx), parentW, false)
 			out = append(out, rowBlock{
-				item: it, kind: rowParentTitle, lines: titleLines,
+				item: it, stripe: stripe, kind: rowParentTitle, lines: titleLines,
 				height: rowHeight(titleLines, nil, parentPadY),
 			})
 			for i := range it.Package.Parts {
@@ -1072,7 +1080,7 @@ func (e *Engine) measureRows(in Input, m metrics) []rowBlock {
 					}
 				}
 				out = append(out, rowBlock{
-					item: it, part: part, kind: rowPart, lines: plines, subs: bullets,
+					item: it, stripe: stripe, part: part, kind: rowPart, lines: plines, subs: bullets,
 					height: rowHeightWithMin(plines, bullets, subPadY, afterCellPx),
 				})
 			}
@@ -1081,7 +1089,7 @@ func (e *Engine) measureRows(in Input, m metrics) []rowBlock {
 
 		// State B: the full-value main row, then unpriced scope rows.
 		out = append(out, rowBlock{
-			item: it, kind: rowMain, lines: lines, subs: subs,
+			item: it, stripe: stripe, kind: rowMain, lines: lines, subs: subs,
 			height: rowHeightWithMin(lines, subs, padY, afterCellPx),
 		})
 		for i := range it.Package.Parts {
@@ -1094,7 +1102,7 @@ func (e *Engine) measureRows(in Input, m metrics) []rowBlock {
 				}
 			}
 			out = append(out, rowBlock{
-				item: it, part: part, kind: rowScope, lines: plines, subs: bullets,
+				item: it, stripe: stripe, part: part, kind: rowScope, lines: plines, subs: bullets,
 				height: rowHeight(plines, bullets, subPadY),
 			})
 		}

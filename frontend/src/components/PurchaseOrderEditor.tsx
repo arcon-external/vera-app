@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
 import {
   CorrectPurchaseOrder,
-  CreatePurchaseOrderBlankDraft,
   FinalizePurchaseOrder,
   GetPurchaseOrderReview,
   LinkPurchaseOrderDraftSource,
@@ -36,7 +35,9 @@ import {
   isPurchaseOrderDirty,
   latestPersistedVersion,
   newPurchaseOrderLineKey,
+  parseQuantityScaled,
   PURCHASE_ORDER_BUSINESS_CATEGORY_OPTIONS,
+  PURCHASE_ORDER_SOURCE_REQUIRED_COPY,
   purchaseOrderEditorReducer,
   sourceStateOf,
   type PurchaseOrderBusinessCategory,
@@ -44,8 +45,15 @@ import {
   type PurchaseOrderEditorAction,
   type PurchaseOrderEditorState,
   type PurchaseOrderLine,
+  type PurchaseOrderLineKind,
   type PurchaseOrderUpdateInput,
 } from "../purchaseOrder";
+import {
+  aggregateDisplayUnitPriceMinor,
+  aggregateKeyOf,
+  aggregateTotalMinor,
+  groupIntoAggregate,
+} from "../poAggregate";
 import {
   draftLinkConflictWarning,
   draftLinkCurrencyRemedy,
@@ -59,6 +67,7 @@ import {
   type InlineQuoteValue,
 } from "./QuoteInlineField";
 import { QuotationGhost } from "./QuotationGhost";
+import { PurchaseOrderAggregateHeader } from "./PurchaseOrderAggregateHeader";
 import {
   groupSourceItems,
   linesFromSourceItem,
@@ -581,8 +590,16 @@ function displayPurchaseOrderDate(raw: string): string {
   });
 }
 
-/** One empty editor line, with the stable alias every write submits. */
-function newEditorLine(key: number, uom: string): PurchaseOrderLine {
+/**
+ * One empty editor line, with the stable alias every write submits. The kind
+ * defaults to quotation because a fresh split part of a sourced line fulfils
+ * the same leaf; the explicit "Add extra line" action names extra itself.
+ */
+function newEditorLine(
+  key: number,
+  uom: string,
+  lineKind: PurchaseOrderLineKind = "quotation"
+): PurchaseOrderLine {
   return {
     key,
     clientKey: newPurchaseOrderLineKey(),
@@ -596,9 +613,11 @@ function newEditorLine(key: number, uom: string): PurchaseOrderLine {
     discountPercent: "0",
     quotationItemNo: null,
     quotationSubNo: null,
+    lineKind,
     groupKey: "",
     parentDescription: "",
     descriptionLines: [],
+    aggregateKey: null,
   };
 }
 
@@ -721,6 +740,164 @@ export function PurchaseOrderEditorView({
   }, [groups, sourceItems, state.lines, activeCurrency, ghostRejected]);
   const ghostCount = ghostAttachments.attached.length + ghostAttachments.unmatched.length;
 
+  // #654: aggregate mode is a deliberate second presentation layer, never the
+  // default. Selection is UI state only; the rows and their allocations are
+  // untouched until Group is pressed.
+  const [aggregateMode, setAggregateMode] = useState(false);
+  const [selectedLineKeys, setSelectedLineKeys] = useState<Set<number>>(new Set());
+  const [selectedGhostItemNos, setSelectedGhostItemNos] = useState<Set<number>>(
+    new Set()
+  );
+  const [focusAggregateKey, setFocusAggregateKey] = useState<number | null>(null);
+
+  const aggregateGroupByKey = useMemo(
+    () => new Map(state.aggregateGroups.map((group) => [group.key, group] as const)),
+    [state.aggregateGroups]
+  );
+
+  const aggregateKeyForItem = (item: EditorItem): string => {
+    const group = groupForItem(item.key);
+    const key = group?.lines[0] !== undefined ? aggregateKeyOf(group.lines[0]) : null;
+    return key === null ? "" : String(key);
+  };
+
+  useEffect(() => {
+    if (focusAggregateKey === null) return;
+    setFocusAggregateKey(null);
+    const input = document.querySelector<HTMLInputElement>(
+      `[data-aggregate-title-input="${focusAggregateKey}"]`
+    );
+    if (input === null) return;
+    input.focus();
+    input.select();
+  }, [focusAggregateKey, state.aggregateGroups.length]);
+
+  const changeAggregateMode = (on: boolean) => {
+    setAggregateMode(on);
+    if (!on) {
+      setSelectedLineKeys(new Set());
+      setSelectedGhostItemNos(new Set());
+    }
+  };
+
+  const toggleLineSelection = (lineKey: number) => {
+    setSelectedLineKeys((current) => {
+      const next = new Set(current);
+      if (next.has(lineKey)) next.delete(lineKey);
+      else next.add(lineKey);
+      return next;
+    });
+  };
+
+  const toggleGhostSelection = (itemNo: number) => {
+    setSelectedGhostItemNos((current) => {
+      const next = new Set(current);
+      if (next.has(itemNo)) next.delete(itemNo);
+      else next.add(itemNo);
+      return next;
+    });
+  };
+
+  const defaultAggregateUoM = () =>
+    uomOptions.some((option) => option.value === "Lot")
+      ? "Lot"
+      : uomOptions[0]?.value ?? "";
+
+  const selectedCount = selectedLineKeys.size + selectedGhostItemNos.size;
+
+  /**
+   * Materializes the selected ghosts, moves every selected display group into
+   * one new aggregate at the earliest selected position, then drops any header
+   * left childless by the move. Grouping one item is valid; grouping nothing is
+   * refused before this is called.
+   */
+  const groupSelection = () => {
+    if (selectedCount === 0) return;
+    let startKey = Math.max(
+      state.nextKey,
+      ...state.lines.map((line) => line.key + 1),
+      1
+    );
+    const fresh: PurchaseOrderLine[] = [];
+    for (const itemNo of selectedGhostItemNos) {
+      const item = sourceItems.find((entry) => entry.itemNo === itemNo);
+      if (item === undefined) continue;
+      const rows = linesFromSourceItem(item, activeCurrency, startKey);
+      startKey += rows.length;
+      fresh.push(...rows);
+    }
+    const key = state.nextAggregateKey;
+    const lines = groupIntoAggregate(
+      state.lines,
+      [...selectedLineKeys],
+      fresh,
+      key
+    );
+    dispatch({ type: "linesReplaced", lines });
+    dispatch({
+      type: "aggregateAdded",
+      group: {
+        key,
+        title: "Combined items",
+        orderedQuantity: "1",
+        orderedUoM: defaultAggregateUoM(),
+        showChildrenToCustomer: false,
+      },
+      lineKeys: lines
+        .filter((line) => aggregateKeyOf(line) === key)
+        .map((line) => line.key),
+    });
+    dispatch({ type: "aggregatePruned" });
+    setSelectedLineKeys(new Set());
+    setSelectedGhostItemNos(new Set());
+    setFocusAggregateKey(key);
+  };
+
+  const aggregateHeaderFor = (key: string) => {
+    const numeric = Number(key);
+    const group = aggregateGroupByKey.get(numeric);
+    if (group === undefined) return null;
+    const index = state.aggregateGroups.findIndex((entry) => entry.key === numeric);
+    const total = aggregateTotalMinor(state.lines, numeric, activeCurrency);
+    const quantity = parseQuantityScaled(group.orderedQuantity);
+    const unitPrice =
+      total === null || quantity === null
+        ? null
+        : aggregateDisplayUnitPriceMinor(total, quantity);
+    return (
+      <PurchaseOrderAggregateHeader
+        group={group}
+        index={index}
+        childCount={
+          editorItems.filter((item) => aggregateKeyForItem(item) === key).length
+        }
+        totalMinor={total}
+        displayUnitPriceMinor={unitPrice}
+        currency={activeCurrency}
+        uomOptions={uomOptions}
+        onChange={(patch) =>
+          dispatch({ type: "aggregateChanged", key: numeric, patch })
+        }
+        onUngroup={() =>
+          dispatch({ type: "aggregateUngrouped", key: numeric })
+        }
+      />
+    );
+  };
+
+  // #654: the server can return a group whose children were deleted out of
+  // band (rule 5 in the plan). The reducer prunes a group the moment its last
+  // child is removed in this editor, but a loaded childless group must still
+  // be visible and ungroupable, or the save would be blocked by a header the
+  // staff member cannot reach. Rendered after the line list, below.
+  const orphanAggregateGroups = () =>
+    state.aggregateGroups.filter(
+      (group) =>
+        !editorItems.some(
+          (item) => aggregateKeyForItem(item) === String(group.key)
+        )
+    );
+
   const applyGhost = (
     item: SourceItem,
     target?: { groupKey?: string; lineKey?: number }
@@ -730,7 +907,20 @@ export function PurchaseOrderEditorView({
       ...state.lines.map((line) => line.key + 1),
       1
     );
-    const fresh = linesFromSourceItem(item, activeCurrency, startKey);
+    // #654: replacing a display group that sits inside an aggregate must keep
+    // its membership; the fresh rows inherit the target group's aggregate key.
+    const targetLine =
+      target?.groupKey !== undefined && target.groupKey !== ""
+        ? state.lines.find((line) => line.groupKey === target.groupKey)
+        : target?.lineKey !== undefined
+          ? state.lines.find((line) => line.key === target.lineKey)
+          : undefined;
+    const fresh = linesFromSourceItem(
+      item,
+      activeCurrency,
+      startKey,
+      targetLine !== undefined ? aggregateKeyOf(targetLine) : null
+    );
     let next: PurchaseOrderLine[] = [];
     let replaced = false;
     for (const line of state.lines) {
@@ -749,10 +939,22 @@ export function PurchaseOrderEditorView({
       next.push(line);
     }
     if (!replaced) next = [...state.lines, ...fresh];
+    setSelectedGhostItemNos((current) => {
+      if (!current.has(item.itemNo)) return current;
+      const nextSelected = new Set(current);
+      nextSelected.delete(item.itemNo);
+      return nextSelected;
+    });
     dispatch({ type: "linesReplaced", lines: next });
   };
 
   const rejectGhost = (item: SourceItem) => {
+    setSelectedGhostItemNos((current) => {
+      if (!current.has(item.itemNo)) return current;
+      const nextSelected = new Set(current);
+      nextSelected.delete(item.itemNo);
+      return nextSelected;
+    });
     setGhostRejected((current) => new Set(current).add(item.itemNo));
     onIgnoreQuotationItem?.(item);
   };
@@ -761,7 +963,20 @@ export function PurchaseOrderEditorView({
     let next = [...state.lines];
     let startKey = Math.max(state.nextKey, ...state.lines.map((line) => line.key + 1), 1);
     const apply = (item: SourceItem, target?: { groupKey?: string; lineKey?: number }) => {
-      const fresh = linesFromSourceItem(item, activeCurrency, startKey);
+      // #654: a replacement keeps the target display group's aggregate key,
+      // exactly as the single-ghost path does.
+      const targetLine =
+        target?.groupKey !== undefined && target.groupKey !== ""
+          ? next.find((line) => line.groupKey === target.groupKey)
+          : target?.lineKey !== undefined
+            ? next.find((line) => line.key === target.lineKey)
+            : undefined;
+      const fresh = linesFromSourceItem(
+        item,
+        activeCurrency,
+        startKey,
+        targetLine !== undefined ? aggregateKeyOf(targetLine) : null
+      );
       startKey += fresh.length;
       let replaced = false;
       const built: PurchaseOrderLine[] = [];
@@ -786,10 +1001,12 @@ export function PurchaseOrderEditorView({
       apply(attachment.item, { groupKey: attachment.groupKey, lineKey: attachment.lineKey });
     }
     for (const item of ghostAttachments.unmatched) apply(item);
+    setSelectedGhostItemNos(new Set());
     dispatch({ type: "linesReplaced", lines: next });
   };
 
   const rejectAllGhosts = () => {
+    setSelectedGhostItemNos(new Set());
     setGhostRejected((current) => {
       const next = new Set(current);
       for (const attachment of ghostAttachments.attached) next.add(attachment.item.itemNo);
@@ -862,6 +1079,14 @@ export function PurchaseOrderEditorView({
   };
   const replaceLines = (lines: PurchaseOrderLine[]) =>
     dispatch({ type: "linesReplaced", lines });
+  // #654: a removal that goes through `linesReplaced` (the standalone view's
+  // remove control and a sub-row removal) must also drop a header left with no
+  // children. The page's own remove path dispatches `lineRemoved`, which
+  // prunes in the reducer.
+  const replaceLinesAndPrune = (lines: PurchaseOrderLine[]) => {
+    dispatch({ type: "linesReplaced", lines });
+    dispatch({ type: "aggregatePruned" });
+  };
   const groupForItem = (key: number) =>
     groups.find((group) => group.key === key);
   const lineForKey = (key: number) =>
@@ -899,7 +1124,7 @@ export function PurchaseOrderEditorView({
       onRemoveLine(group.lines[0].clientKey);
       return;
     }
-    replaceLines(removeGroup(state.lines, group.groupKey, key));
+    replaceLinesAndPrune(removeGroup(state.lines, group.groupKey, key));
   };
 
   const addBullet = (key: number) => {
@@ -961,7 +1186,14 @@ export function PurchaseOrderEditorView({
         state.lines,
         key,
         groupKey,
-        newEditorLine(state.nextKey, line.uom || uomOptions[0]?.value || "")
+        // A new part of a split line belongs to the same kind as the line it
+        // splits; an extra split stays extra and a quotation split stays
+        // quotation-backed.
+        newEditorLine(
+          state.nextKey,
+          line.uom || uomOptions[0]?.value || "",
+          line.lineKind
+        )
       )
     );
   };
@@ -1023,13 +1255,17 @@ export function PurchaseOrderEditorView({
       addSubLine(
         state.lines,
         group.groupKey,
-        newEditorLine(state.nextKey, group.lines[0]?.uom ?? "")
+        newEditorLine(
+          state.nextKey,
+          group.lines[0]?.uom ?? "",
+          group.lines[0]?.lineKind ?? "quotation"
+        )
       )
     );
   };
 
   const removeSubRow = (_key: number, subId: number) => {
-    replaceLines(state.lines.filter((line) => line.key !== subId));
+    replaceLinesAndPrune(state.lines.filter((line) => line.key !== subId));
   };
 
   const patchSubRow = (
@@ -1162,17 +1398,39 @@ export function PurchaseOrderEditorView({
   const renderItemMeta = (item: EditorItem, index: number) => {
     const group = groupForItem(item.key);
     if (group === undefined) return null;
+    let meta: React.ReactNode;
     if (group.groupKey === "") {
-      return matchMetaFor(group.lines[0], `Line ${index + 1}`);
+      meta = matchMetaFor(group.lines[0], `Line ${index + 1}`);
+    } else {
+      const first = group.lines[0];
+      meta = (
+        <span className="text-caption text-ink-500">
+          {first?.quotationItemNo != null
+            ? `Quotation item ${first.quotationItemNo}`
+            : "Split line"}{" "}
+          · {group.lines.length} sub-item
+          {group.lines.length === 1 ? "" : "s"}
+        </span>
+      );
     }
-    const first = group.lines[0];
+    if (!aggregateMode) return meta;
+    // #654: grouping an existing display group is a selection of the whole
+    // group (a split package is never split), so the key is the first row.
+    const lineKey = group.lines[0].key;
     return (
-      <span className="text-caption text-ink-500">
-        {first?.quotationItemNo != null
-          ? `Quotation item ${first.quotationItemNo}`
-          : "Split line"}{" "}
-        · {group.lines.length} sub-item{group.lines.length === 1 ? "" : "s"}
-      </span>
+      <div className="flex flex-wrap items-center gap-2">
+        <label className="flex items-center gap-1.5 text-caption text-ink-600">
+          <input
+            type="checkbox"
+            aria-label={`Select line ${index + 1} for an aggregate line`}
+            className="size-4 cursor-pointer rounded border-rule-strong accent-accent-700"
+            checked={selectedLineKeys.has(lineKey)}
+            onChange={() => toggleLineSelection(lineKey)}
+          />
+          Select for aggregate
+        </label>
+        {meta}
+      </div>
     );
   };
 
@@ -1680,16 +1938,47 @@ export function PurchaseOrderEditorView({
               : ""
           }`}
           action={
-            <Button
-              size="sm"
-              aria-label="Add line"
-              data-tutorial="po-add-line"
-              onClick={addLine}
-            >
-              Add line
-            </Button>
+            <div className="flex flex-wrap items-center gap-2">
+              <label className="flex items-center gap-1.5 text-small text-ink-700">
+                <input
+                  type="checkbox"
+                  aria-label="Aggregate mode"
+                  className="size-4 cursor-pointer rounded border-rule-strong accent-accent-700"
+                  checked={aggregateMode}
+                  onChange={(event) => changeAggregateMode(event.target.checked)}
+                />
+                Aggregate mode
+              </label>
+              <Button
+                size="sm"
+                aria-label="Add extra line"
+                data-tutorial="po-add-line"
+                onClick={addLine}
+              >
+                Add extra line
+              </Button>
+            </div>
           }
         />
+        {aggregateMode ? (
+          <div className="sticky top-0 z-10 mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 rounded-lg border border-accent-200 bg-accent-50 px-3 py-2 shadow-card">
+            <span className="text-small text-ink-700">
+              <span className="tnum">{selectedCount}</span> selected ·{" "}
+            </span>
+            <Button
+              size="xs"
+              aria-label="Group selected items into an aggregate line"
+              disabled={selectedCount === 0}
+              onClick={groupSelection}
+            >
+              Group into an aggregate line
+            </Button>
+            <span className="text-caption text-ink-500">
+              Select on-order lines and quotation cards. A split package moves
+              whole.
+            </span>
+          </div>
+        ) : null}
         {state.lines.length === 0 ? (
           <p className="rounded-lg border border-dashed border-rule px-4 py-8 text-center text-small text-ink-500">
             No lines yet. Add the customer's first line.
@@ -1736,6 +2025,8 @@ export function PurchaseOrderEditorView({
             }}
             allowMergeSubItems={false}
             allowEmpty
+            aggregateKeyOf={aggregateKeyForItem}
+            renderAggregateHeader={aggregateHeaderFor}
             renderItemMeta={renderItemMeta}
             renderSubItemMeta={renderSubItemMeta}
             onLineFieldFocus={focusEditorLineField}
@@ -1761,6 +2052,37 @@ export function PurchaseOrderEditorView({
             onPasteItems={() => undefined}
           />
         )}
+
+        {orphanAggregateGroups().map((group) => {
+          const index = state.aggregateGroups.findIndex(
+            (entry) => entry.key === group.key
+          );
+          return (
+            <div
+              key={`orphan-aggregate:${group.key}`}
+              className="mt-2 overflow-hidden rounded-xl border border-dashed border-rule bg-white"
+            >
+              <PurchaseOrderAggregateHeader
+                group={group}
+                index={index}
+                childCount={0}
+                totalMinor={0}
+                displayUnitPriceMinor={null}
+                currency={activeCurrency}
+                uomOptions={uomOptions}
+                onChange={(patch) =>
+                  dispatch({ type: "aggregateChanged", key: group.key, patch })
+                }
+                onUngroup={() =>
+                  dispatch({ type: "aggregateUngrouped", key: group.key })
+                }
+              />
+              <p className="border-t border-rule bg-paper-subtle px-3 py-2 text-caption text-ink-500">
+                This saved aggregate has no lines left. Ungroup it to clear it.
+              </p>
+            </div>
+          );
+        })}
 
         {ghostCount > 0 ? (
           <div className="mt-4 rounded-xl border border-accent-200 bg-accent-50/30 p-3">
@@ -1794,6 +2116,15 @@ export function PurchaseOrderEditorView({
                     item={item}
                     currency={activeCurrency}
                     tutorial={tutorial}
+                    selection={
+                      aggregateMode
+                        ? {
+                            selected: selectedGhostItemNos.has(item.itemNo),
+                            onToggle: () => toggleGhostSelection(item.itemNo),
+                            label: `Select quotation item ${item.label} for an aggregate line`,
+                          }
+                        : undefined
+                    }
                     onAccept={() => applyGhost(item)}
                     onReject={() => rejectGhost(item)}
                   />
@@ -2031,7 +2362,7 @@ export function PurchaseOrderEditorPage({
     dispatch({ type: "lineAdded", uom: uomOptions[0]?.value ?? "" });
     setOpenMatchLineKey(null);
     setPendingFocus(`Description for line ${at}`);
-    reconciliation.announce(`Line ${at} added.`);
+    reconciliation.announce(`Extra line ${at} added.`);
   };
   useEffect(() => {
     if (pendingFocus === null) return;
@@ -2377,10 +2708,8 @@ export function PurchaseOrderEditorPage({
    * a second one.
    */
   type PersistedDraft = { id: number; version: number };
-  const persisting = useRef<Promise<PersistedDraft> | null>(null);
-  // Retained beyond the in-flight promise so a trigger that arrives after the
-  // create resolves but before React renders the `created` action still sees
-  // the one row.
+  // Retained after a write so a trigger that arrives before React renders the
+  // `saveSucceeded` action still sees the row as the server now stands.
   const persistedRef = useRef<PersistedDraft | null>(null);
   /**
    * #584: every successful write advances the retained version, so the next
@@ -2414,28 +2743,10 @@ export function PurchaseOrderEditorPage({
       return existing;
     }
     if (persistedRef.current !== null) return persistedRef.current;
-    if (persisting.current !== null) return persisting.current;
-    const promise = (async () => {
-      const created = await CreatePurchaseOrderBlankDraft(
-        new backend.PurchaseOrderBlankCreateInput({
-          ReceivedDate: current.header.receivedDate,
-          TaxZone: current.taxZone,
-          TaxType: current.taxType,
-          ServiceCategory: current.serviceCategory,
-          BusinessCategory: current.header.businessCategory,
-        })
-      );
-      dispatch({ type: "created", orderId: created.ID, version: created.Version });
-      const result = { id: created.ID, version: created.Version };
-      persistedRef.current = result;
-      return result;
-    })();
-    persisting.current = promise;
-    try {
-      return await promise;
-    } finally {
-      persisting.current = null;
-    }
+    // #655: a purchase order is created by the quotation selector, never from
+    // an empty form. A source-less draft has no row to create here; the guard
+    // is the refusal that keeps a stale caller from inventing one.
+    throw new Error(PURCHASE_ORDER_SOURCE_REQUIRED_COPY);
   };
 
   /**
@@ -2466,6 +2777,12 @@ export function PurchaseOrderEditorPage({
     const preflight = buildPurchaseOrderUpdate(editorStateRef.current, activeCurrency);
     if (preflight.input === null) {
       return { kind: "error", message: preflight.error ?? "The draft is incomplete." };
+    }
+    if (editorStateRef.current.orderId === 0) {
+      // #655: the selector creates the row; nothing here may create a
+      // source-less one. Refusing with the entry page's own sentence keeps the
+      // rule and the instruction the same.
+      return { kind: "error", message: PURCHASE_ORDER_SOURCE_REQUIRED_COPY };
     }
     let shared = workingCopyPersisting.current;
     if (shared === null) {
@@ -2765,7 +3082,7 @@ export function PurchaseOrderEditorPage({
       const message = "Add at least one line before Final Save.";
       dispatch({ type: "saveFailed", error: message });
       reconciliation.setBlockedAnnouncement(`Final Save is blocked. 1 blocker: ${message}.`);
-      const addLine = document.querySelector<HTMLElement>('[aria-label="Add line"]');
+      const addLine = document.querySelector<HTMLElement>('[aria-label="Add extra line"]');
       if (addLine !== null) addLine.focus();
       return;
     }
@@ -3108,7 +3425,7 @@ export function PurchaseOrderEditorPage({
     }
   };
   // U1: immediate removal keeps review history server-side; focus moves to
-  // the next line's description (or Add line) and never falls to body.
+  // the next line's description (or Add extra line) and never falls to body.
   const removeLine = (clientKey: string) => {
     const at = state.lines.findIndex((line) => line.clientKey === clientKey);
     if (at === -1) return;
@@ -3121,7 +3438,7 @@ export function PurchaseOrderEditorPage({
         `Description for line ${nextAt === -1 ? at + 1 : nextAt + 1}`
       );
     } else {
-      setPendingFocus("Add line");
+      setPendingFocus("Add extra line");
     }
     reconciliation.announce(`Line ${at + 1} removed.`);
   };
@@ -3226,10 +3543,18 @@ export function PurchaseOrderEditorPage({
           onMatchChange={(lineKey, quotationItemNo, quotationSubNo) => {
             const target = state.lines.find((line) => line.clientKey === lineKey);
             if (target === undefined) return;
+            // #655: the kind follows the reference. Choosing a match makes the
+            // line quotation-backed (and it gains an allocation on save);
+            // clearing it makes an explicit extra, never a silent legacy
+            // quotation line that strict mode would refuse.
             dispatch({
               type: "lineChanged",
               key: target.key,
-              patch: { quotationItemNo, quotationSubNo },
+              patch: {
+                quotationItemNo,
+                quotationSubNo,
+                lineKind: quotationItemNo === null ? "extra" : "quotation",
+              },
             });
           }}
           onCommitLine={(lineKey, field, explicitRaw) =>

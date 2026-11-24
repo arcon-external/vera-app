@@ -190,7 +190,7 @@ func TestBuildItems(t *testing.T) {
 		{Description: "Item B", Qty: 3, UoM: "Unit", UnitPrice: 5000},
 	}
 
-	items := buildItems(inputs, "IDR")
+	items := mustBuildItems(t, inputs, "IDR")
 	if len(items) != 2 {
 		t.Fatalf("buildItems returned %d items; want 2", len(items))
 	}
@@ -213,7 +213,7 @@ func TestBuildItems(t *testing.T) {
 }
 
 func TestBuildItemsEmpty(t *testing.T) {
-	items := buildItems(nil, "IDR")
+	items := mustBuildItems(t, nil, "IDR")
 	if items == nil {
 		t.Fatal("buildItems(nil) returned nil; want empty slice")
 	}

@@ -15,8 +15,11 @@ import {
 } from "../format";
 import {
   purchaseOrderVarianceBadges,
+  formatQuantityScaled,
   type PurchaseOrderVarianceBadge,
 } from "../purchaseOrder";
+import { sanitizeQuantityInput } from "../poAggregate";
+import { boughtLeafKey } from "../quotationItemIdentity";
 
 // The IDR entry, transcribed field-for-field from
 // backend/currency/currency.go. This is the prop default only -- the live
@@ -64,6 +67,14 @@ export function parseMoneyKeystroke(entry: CurrencyInfo, raw: string): string {
 /** One priced sub-item of a main item. */
 export interface EditorSubItem {
   id: number;
+  /**
+   * #648: the sub-item's stable allocation identity. A purchase order names
+   * its bought quantity by this number, so it never follows position: removing
+   * an earlier sub-item or reordering the list leaves it alone. 0 means "not
+   * numbered yet", the shape a component default has before the editor assigns
+   * one.
+   */
+  no: number;
   description: string;
   qty: string;
   uom: string;
@@ -82,6 +93,19 @@ export interface EditorSubItem {
 
 export interface EditorItem {
   key: number;
+  /**
+   * #648: the line's stable allocation identity, matching the revision's
+   * `ItemNo`. A purchase order names its bought quantity by this number, so it
+   * must survive removal and reordering and never be reused. 0 means "not
+   * numbered yet" -- a component default before the editor assigns one.
+   */
+  no: number;
+  /**
+   * #648: the per-line high-water mark for sub-item numbers. It is stored on
+   * the line rather than derived from the sub-items so removing the last
+   * sub-item cannot release its number for a different product.
+   */
+  nextSubNo?: number;
   description: string;
   /**
    * Description bullets for a plain line. They convert into priced sub-items
@@ -117,9 +141,17 @@ export interface EditorItem {
  *  company's canonical unit, passed in by the caller (#337): there is no
  *  hardcoded "Lot" default any more, because a company may have removed that
  *  unit or set a different canonical one. */
-export function newSubItem(id: number, description = "", uom = ""): EditorSubItem {
+export function newSubItem(
+  id: number,
+  description = "",
+  uom = "",
+  no = 0
+): EditorSubItem {
   return {
     id,
+    // #648: an unnumbered sub-item unless the caller hands over the line's
+    // next stable number. The quotation editor does; a bare fixture does not.
+    no,
     description,
     qty: "1",
     uom,
@@ -166,17 +198,6 @@ function quantityTimes(unitMinor: number, rawQty: string): number {
   return Number(rounded);
 }
 
-/** Keeps digits and at most one decimal point, with four places. */
-function sanitizeQuantityInput(raw: string): string {
-  const cleaned = raw.replace(/[^\d.]/g, "");
-  const dot = cleaned.indexOf(".");
-  if (dot === -1) return cleaned;
-  return `${cleaned.slice(0, dot)}.${cleaned
-    .slice(dot + 1)
-    .replace(/\./g, "")
-    .slice(0, 4)}`;
-}
-
 /** One inline PO variance badge set. The text and tone come from the pure
  *  rule in purchaseOrder.ts; this only paints them. */
 function VarianceBadges({ badges }: { badges: PurchaseOrderVarianceBadge[] }) {
@@ -199,6 +220,33 @@ function VarianceBadges({ badges }: { badges: PurchaseOrderVarianceBadge[] }) {
         </span>
       ))}
     </>
+  );
+}
+
+/**
+ * #648: how much of this line a purchase order already bought. The number
+ * comes from the quotation's availability answer only -- no answer, or no
+ * entry for the leaf, paints nothing. A fabricated "Bought 0" would read as a
+ * confirmed empty purchase history, which is a different fact from "we could
+ * not ask".
+ */
+function BoughtBadge({
+  quantityScaled,
+  what,
+}: {
+  quantityScaled: number | undefined;
+  what: string;
+}) {
+  if (quantityScaled === undefined || quantityScaled <= 0) return null;
+  const quantity = formatQuantityScaled(quantityScaled);
+  return (
+    <span
+      data-bought-badge=""
+      title={`${quantity} already bought on a purchase order against this ${what}. The number is kept, so the bought history stays with this product even if the row moves or is removed.`}
+      className="tnum inline-flex items-center rounded-full border border-rule bg-paper-subtle px-2 py-0.5 text-caption font-medium text-ink-600"
+    >
+      Bought {quantity}
+    </span>
   );
 }
 
@@ -256,6 +304,19 @@ interface ItemEditorProps {
   /** Optional content rendered directly after one row, used by the PO editor
    *  to place a quotation ghost under the line it belongs to. */
   renderAfterItem?: (item: EditorItem, index: number) => React.ReactNode;
+  /**
+   * #654: the aggregate presentation key of one display group; "" means it
+   * stands on its own. Present only on a grouped-capable PO editor. When this
+   * and `renderAggregateHeader` are both absent, every row renders exactly as
+   * it always has (the quotation editor passes neither).
+   */
+  aggregateKeyOf?: (item: EditorItem) => string;
+  /**
+   * #654: the header rendered once before the consecutive rows sharing one
+   * aggregate key. The header owns its own controls; the wrapper stops its
+   * keydowns so typing a title or quantity cannot move the line grid focus.
+   */
+  renderAggregateHeader?: (key: string, items: EditorItem[]) => React.ReactNode;
   /** Optional sub-item metadata, rendered under the sub-item description. */
   renderSubItemMeta?: (
     item: EditorItem,
@@ -297,6 +358,12 @@ interface ItemEditorProps {
     percent: string,
     subId?: number
   ) => void;
+  /**
+   * #648: bought quantities by stable leaf key (`boughtLeafKey`), read from
+   * the edited quotation's availability answer. Absent means "no answer":
+   * every badge stays hidden rather than claiming nothing was bought.
+   */
+  boughtQuantities?: ReadonlyMap<string, number>;
   /** A select commits its NEW value immediately; blur would read the previous
    *  render because React has not applied the change yet. */
   onLineSelectCommit?: (
@@ -355,6 +422,8 @@ export function ItemEditor({
   renderItemMeta,
   renderAfterItem,
   renderSubItemMeta,
+  aggregateKeyOf,
+  renderAggregateHeader,
   allowMergeSubItems = true,
   tutorialAnchors = false,
   allowEmpty = false,
@@ -362,6 +431,7 @@ export function ItemEditor({
   onLineFieldBlur,
   onLineDiscountCommit,
   onLineSelectCommit,
+  boughtQuantities,
   onAddItem,
   onRemoveItem,
   onChange,
@@ -493,6 +563,128 @@ export function ItemEditor({
     }
   };
 
+  // #654: one row plus its optional ghost; the same node whether it is flat or
+  // inside an aggregate wrapper, so the quotation path cannot drift from the
+  // grouped one. A Fragment keeps the existing DOM shape (no extra element).
+  // #648: a bought quantity belongs to a numbered leaf; an unnumbered row (0)
+  // must never inherit a count from a "0" key.
+  const boughtFor = (no: number, subNo = 0): number | undefined =>
+    no > 0 ? boughtQuantities?.get(boughtLeafKey(no, subNo)) : undefined;
+  const renderRow = (item: EditorItem, index: number) => (
+    <Fragment key={item.key}>
+      <ItemRow
+        key={item.key}
+        item={item}
+        index={index}
+        canRemove={allowEmpty || items.length > 1}
+        currency={currency}
+        uomOptions={uomOptions}
+        uomPendingLabel={uomPendingLabel}
+        mode={mode}
+        meta={renderItemMeta?.(item, index)}
+        boughtQuantityScaled={boughtFor(item.no)}
+        boughtSubQuantityScaled={(sub) => boughtFor(item.no, sub.no)}
+        renderSubItemMeta={renderSubItemMeta}
+        allowMergeSubItems={allowMergeSubItems}
+        tutorialAnchors={tutorialAnchors}
+        onLineFieldFocus={onLineFieldFocus}
+        onLineFieldBlur={onLineFieldBlur}
+        onLineDiscountCommit={onLineDiscountCommit}
+        onLineSelectCommit={onLineSelectCommit}
+        showPanel={
+          expanded[item.key] ??
+          (item.subItems.length > 0 || item.bullets.length > 0)
+        }
+        onTogglePanel={() =>
+          setExpanded((prev) => ({
+            ...prev,
+            [item.key]: !(
+              prev[item.key] ??
+              (item.subItems.length > 0 || item.bullets.length > 0)
+            ),
+          }))
+        }
+        onRemoveItem={onRemoveItem}
+        onChange={onChange}
+        onAddBullet={onAddBullet}
+        onRemoveBullet={onRemoveBullet}
+        onBulletChange={onBulletChange}
+        onEnableSubItems={onEnableSubItems}
+        onDisableSubItems={onDisableSubItems}
+        onAddSubRow={onAddSubRow}
+        onRemoveSubRow={onRemoveSubRow}
+        onPatchSubRow={onPatchSubRow}
+        onMoveSubRow={onMoveSubRow}
+        onPasteSubRows={onPasteSubRows}
+        onAddSubBullet={onAddSubBullet}
+        onRemoveSubBullet={onRemoveSubBullet}
+        onSubBulletChange={onSubBulletChange}
+        onPasteItems={onPasteItems}
+      />
+      {renderAfterItem?.(item, index)}
+    </Fragment>
+  );
+
+  // #654: consecutive rows sharing a non-empty aggregate key render inside one
+  // wrapper with its header once. Both new props absent (the quotation editor,
+  // and every pre-#654 caller) is the original flat map, byte for byte; both
+  // present with no key set is the same flat map too, so a grouped-capable PO
+  // with no aggregates looks exactly like it always did.
+  let lineRows: React.ReactNode;
+  if (aggregateKeyOf === undefined || renderAggregateHeader === undefined) {
+    lineRows = items.map(renderRow);
+  } else {
+    const runs: Array<{ key: string; start: number; items: EditorItem[] }> = [];
+    items.forEach((item, index) => {
+      const key = aggregateKeyOf(item);
+      if (key === "") {
+        runs.push({ key: "", start: index, items: [item] });
+        return;
+      }
+      const previous = runs[runs.length - 1];
+      if (previous !== undefined && previous.key === key) {
+        previous.items.push(item);
+        return;
+      }
+      runs.push({ key, start: index, items: [item] });
+    });
+    // A flat array, not nested per-run arrays: the row's key must keep its
+    // reconciliation identity when a neighbour is removed, or focus is lost
+    // and React remounts every row after the removal.
+    const rows: React.ReactNode[] = [];
+    const runOccurrences = new Map<string, number>();
+    for (const run of runs) {
+      if (run.key === "") {
+        run.items.forEach((item, offset) => {
+          rows.push(renderRow(item, run.start + offset));
+        });
+        continue;
+      }
+      // Key by the aggregate, not its position: removing an unrelated row
+      // above must not remount the aggregate's children and drop focus.
+      const occurrence = runOccurrences.get(run.key) ?? 0;
+      runOccurrences.set(run.key, occurrence + 1);
+      rows.push(
+        <div
+          key={`aggregate:${run.key}:${occurrence}`}
+          data-aggregate-key={run.key}
+          className="divide-y divide-rule"
+        >
+          {/* The header's own inputs must never feed the line grid's arrow /
+              Enter handler: typing a title or quantity is not moving a cell. */}
+          <div
+            data-aggregate-header
+            onKeyDown={(event) => event.stopPropagation()}
+          >
+            {renderAggregateHeader(run.key, run.items)}
+          </div>
+          {run.items.map((item, offset) => renderRow(item, run.start + offset))}
+        </div>
+      );
+    }
+    lineRows = rows;
+  }
+
   return (
     <div className="overflow-hidden rounded-xl border border-rule bg-white shadow-card">
       {/* Two-line rows: the description takes the whole first line and every
@@ -500,58 +692,7 @@ export function ItemEditor({
           header row to keep aligned and no breakpoint where labels appear or
           vanish. */}
       <div ref={gridRef} onKeyDown={gridKeyDown} className="divide-y divide-rule">
-        {items.map((item, index) => (
-          <Fragment key={item.key}>
-          <ItemRow
-            key={item.key}
-            item={item}
-            index={index}
-            canRemove={allowEmpty || items.length > 1}
-            currency={currency}
-            uomOptions={uomOptions}
-            uomPendingLabel={uomPendingLabel}
-            mode={mode}
-            meta={renderItemMeta?.(item, index)}
-            renderSubItemMeta={renderSubItemMeta}
-            allowMergeSubItems={allowMergeSubItems}
-            tutorialAnchors={tutorialAnchors}
-            onLineFieldFocus={onLineFieldFocus}
-            onLineFieldBlur={onLineFieldBlur}
-            onLineDiscountCommit={onLineDiscountCommit}
-            onLineSelectCommit={onLineSelectCommit}
-            showPanel={
-              expanded[item.key] ??
-              (item.subItems.length > 0 || item.bullets.length > 0)
-            }
-            onTogglePanel={() =>
-              setExpanded((prev) => ({
-                ...prev,
-                [item.key]: !(
-                  prev[item.key] ??
-                  (item.subItems.length > 0 || item.bullets.length > 0)
-                ),
-              }))
-            }
-            onRemoveItem={onRemoveItem}
-            onChange={onChange}
-            onAddBullet={onAddBullet}
-            onRemoveBullet={onRemoveBullet}
-            onBulletChange={onBulletChange}
-            onEnableSubItems={onEnableSubItems}
-            onDisableSubItems={onDisableSubItems}
-            onAddSubRow={onAddSubRow}
-            onRemoveSubRow={onRemoveSubRow}
-            onPatchSubRow={onPatchSubRow}
-            onMoveSubRow={onMoveSubRow}
-            onPasteSubRows={onPasteSubRows}
-            onAddSubBullet={onAddSubBullet}
-            onRemoveSubBullet={onRemoveSubBullet}
-            onSubBulletChange={onSubBulletChange}
-            onPasteItems={onPasteItems}
-          />
-          {renderAfterItem?.(item, index)}
-          </Fragment>
-        ))}
+        {lineRows}
       </div>
 
       <div className="flex flex-wrap items-center gap-x-5 gap-y-2 border-t border-rule bg-paper-subtle px-4 py-2.5">
@@ -830,6 +971,8 @@ export function ItemRow({
   uomPendingLabel,
   mode,
   meta,
+  boughtQuantityScaled,
+  boughtSubQuantityScaled,
   renderSubItemMeta,
   allowMergeSubItems,
   tutorialAnchors = false,
@@ -864,6 +1007,11 @@ export function ItemRow({
   uomPendingLabel?: string;
   mode: "quotation" | "purchase-order";
   meta?: React.ReactNode;
+  /** #648: bought quantity for this line's stable number; undefined when the
+   *  availability answer has no entry for it. */
+  boughtQuantityScaled?: number;
+  /** #648: bought quantity lookup for this line's sub-items. */
+  boughtSubQuantityScaled?: (sub: EditorSubItem) => number | undefined;
   renderSubItemMeta?: (
     item: EditorItem,
     sub: EditorSubItem,
@@ -945,6 +1093,14 @@ export function ItemRow({
   const removeLineTitle = hasSubItems
     ? `Remove split line ${index + 1} and all its sub-items`
     : `Remove line ${index + 1}`;
+  // #648: removing a bought line is allowed, but the control says what is at
+  // stake first. The number is kept, so the bought history still points here.
+  const removeLineTitleWithBought =
+    boughtQuantityScaled !== undefined && boughtQuantityScaled > 0
+      ? `${removeLineTitle} — Bought ${formatQuantityScaled(
+          boughtQuantityScaled
+        )}; the line keeps its number so the bought history stays with this product.`
+      : removeLineTitle;
   const controlCells = hasSubItems && rollup ? (
     <>
       <Captioned label="UoM">
@@ -1269,6 +1425,10 @@ export function ItemRow({
               Split into sub-items
             </button>
           )}
+          <BoughtBadge
+            quantityScaled={boughtQuantityScaled}
+            what={`line ${index + 1}`}
+          />
           {purchaseOrder ? (
             hasSubItems ? null : (
               <VarianceBadges
@@ -1304,7 +1464,7 @@ export function ItemRow({
         <button
           type="button"
           aria-label={removeLineLabel}
-          title={removeLineTitle}
+          title={removeLineTitleWithBought}
           onClick={() => onRemoveItem(item.key)}
           disabled={!canRemove}
           className="flex h-9 w-9 shrink-0 cursor-pointer items-center justify-center rounded-md text-ink-300 transition-colors duration-150 hover:bg-danger-50 hover:text-danger-500 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-danger-400/40 disabled:opacity-0 disabled:hover:bg-transparent"
@@ -1400,6 +1560,7 @@ export function ItemRow({
                 uomPendingLabel={uomPendingLabel}
                 mode={mode}
                 meta={renderSubItemMeta?.(item, sub, index, subIndex)}
+                boughtQuantityScaled={boughtSubQuantityScaled?.(sub)}
                 onFieldFocus={onLineFieldFocus}
                 onFieldBlur={onLineFieldBlur}
                 onDiscountCommit={onLineDiscountCommit}
@@ -1468,6 +1629,7 @@ function SubRow({
   uomPendingLabel,
   mode,
   meta,
+  boughtQuantityScaled,
   onFieldFocus,
   onFieldBlur,
   onDiscountCommit,
@@ -1490,6 +1652,8 @@ function SubRow({
   uomPendingLabel?: string;
   mode: "quotation" | "purchase-order";
   meta?: React.ReactNode;
+  /** #648: bought quantity for this sub-item's stable number. */
+  boughtQuantityScaled?: number;
   onFieldFocus?: (
     itemKey: number,
     field: EditorLineField,
@@ -1529,6 +1693,14 @@ function SubRow({
     sub.marginEnabled
   );
   const label = `sub-item ${subIndex + 1} of line ${index + 1}`;
+  // #648: the same warning as the line's remove control -- the sub-item's
+  // number is kept, so the bought history stays with this part.
+  const removeTitle =
+    boughtQuantityScaled !== undefined && boughtQuantityScaled > 0
+      ? `Remove ${label} — Bought ${formatQuantityScaled(
+          boughtQuantityScaled
+        )}; the sub-item keeps its number so the bought history stays with this product.`
+      : `Remove ${label}`;
 
   return (
     <div className="rounded-md border border-rule/70 bg-white px-2.5 py-2">
@@ -1571,7 +1743,7 @@ function SubRow({
           <button
             type="button"
             aria-label={`Remove ${label}`}
-            title={`Remove ${label}`}
+            title={removeTitle}
             onClick={onRemove}
             className="flex h-9 w-7 cursor-pointer items-center justify-center rounded-md text-ink-300 transition-colors duration-150 hover:bg-danger-50 hover:text-danger-500 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-danger-400/40"
           >
@@ -1582,6 +1754,14 @@ function SubRow({
         </div>
       </div>
       {meta === undefined ? null : <div className="mt-1">{meta}</div>}
+      {boughtQuantityScaled === undefined ? null : (
+        <div className="mt-1">
+          <BoughtBadge
+            quantityScaled={boughtQuantityScaled}
+            what={`sub-item ${subIndex + 1} of line ${index + 1}`}
+          />
+        </div>
+      )}
       {purchaseOrder ? (
         <div className="mt-1 flex flex-wrap gap-1.5">
           <VarianceBadges

@@ -112,7 +112,7 @@ func benchmarkPurchaseOrderReport(b *testing.B, total int) {
 		AsOf:           snapshot.AsOf.Format(time.DateOnly),
 		Filter:         query,
 		Company:        poreport.Company{Name: "PT Arcon Penta Persada", Address: "Batam"},
-		Population:     poreport.Population{AvailableCurrencies: snapshot.AvailableCurrencies, HasUnassigned: snapshot.HasUnassigned, SourceMissingPoCount: snapshot.SourceMissingPoCount},
+		Population:     poreport.Population{AvailableCurrencies: snapshot.AvailableCurrencies, HasUnassigned: snapshot.HasUnassigned, SourceMissingPoCount: snapshot.SourceMissingPoCount, UnallocatedPoCount: snapshot.UnallocatedPoCount, LegacyFallbackPoCount: snapshot.LegacyFallbackPoCount, ExpiredUnclosedQuotationCount: snapshot.ExpiredUnclosedQuotationCount},
 		Totals:         snapshot.Totals,
 		Periods:        snapshot.Periods,
 		Categories:     snapshot.Categories,
@@ -145,9 +145,12 @@ func benchmarkPurchaseOrderReport(b *testing.B, total int) {
 	wideReport.Filter = wideQuery
 	wideReport.AsOf = wide.AsOf.Format(time.DateOnly)
 	wideReport.Population = poreport.Population{
-		AvailableCurrencies:  wide.AvailableCurrencies,
-		HasUnassigned:        wide.HasUnassigned,
-		SourceMissingPoCount: wide.SourceMissingPoCount,
+		AvailableCurrencies:           wide.AvailableCurrencies,
+		HasUnassigned:                 wide.HasUnassigned,
+		SourceMissingPoCount:          wide.SourceMissingPoCount,
+		UnallocatedPoCount:            wide.UnallocatedPoCount,
+		LegacyFallbackPoCount:         wide.LegacyFallbackPoCount,
+		ExpiredUnclosedQuotationCount: wide.ExpiredUnclosedQuotationCount,
 	}
 	wideReport.Totals = wide.Totals
 	wideReport.Periods = wide.Periods

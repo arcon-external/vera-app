@@ -113,6 +113,11 @@ func mapPOSourceQuotation(quotation store.POSourceQuotation) apicontract.POSourc
 	row.SavedPOCount = quotation.SavedPOCount
 	row.DraftPOCount = quotation.DraftPOCount
 	row.LegacyHeaderDiscount = quotation.LegacyHeaderDiscount
+	row.Closed = quotation.Closed
+	row.ClosedAt = optionalRFC3339(quotation.ClosedAt)
+	row.ClosedReason = quotation.ClosedReason
+	row.ValidUntil = optionalDate(quotation.ValidUntil)
+	row.ExpiredUnclosed = quotation.ExpiredUnclosed
 	if quotation.ActivePO != nil {
 		row.ActivePO = &apicontract.POSourceActivePORow{
 			ID:    quotation.ActivePO.ID,
@@ -184,6 +189,12 @@ func (s *Server) getPOSourceOccupancy(context echo.Context) error {
 		SavedPOCount:         occupancy.SavedPOCount,
 		DraftPOCount:         occupancy.DraftPOCount,
 		LegacyHeaderDiscount: occupancy.LegacyHeaderDiscount,
+		Closed:               occupancy.Closed,
+		ClosedAt:             optionalRFC3339(occupancy.ClosedAt),
+		ClosedReason:         occupancy.ClosedReason,
+		ClosedByName:         occupancy.ClosedByName,
+		ValidUntil:           optionalDate(occupancy.ValidUntil),
+		ExpiredUnclosed:      occupancy.ExpiredUnclosed,
 	}
 	if occupancy.ActivePO != nil {
 		response.ActivePO = &apicontract.POSourceActivePORow{
@@ -258,6 +269,11 @@ func (s *Server) getPOSourceAvailability(context echo.Context) error {
 		LegacyHeaderDiscount: availability.LegacyHeaderDiscount,
 		SavedPOCount:         availability.SavedPOCount,
 		DraftPOCount:         availability.DraftPOCount,
+		Closed:               availability.Closed,
+		ClosedAt:             optionalRFC3339(availability.ClosedAt),
+		ClosedReason:         availability.ClosedReason,
+		ValidUntil:           optionalDate(availability.ValidUntil),
+		ExpiredUnclosed:      availability.ExpiredUnclosed,
 		Items:                rows,
 	})
 }

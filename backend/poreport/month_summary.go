@@ -51,7 +51,7 @@ func BuildMonthSummary(
 	if day.elapsed <= 0 {
 		return nil, nil
 	}
-	actual, err := currentMetrics(day.poCount, day.amount, day.costed, day.capital)
+	actual, err := currentMetrics(day.poCount, day.amount, day.costed, day.capital, day.extra)
 	if err != nil {
 		return nil, fmt.Errorf("current month actual: %w", err)
 	}
@@ -137,10 +137,10 @@ func summaryScopeMatches(query Query, mode string, asOfDate, monthStart time.Tim
 
 // futureDayMetrics sums the supplied day rows after the as-of day and inside
 // the current month. A day-bucketed report materializes the whole month, so
-// these rows are the recorded future-dated evidence. Only the six core metrics
-// are summed; the ratios are derived once from the sums, never averaged.
+// these rows are the recorded future-dated evidence. Only the core figures are
+// summed; the ratios are derived once from the sums, never averaged.
 func futureDayMetrics(periods []Period, asOfDate, monthStart, monthEnd time.Time) (*Metrics, error) {
-	var count, amount, costed, capital int64
+	var count, amount, costed, extra, capital int64
 	has := false
 	for _, period := range periods {
 		start, err := time.Parse(reportDateLayout, period.PeriodStart)
@@ -151,7 +151,8 @@ func futureDayMetrics(periods []Period, asOfDate, monthStart, monthEnd time.Time
 			continue
 		}
 		if period.PoCount == 0 && period.AmountMinor == 0 &&
-			period.CostedMinor == 0 && period.CapitalMinor == 0 {
+			period.CostedMinor == 0 && period.ExtraExpenseMinor == 0 &&
+			period.CapitalMinor == 0 {
 			continue
 		}
 		has = true
@@ -164,6 +165,9 @@ func futureDayMetrics(periods []Period, asOfDate, monthStart, monthEnd time.Time
 		if costed, err = addExact(costed, period.CostedMinor); err != nil {
 			return nil, fmt.Errorf("recorded future costed amount: %w", err)
 		}
+		if extra, err = addExact(extra, period.ExtraExpenseMinor); err != nil {
+			return nil, fmt.Errorf("recorded future extra expense: %w", err)
+		}
 		if capital, err = addExact(capital, period.CapitalMinor); err != nil {
 			return nil, fmt.Errorf("recorded future capital: %w", err)
 		}
@@ -171,7 +175,7 @@ func futureDayMetrics(periods []Period, asOfDate, monthStart, monthEnd time.Time
 	if !has {
 		return nil, nil
 	}
-	metrics, err := currentMetrics(count, amount, costed, capital)
+	metrics, err := currentMetrics(count, amount, costed, capital, extra)
 	if err != nil {
 		return nil, fmt.Errorf("recorded future metrics: %w", err)
 	}
@@ -208,14 +212,18 @@ func recordedDifference(periods []Period, monthStart time.Time, actual Metrics) 
 	if err != nil {
 		return nil, fmt.Errorf("recorded future costed amount: %w", err)
 	}
+	extra, err := subtractExact(raw.ExtraExpenseMinor, actual.ExtraExpenseMinor)
+	if err != nil {
+		return nil, fmt.Errorf("recorded future extra expense: %w", err)
+	}
 	capital, err := subtractExact(raw.CapitalMinor, actual.CapitalMinor)
 	if err != nil {
 		return nil, fmt.Errorf("recorded future capital: %w", err)
 	}
-	if count == 0 && amount == 0 && costed == 0 && capital == 0 {
+	if count == 0 && amount == 0 && costed == 0 && extra == 0 && capital == 0 {
 		return nil, nil
 	}
-	metrics, err := currentMetrics(count, amount, costed, capital)
+	metrics, err := currentMetrics(count, amount, costed, capital, extra)
 	if err != nil {
 		return nil, fmt.Errorf("recorded future metrics: %w", err)
 	}

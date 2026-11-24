@@ -235,6 +235,79 @@ func hm(month string, poCount, amount, costed, capital int64) HistoryMonth {
 	}
 }
 
+// hmExtra is one month whose amount includes a pass-through extra expense. The
+// costed amount is the non-extra portion and uncosted is zero: the line has no
+// supplier cost, but it is not unknown cost either.
+func hmExtra(month string, poCount, amount, extra, costed, capital int64) HistoryMonth {
+	monthMetrics := hm(month, poCount, amount, costed, capital)
+	monthMetrics.ExtraExpenseMinor = extra
+	monthMetrics.UncostedMinor = amount - costed - extra
+	return monthMetrics
+}
+
+// TestProjectTreatsAnExtraExpenseMonthAsFullyCosted is #655's projection gate:
+// a month whose amount includes a pass-through extra is fully costed on its
+// non-extra portion. Before the gate was corrected, costed < amount made every
+// forecast unavailable with incomplete_cost_basis.
+func TestProjectTreatsAnExtraExpenseMonthAsFullyCosted(t *testing.T) {
+	t.Parallel()
+
+	history := []HistoryMonth{
+		hm("2026-01-01", 1, 1000, 1000, 100),
+		hm("2026-02-01", 1, 2000, 2000, 200),
+		hmExtra("2026-03-01", 1, 3000, 1000, 2000, 300),
+		hm("2026-04-01", 1, 4000, 4000, 400),
+		hm("2026-05-01", 1, 5000, 5000, 500),
+		hm("2026-06-01", 1, 6000, 6000, 600),
+	}
+	query := mustQuery(t, Query{
+		From: "2026-01-01", To: "2026-07-01", Bucket: BucketMonth,
+		Category: CategoryAll, Currency: "IDR",
+	})
+
+	projection := Project(history, query, at(2026, 7, 15), 6)
+
+	// Six complete months pass the monthly guard; the yearly series needs
+	// twelve, so this test asserts the monthly sample-size and cost gates.
+	if monthly := projection.Monthly; monthly.Status != ProjectionStatusAvailable {
+		t.Errorf("monthly = %s/%s; want available: an extra expense is not missing cost",
+			monthly.Status, monthly.Reason)
+	}
+}
+
+// TestProjectStillWithholdsAForecastForLegacyUncostedRevenue keeps the guard
+// from becoming a rubber stamp: revenue that genuinely has no source cost still
+// makes the forecast unavailable.
+func TestProjectStillWithholdsAForecastForLegacyUncostedRevenue(t *testing.T) {
+	t.Parallel()
+
+	history := []HistoryMonth{
+		hm("2026-01-01", 1, 1000, 1000, 100),
+		hm("2026-02-01", 1, 2000, 2000, 200),
+		hm("2026-03-01", 1, 3000, 2000, 300),
+		hm("2026-04-01", 1, 4000, 4000, 400),
+		hm("2026-05-01", 1, 5000, 5000, 500),
+		hm("2026-06-01", 1, 6000, 6000, 600),
+	}
+	query := mustQuery(t, Query{
+		From: "2026-01-01", To: "2026-07-01", Bucket: BucketMonth,
+		Category: CategoryAll, Currency: "IDR",
+	})
+
+	projection := Project(history, query, at(2026, 7, 15), 6)
+
+	monthly := projection.Monthly
+	if monthly.Status != ProjectionStatusUnavailable || monthly.Reason != ReasonIncompleteCostBasis {
+		t.Errorf("monthly = %s/%s; want unavailable/%s",
+			monthly.Status, monthly.Reason, ReasonIncompleteCostBasis)
+	}
+	if yearly := projection.Yearly; yearly.Status != ProjectionStatusUnavailable ||
+		yearly.Reason != ReasonInsufficientHistory {
+		t.Errorf("yearly = %s/%s; want unavailable/%s with only six months",
+			yearly.Status, yearly.Reason, ReasonInsufficientHistory)
+	}
+}
+
 func monthStart(year, month int) string {
 	return time.Date(year, time.Month(month), 1, 0, 0, 0, 0, time.UTC).Format(reportDateLayout)
 }

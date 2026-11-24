@@ -91,6 +91,53 @@ afterEach(() => {
   document.body.innerHTML = "";
 });
 
+describe("QuotationGhost aggregate selection (#654)", () => {
+  it("renders an accessible selection checkbox when the editor offers one", () => {
+    const onToggle = vi.fn();
+    act(() =>
+      root.render(
+        <QuotationGhost
+          item={SPLIT_ITEM}
+          currency={IDR}
+          onAccept={() => undefined}
+          onReject={() => undefined}
+          selection={{
+            selected: false,
+            onToggle,
+            label: "Select quotation item 2 for an aggregate line",
+          }}
+        />
+      )
+    );
+
+    const box = document.querySelector<HTMLInputElement>(
+      'input[type="checkbox"][aria-label="Select quotation item 2 for an aggregate line"]'
+    );
+    if (box === null) throw new Error("no aggregate selection checkbox");
+    expect(box.checked).toBe(false);
+
+    act(() => box.click());
+    expect(onToggle).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps the Use and Ignore actions and no checkbox when selection is not offered", () => {
+    act(() =>
+      root.render(
+        <QuotationGhost
+          item={SPLIT_ITEM}
+          currency={IDR}
+          onAccept={() => undefined}
+          onReject={() => undefined}
+        />
+      )
+    );
+
+    expect(document.querySelector('input[type="checkbox"]')).toBeNull();
+    expect(button("Use quotation 2")).toBeDefined();
+    expect(button("Ignore quotation 2")).toBeDefined();
+  });
+});
+
 describe("QuotationGhost actions (issue #606)", () => {
   it("carries the tutorial action anchor and resolves from either choice", () => {
     const onAccept = vi.fn();

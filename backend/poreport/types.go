@@ -129,19 +129,24 @@ type Query struct {
 }
 
 // Metrics are one period, category or whole-report set of figures. Amount is
-// the sell total excluding PPN. Costed is the amount on lines whose exact source
-// cost resolved, Capital is the pinned source cost at the ordered quantity, and
-// Uncosted is amount-costed. Margin is costed-capital and is signed. MarginBps
-// and CoverageBps are null, never zero, when their denominator is zero.
+// the sell total excluding PPN and includes extra expense lines. Costed is the
+// amount on lines whose exact source cost resolved, Capital is the pinned source
+// cost at the ordered quantity, and Uncosted is amount - costed - extra: money
+// that should have a quotation cost but does not. ExtraExpense is the
+// pass-through amount of deliberate extra lines (#655); it has no cost and no
+// margin, and it is subtracted from the coverage denominator. Margin is
+// costed-capital and is signed. MarginBps and CoverageBps are null, never zero,
+// when their denominator is zero.
 type Metrics struct {
-	PoCount       int64  `json:"poCount"`
-	AmountMinor   int64  `json:"amountMinor"`
-	CostedMinor   int64  `json:"costedMinor"`
-	UncostedMinor int64  `json:"uncostedMinor"`
-	CapitalMinor  int64  `json:"capitalMinor"`
-	MarginMinor   int64  `json:"marginMinor"`
-	MarginBps     *int64 `json:"marginBps"`
-	CoverageBps   *int64 `json:"coverageBps"`
+	PoCount           int64  `json:"poCount"`
+	AmountMinor       int64  `json:"amountMinor"`
+	CostedMinor       int64  `json:"costedMinor"`
+	UncostedMinor     int64  `json:"uncostedMinor"`
+	ExtraExpenseMinor int64  `json:"extraExpenseMinor"`
+	CapitalMinor      int64  `json:"capitalMinor"`
+	MarginMinor       int64  `json:"marginMinor"`
+	MarginBps         *int64 `json:"marginBps"`
+	CoverageBps       *int64 `json:"coverageBps"`
 }
 
 // Company is the issuer snapshot the report was generated under.
@@ -152,10 +157,33 @@ type Company struct {
 
 // Population describes the facets a filter selector can offer without
 // changing the selected currency or category.
+//
+// The three population counters are health facts about the selected currency,
+// not about the selected date range or category: a saved record outside the
+// range still needs its allocation, and a lapsed offer is still lapsed. Each is
+// a count of records, never an amount, and they are never summed into Totals.
 type Population struct {
-	AvailableCurrencies  []string `json:"availableCurrencies"`
-	HasUnassigned        bool     `json:"hasUnassigned"`
-	SourceMissingPoCount int64    `json:"sourceMissingPoCount"`
+	AvailableCurrencies []string `json:"availableCurrencies"`
+	HasUnassigned       bool     `json:"hasUnassigned"`
+	// SourceMissingPoCount counts filtered purchase orders whose source
+	// quotation was deleted. Unlike the counters below it follows the date and
+	// category filter, because it describes the rows the report is showing.
+	SourceMissingPoCount int64 `json:"sourceMissingPoCount"`
+	// UnallocatedPoCount counts saved purchase orders in the report currency
+	// with no allocation row at all: the pre-#650 shape a backfill has not
+	// reached yet. A record whose every line is a deliberate extra also owns no
+	// allocation and is counted, because the predicate is the allocation set.
+	UnallocatedPoCount int64 `json:"unallocatedPoCount"`
+	// LegacyFallbackPoCount counts saved purchase orders in the report currency
+	// with at least one quotation-kind line that names no quotation leaf. An
+	// extra line names none by design and is not a legacy line.
+	LegacyFallbackPoCount int64 `json:"legacyFallbackPoCount"`
+	// ExpiredUnclosedQuotationCount counts quotations, in the report currency,
+	// whose latest issued revision's offer has lapsed in the company's WIB
+	// calendar and that are not closed. The last valid day is still valid.
+	// A fully bought quotation is still counted: the offer lapsed even though
+	// its remainder was consumed, and only an explicit close excludes it.
+	ExpiredUnclosedQuotationCount int64 `json:"expiredUnclosedQuotationCount"`
 }
 
 // Period is one actual calendar bucket. The metrics are embedded so the wire
@@ -199,6 +227,14 @@ type Note struct {
 type PipelineSummary struct {
 	UnsoldAmountMinor int64 `json:"unsoldAmountMinor"`
 	UnsoldMarginMinor int64 `json:"unsoldMarginMinor"`
+	// FulfillmentBps is the bought share of the quoted quantity, in basis
+	// points: bought / quoted * 10000, rounded half away from zero, and 0 when
+	// the quoted quantity is 0. It is a coverage ratio of quantity, never of
+	// money: it is deliberately separate from Metrics.CoverageBps and may read
+	// above 10000 when the customer bought more than the quotation offered.
+	// Expiry and closure never change it; a closed quotation's remainder has
+	// already left Unsold but the bought quantity still stands.
+	FulfillmentBps int64 `json:"fulfillmentBps"`
 }
 
 // VarianceSummary is the realized commercial comparison between what was
@@ -209,8 +245,9 @@ type PipelineSummary struct {
 //
 // Price variance has no cost effect (it is pure margin); quantity extra income
 // carries both the quoted revenue and the frozen cost of the extra units, so
-// its amount and margin differ. Closed loss is zero until #656 implements
-// explicit quotation closure.
+// its amount and margin differ. ClosedLoss is the unbought remainder of an
+// explicitly closed quotation (#656): it leaves Unsold, is subtracted from
+// NetRealizedVariance, and reopening the quotation moves it back to Unsold.
 type VarianceSummary struct {
 	QuantityExtraIncomeAmountMinor int64 `json:"quantityExtraIncomeAmountMinor"`
 	QuantityExtraIncomeMarginMinor int64 `json:"quantityExtraIncomeMarginMinor"`

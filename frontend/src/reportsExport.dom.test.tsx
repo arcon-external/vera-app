@@ -234,6 +234,7 @@ function reportWire(): poreport.Report {
         amountMinor: period.amountMinor,
         costedMinor: period.costedMinor,
         uncostedMinor: period.uncostedMinor,
+        extraExpenseMinor: period.extraExpenseMinor,
         capitalMinor: period.capitalMinor,
         marginMinor: period.marginMinor,
         marginBps: period.marginBps,

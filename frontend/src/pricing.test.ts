@@ -51,6 +51,7 @@ const fixture = JSON.parse(readFileSync(fixturePath, "utf8")) as { cases: Fixtur
 function toSubItem(line: FixtureLine, index: number): EditorSubItem {
   return {
     id: index,
+    no: index + 1,
     description: `part ${index}`,
     qty: String(line.qty),
     uom: "Pc",

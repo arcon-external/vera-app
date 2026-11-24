@@ -32,10 +32,18 @@ import (
 //
 //	amount    = subtotal_minor - discount_minor + adjustment_minor  (ex PPN)
 //	costed    = SUM(net_minor) of lines whose exact source cost resolved
+//	extra     = SUM(net_minor) of explicit extra expense lines
 //	capital   = round_half_away(SUM(cost_unit * quantity_scaled) / 10000)
 //	            rounded once per PO, left unrounded across a PO's lines
 //	margin    = costed - capital                                   (signed)
-//	uncosted  = amount - costed
+//	uncosted  = amount - costed - extra
+//	coverage  = costed / (amount - extra)
+//
+// An extra line (#655) is a pass-through: its amount is real revenue, but it has
+// no supplier cost and no margin, so it is neither costed nor uncosted. It is
+// reported in its own Extra Expense bucket and subtracted from the coverage
+// denominator. A record whose only line is an extra therefore has a zero
+// denominator and null coverage, never 0% or 100% profit.
 //
 // Capital's division happens after the lines are summed, so two half-unit
 // lines round together rather than becoming zeros separately. The per-PO
@@ -124,6 +132,18 @@ type PurchaseOrderReportSnapshot struct {
 	// LegacyAdjustmentPoCount is the number of filtered POs carrying a retired
 	// nonzero whole-order discount or adjustment.
 	LegacyAdjustmentPoCount int64
+	// UnallocatedPoCount is the number of saved POs in the report currency with
+	// no allocation row at all. It ignores the date and category filters: the
+	// population's allocation health is not a property of the shown range.
+	UnallocatedPoCount int64
+	// LegacyFallbackPoCount is the number of saved POs in the report currency
+	// with at least one quotation-kind line that names no quotation leaf. Extra
+	// lines name none by design and are not counted.
+	LegacyFallbackPoCount int64
+	// ExpiredUnclosedQuotationCount is the number of quotations in the report
+	// currency whose latest issued revision's offer has lapsed in the company's
+	// WIB calendar and that are not closed. The last valid day is still valid.
+	ExpiredUnclosedQuotationCount int64
 }
 
 // reportCategoryOrder is the fixed wire order of an All category breakdown.
@@ -242,7 +262,11 @@ func (s *Store) ReportPurchaseOrders(ctx context.Context, query poreport.Query, 
 	if err != nil {
 		return PurchaseOrderReportSnapshot{}, err
 	}
-	totals, err := reportMetrics(totalsRow.PoCount, amount, costed, capital)
+	extra, err := reportExactNumber(totalsRow.ExtraExpenseMinor, "total extra expense")
+	if err != nil {
+		return PurchaseOrderReportSnapshot{}, err
+	}
+	totals, err := reportMetrics(totalsRow.PoCount, amount, costed, capital, extra)
 	if err != nil {
 		return PurchaseOrderReportSnapshot{}, fmt.Errorf("total metrics: %w", err)
 	}
@@ -251,6 +275,15 @@ func (s *Store) ReportPurchaseOrders(ctx context.Context, query poreport.Query, 
 	}
 	if err := poreport.CheckExact(totalsRow.LegacyAdjustmentPoCount); err != nil {
 		return PurchaseOrderReportSnapshot{}, fmt.Errorf("legacy adjustment count: %w", err)
+	}
+	if err := poreport.CheckExact(totalsRow.UnallocatedPoCount); err != nil {
+		return PurchaseOrderReportSnapshot{}, fmt.Errorf("unallocated purchase order count: %w", err)
+	}
+	if err := poreport.CheckExact(totalsRow.LegacyFallbackPoCount); err != nil {
+		return PurchaseOrderReportSnapshot{}, fmt.Errorf("legacy fallback purchase order count: %w", err)
+	}
+	if err := poreport.CheckExact(totalsRow.ExpiredUnclosedQuotationCount); err != nil {
+		return PurchaseOrderReportSnapshot{}, fmt.Errorf("expired unclosed quotation count: %w", err)
 	}
 	pipeline, variance, err := reportPipelineAndVariance(pipelineRaw)
 	if err != nil {
@@ -283,52 +316,63 @@ func (s *Store) ReportPurchaseOrders(ctx context.Context, query poreport.Query, 
 	}
 
 	return PurchaseOrderReportSnapshot{
-		AsOf:                    asOf,
-		Totals:                  totals,
-		Pipeline:                pipeline,
-		Variance:                variance,
-		Periods:                 periods,
-		Categories:              categories,
-		CategorySeries:          series,
-		History:                 history.months,
-		HistoryOutOfRange:       history.outOfRange,
-		HistoryBasis:            history.basis,
-		Daily:                   daily.days,
-		DailyOutOfRange:         daily.outOfRange,
-		AvailableCurrencies:     currencies,
-		HasUnassigned:           hasUnassigned,
-		SourceMissingPoCount:    totalsRow.SourceMissingPoCount,
-		LegacyAdjustmentPoCount: totalsRow.LegacyAdjustmentPoCount,
+		AsOf:                          asOf,
+		Totals:                        totals,
+		Pipeline:                      pipeline,
+		Variance:                      variance,
+		Periods:                       periods,
+		Categories:                    categories,
+		CategorySeries:                series,
+		History:                       history.months,
+		HistoryOutOfRange:             history.outOfRange,
+		HistoryBasis:                  history.basis,
+		Daily:                         daily.days,
+		DailyOutOfRange:               daily.outOfRange,
+		AvailableCurrencies:           currencies,
+		HasUnassigned:                 hasUnassigned,
+		SourceMissingPoCount:          totalsRow.SourceMissingPoCount,
+		LegacyAdjustmentPoCount:       totalsRow.LegacyAdjustmentPoCount,
+		UnallocatedPoCount:            totalsRow.UnallocatedPoCount,
+		LegacyFallbackPoCount:         totalsRow.LegacyFallbackPoCount,
+		ExpiredUnclosedQuotationCount: totalsRow.ExpiredUnclosedQuotationCount,
 	}, nil
 }
 
 // reportTotalsJSON is the exact totals object Postgres returns. Every money
 // field is a json.Number because the SQL sum is numeric: a 10,000-PO report can
 // exceed int64's comfortable range only after the fact, and the caller must see
-// a typed range refusal rather than a wrapped figure.
+// a typed range refusal rather than a wrapped figure. The three population
+// counts ride here because they are single-row facts beside the grand total;
+// they are counts, never amounts.
 type reportTotalsJSON struct {
-	PoCount                 int64       `json:"poCount"`
-	AmountMinor             json.Number `json:"amountMinor"`
-	CostedMinor             json.Number `json:"costedMinor"`
-	CapitalMinor            json.Number `json:"capitalMinor"`
-	SourceMissingPoCount    int64       `json:"sourceMissingPoCount"`
-	LegacyAdjustmentPoCount int64       `json:"legacyAdjustmentPoCount"`
+	PoCount                       int64       `json:"poCount"`
+	AmountMinor                   json.Number `json:"amountMinor"`
+	CostedMinor                   json.Number `json:"costedMinor"`
+	ExtraExpenseMinor             json.Number `json:"extraExpenseMinor"`
+	CapitalMinor                  json.Number `json:"capitalMinor"`
+	SourceMissingPoCount          int64       `json:"sourceMissingPoCount"`
+	LegacyAdjustmentPoCount       int64       `json:"legacyAdjustmentPoCount"`
+	UnallocatedPoCount            int64       `json:"unallocatedPoCount"`
+	LegacyFallbackPoCount         int64       `json:"legacyFallbackPoCount"`
+	ExpiredUnclosedQuotationCount int64       `json:"expiredUnclosedQuotationCount"`
 }
 
 type reportBucketJSON struct {
-	PeriodStart  string      `json:"periodStart"`
-	PoCount      int64       `json:"poCount"`
-	AmountMinor  json.Number `json:"amountMinor"`
-	CostedMinor  json.Number `json:"costedMinor"`
-	CapitalMinor json.Number `json:"capitalMinor"`
+	PeriodStart       string      `json:"periodStart"`
+	PoCount           int64       `json:"poCount"`
+	AmountMinor       json.Number `json:"amountMinor"`
+	CostedMinor       json.Number `json:"costedMinor"`
+	ExtraExpenseMinor json.Number `json:"extraExpenseMinor"`
+	CapitalMinor      json.Number `json:"capitalMinor"`
 }
 
 type reportCategoryJSON struct {
-	BusinessCategory string      `json:"businessCategory"`
-	PoCount          int64       `json:"poCount"`
-	AmountMinor      json.Number `json:"amountMinor"`
-	CostedMinor      json.Number `json:"costedMinor"`
-	CapitalMinor     json.Number `json:"capitalMinor"`
+	BusinessCategory  string      `json:"businessCategory"`
+	PoCount           int64       `json:"poCount"`
+	AmountMinor       json.Number `json:"amountMinor"`
+	CostedMinor       json.Number `json:"costedMinor"`
+	ExtraExpenseMinor json.Number `json:"extraExpenseMinor"`
+	CapitalMinor      json.Number `json:"capitalMinor"`
 }
 
 type reportCategoryPeriodJSON struct {
@@ -339,11 +383,12 @@ type reportCategoryPeriodJSON struct {
 }
 
 type reportHistoryJSON struct {
-	MonthStart   string      `json:"monthStart"`
-	PoCount      int64       `json:"poCount"`
-	AmountMinor  json.Number `json:"amountMinor"`
-	CostedMinor  json.Number `json:"costedMinor"`
-	CapitalMinor json.Number `json:"capitalMinor"`
+	MonthStart        string      `json:"monthStart"`
+	PoCount           int64       `json:"poCount"`
+	AmountMinor       json.Number `json:"amountMinor"`
+	CostedMinor       json.Number `json:"costedMinor"`
+	ExtraExpenseMinor json.Number `json:"extraExpenseMinor"`
+	CapitalMinor      json.Number `json:"capitalMinor"`
 }
 
 // reportExactNumber reads one JSON numeric aggregate as an int64 that a
@@ -400,19 +445,23 @@ func reportOptionalExact(value json.Number, field string) (int64, error) {
 	return reportExactNumber(value, field)
 }
 
-func reportMetrics(poCount, amount, costed, capital int64) (poreport.Metrics, error) {
+func reportMetrics(poCount, amount, costed, capital, extra int64) (poreport.Metrics, error) {
 	for name, value := range map[string]int64{
-		"po count": poCount,
-		"amount":   amount,
-		"costed":   costed,
-		"capital":  capital,
+		"po count":      poCount,
+		"amount":        amount,
+		"costed":        costed,
+		"capital":       capital,
+		"extra expense": extra,
 	} {
 		if err := poreport.CheckExact(value); err != nil {
 			return poreport.Metrics{}, fmt.Errorf("%s: %w", name, err)
 		}
 	}
 	margin := costed - capital
-	uncosted := amount - costed
+	// An extra line is a pass-through charge, not an unknown cost: it leaves
+	// uncosted and the coverage denominator, so a record whose only line is an
+	// extra reads 0% uncovered rather than 100% profit.
+	uncosted := amount - costed - extra
 	if err := poreport.CheckExact(margin); err != nil {
 		return poreport.Metrics{}, fmt.Errorf("margin: %w", err)
 	}
@@ -423,19 +472,20 @@ func reportMetrics(poCount, amount, costed, capital int64) (poreport.Metrics, er
 	if err != nil {
 		return poreport.Metrics{}, fmt.Errorf("margin percentage: %w", err)
 	}
-	coverageBps, err := poreport.RatioBps(costed, amount)
+	coverageBps, err := poreport.RatioBps(costed, amount-extra)
 	if err != nil {
 		return poreport.Metrics{}, fmt.Errorf("coverage percentage: %w", err)
 	}
 	return poreport.Metrics{
-		PoCount:       poCount,
-		AmountMinor:   amount,
-		CostedMinor:   costed,
-		UncostedMinor: uncosted,
-		CapitalMinor:  capital,
-		MarginMinor:   margin,
-		MarginBps:     marginBps,
-		CoverageBps:   coverageBps,
+		PoCount:           poCount,
+		AmountMinor:       amount,
+		CostedMinor:       costed,
+		UncostedMinor:     uncosted,
+		ExtraExpenseMinor: extra,
+		CapitalMinor:      capital,
+		MarginMinor:       margin,
+		MarginBps:         marginBps,
+		CoverageBps:       coverageBps,
 	}, nil
 }
 
@@ -472,7 +522,11 @@ func reportPeriods(raw []byte, from, to, asOf time.Time, bucket string) ([]porep
 		if err != nil {
 			return nil, err
 		}
-		metrics, err := reportMetrics(row.PoCount, amount, costed, capital)
+		extra, err := reportOptionalExact(row.ExtraExpenseMinor, "period "+start.Format(time.DateOnly)+" extra expense")
+		if err != nil {
+			return nil, err
+		}
+		metrics, err := reportMetrics(row.PoCount, amount, costed, capital, extra)
 		if err != nil {
 			return nil, fmt.Errorf("period %s: %w", start.Format(time.DateOnly), err)
 		}
@@ -519,7 +573,11 @@ func reportCategories(raw []byte, filter string) ([]poreport.Category, error) {
 		if err != nil {
 			return nil, err
 		}
-		metrics, err := reportMetrics(row.PoCount, amount, costed, capital)
+		extra, err := reportOptionalExact(row.ExtraExpenseMinor, "category "+code+" extra expense")
+		if err != nil {
+			return nil, err
+		}
+		metrics, err := reportMetrics(row.PoCount, amount, costed, capital, extra)
 		if err != nil {
 			return nil, fmt.Errorf("category %s: %w", code, err)
 		}
@@ -682,8 +740,14 @@ func reportHistory(raw []byte, historyTo, asOf time.Time) (reportHistorySample, 
 		if err != nil {
 			return reportHistorySample{basis: basis, outOfRange: true}, nil
 		}
+		extra, err := reportOptionalExact(row.ExtraExpenseMinor, "history "+key+" extra expense")
+		if err != nil {
+			return reportHistorySample{basis: basis, outOfRange: true}, nil
+		}
 		uncosted, err := reportExactBigInt(
-			new(big.Int).Sub(big.NewInt(amount), big.NewInt(costed)),
+			new(big.Int).Sub(
+				new(big.Int).Sub(big.NewInt(amount), big.NewInt(costed)),
+				big.NewInt(extra)),
 			"history "+key+" uncosted amount")
 		if err != nil {
 			return reportHistorySample{basis: basis, outOfRange: true}, nil
@@ -691,11 +755,12 @@ func reportHistory(raw []byte, historyTo, asOf time.Time) (reportHistorySample, 
 		history = append(history, poreport.HistoryMonth{
 			MonthStart: key,
 			Metrics: poreport.Metrics{
-				PoCount:       row.PoCount,
-				AmountMinor:   amount,
-				CostedMinor:   costed,
-				UncostedMinor: uncosted,
-				CapitalMinor:  capital,
+				PoCount:           row.PoCount,
+				AmountMinor:       amount,
+				CostedMinor:       costed,
+				UncostedMinor:     uncosted,
+				ExtraExpenseMinor: extra,
+				CapitalMinor:      capital,
 			},
 		})
 	}
@@ -711,11 +776,12 @@ type reportDailySample struct {
 }
 
 type reportDailyJSON struct {
-	Date         string      `json:"date"`
-	PoCount      int64       `json:"poCount"`
-	AmountMinor  json.Number `json:"amountMinor"`
-	CostedMinor  json.Number `json:"costedMinor"`
-	CapitalMinor json.Number `json:"capitalMinor"`
+	Date              string      `json:"date"`
+	PoCount           int64       `json:"poCount"`
+	AmountMinor       json.Number `json:"amountMinor"`
+	CostedMinor       json.Number `json:"costedMinor"`
+	ExtraExpenseMinor json.Number `json:"extraExpenseMinor"`
+	CapitalMinor      json.Number `json:"capitalMinor"`
 }
 
 // reportDaily decodes the current month's daily rows. Days with no orders are
@@ -757,8 +823,14 @@ func reportDaily(raw []byte, asOf time.Time) (reportDailySample, error) {
 		if err != nil {
 			return reportDailySample{outOfRange: true}, nil
 		}
+		extra, err := reportExactNumber(row.ExtraExpenseMinor, "daily "+row.Date+" extra expense")
+		if err != nil {
+			return reportDailySample{outOfRange: true}, nil
+		}
 		uncosted, err := reportExactBigInt(
-			new(big.Int).Sub(big.NewInt(amount), big.NewInt(costed)),
+			new(big.Int).Sub(
+				new(big.Int).Sub(big.NewInt(amount), big.NewInt(costed)),
+				big.NewInt(extra)),
 			"daily "+row.Date+" uncosted amount")
 		if err != nil {
 			return reportDailySample{outOfRange: true}, nil
@@ -766,11 +838,12 @@ func reportDaily(raw []byte, asOf time.Time) (reportDailySample, error) {
 		days = append(days, poreport.HistoryDay{
 			Date: row.Date,
 			Metrics: poreport.Metrics{
-				PoCount:       row.PoCount,
-				AmountMinor:   amount,
-				CostedMinor:   costed,
-				UncostedMinor: uncosted,
-				CapitalMinor:  capital,
+				PoCount:           row.PoCount,
+				AmountMinor:       amount,
+				CostedMinor:       costed,
+				UncostedMinor:     uncosted,
+				ExtraExpenseMinor: extra,
+				CapitalMinor:      capital,
 			},
 		})
 	}
@@ -861,6 +934,7 @@ func reportNextPeriod(start time.Time, bucket string) time.Time {
 type reportPipelineJSON struct {
 	UnsoldAmountMinor              json.Number `json:"unsoldAmountMinor"`
 	UnsoldMarginMinor              json.Number `json:"unsoldMarginMinor"`
+	FulfillmentBps                 json.Number `json:"fulfillmentBps"`
 	QuantityExtraIncomeAmountMinor json.Number `json:"quantityExtraIncomeAmountMinor"`
 	QuantityExtraIncomeMarginMinor json.Number `json:"quantityExtraIncomeMarginMinor"`
 	PriceExtraIncomeMinor          json.Number `json:"priceExtraIncomeMinor"`
@@ -872,8 +946,8 @@ type reportPipelineJSON struct {
 }
 
 // reportPipelineAndVariance decodes the one pipeline/variance object. Closed
-// loss is deliberately zero: quotation closure belongs to #656 and this build
-// must not invent a closed population.
+// loss is real since #656: an explicit quotation close moves the unbought
+// remainder out of Unsold and into a realized loss the net subtracts.
 func reportPipelineAndVariance(raw []byte) (poreport.PipelineSummary, poreport.VarianceSummary, error) {
 	var row reportPipelineJSON
 	if err := json.Unmarshal(raw, &row); err != nil {
@@ -888,6 +962,10 @@ func reportPipelineAndVariance(raw []byte) (poreport.PipelineSummary, poreport.V
 		return poreport.PipelineSummary{}, poreport.VarianceSummary{}, err
 	}
 	unsoldMargin, err := read(row.UnsoldMarginMinor, "pipeline unsold margin")
+	if err != nil {
+		return poreport.PipelineSummary{}, poreport.VarianceSummary{}, err
+	}
+	fulfillmentBps, err := read(row.FulfillmentBps, "pipeline fulfillment bps")
 	if err != nil {
 		return poreport.PipelineSummary{}, poreport.VarianceSummary{}, err
 	}
@@ -926,6 +1004,7 @@ func reportPipelineAndVariance(raw []byte) (poreport.PipelineSummary, poreport.V
 	return poreport.PipelineSummary{
 			UnsoldAmountMinor: unsoldAmount,
 			UnsoldMarginMinor: unsoldMargin,
+			FulfillmentBps:    fulfillmentBps,
 		}, poreport.VarianceSummary{
 			QuantityExtraIncomeAmountMinor: quantityExtraAmount,
 			QuantityExtraIncomeMarginMinor: quantityExtraMargin,
@@ -944,27 +1023,30 @@ func reportPipelineAndVariance(raw []byte) (poreport.PipelineSummary, poreport.V
 // expands each quotation's latest issued revision into its priced leaves and
 // joins the cross-revision saved allocations by leaf, so:
 //
-//   - Unsold is the quoted quantity not yet bought, at the row-discounted
-//     quotation baseline;
+//   - Unsold is the quoted quantity not yet bought on an open quotation, at the
+//     row-discounted quotation baseline;
+//   - closed loss is the same remainder once an admin closes the quotation
+//     (#656): it leaves Unsold and becomes a realized loss the net subtracts;
 //   - quantity extra income is the over-bought quantity at that same baseline
 //     (and its frozen cost);
 //   - price variance is the actual allocation revenue compared with the
 //     baseline revenue already recorded in the allocation.
 //
 // Unknown supplier cost is zero for the capital side rather than profit, the
-// same honesty rule the Actual report uses. Closed loss is hard zero until
-// #656 implements closure. The query deliberately does not filter by the
-// report's date or category: bought state spans revisions and categories, so a
-// date-filtered half-answer would misstate what is still orderable.
+// same honesty rule the Actual report uses. The query deliberately does not
+// filter by the report's date or category: bought state spans revisions and
+// categories, so a date-filtered half-answer would misstate what is still
+// orderable.
 func purchaseOrderPipelineSQL(schema string) string {
 	return fmt.Sprintf(`
 WITH latest_revision AS (
     -- Currency is part of the partition: a USD quotation must never add its
     -- cents to an IDR report's Unsold. Select the latest revision's currency
-    -- and filter the leaves by the report currency below.
+    -- and closure, and filter the leaves by the report currency below.
     SELECT DISTINCT ON (r.quotation_id) r.id AS revision_id,
-           r.quotation_id, r.currency
+           r.quotation_id, r.currency, q.closed_at
     FROM %[1]s.quotation_revisions r
+    JOIN %[1]s.quotations q ON q.id = r.quotation_id
     ORDER BY r.quotation_id, r.revision_number DESC
 ),
 leaves AS (
@@ -973,7 +1055,8 @@ leaves AS (
     SELECT lr.quotation_id, i.item_no, NULL::integer AS sub_no,
            (i.qty::numeric * 10000) AS quoted_qty_scaled,
            i.marginalized_unit_price::numeric AS quoted_unit_price_minor,
-           i.unit_price::numeric AS cost_unit_minor
+           i.unit_price::numeric AS cost_unit_minor,
+           lr.closed_at
     FROM latest_revision lr
     JOIN %[1]s.quotation_revision_items i ON i.revision_id = lr.revision_id
     WHERE lr.currency = $2
@@ -985,7 +1068,8 @@ leaves AS (
     SELECT lr.quotation_id, i.item_no, s.sub_no,
            (s.qty::numeric * 10000),
            s.unit_price::numeric,
-           s.unit_cost::numeric
+           s.unit_cost::numeric,
+           lr.closed_at
     FROM latest_revision lr
     JOIN %[1]s.quotation_revision_items i ON i.revision_id = lr.revision_id
     JOIN %[1]s.quotation_revision_sub_items s ON s.revision_item_id = i.id
@@ -1008,14 +1092,17 @@ bought AS (
 position AS (
     -- A FULL OUTER JOIN keeps a bought allocation whose leaf was removed in a
     -- later revision or whose quotation was deleted. Its realized price
-    -- variance survives; the nullable quoted columns make the unsold and
-    -- quantity-extra gates below contribute zero for that row.
+    -- variance survives; the nullable quoted columns make the unsold, closed
+    -- loss and quantity-extra gates below contribute zero for that row. A
+    -- bought-only row has no closed_at either, so a close can never turn a
+    -- removed bought leaf into a loss: there is no quoted quantity to close.
     SELECT COALESCE(b.bought_qty_scaled, 0) AS bought_qty_scaled,
            COALESCE(b.bought_revenue_minor, 0) AS bought_revenue_minor,
            COALESCE(b.bought_at_quoted_minor, 0) AS bought_at_quoted_minor,
            l.quoted_qty_scaled,
            l.quoted_unit_price_minor,
-           l.cost_unit_minor
+           l.cost_unit_minor,
+           l.closed_at
     FROM leaves l
     FULL OUTER JOIN bought b
       ON b.quotation_id = l.quotation_id
@@ -1037,31 +1124,65 @@ classified AS (
                 ELSE 0 END AS quantity_extra_cost,
            CASE WHEN quoted_qty_scaled IS NOT NULL
                      AND bought_qty_scaled < quoted_qty_scaled
+                     AND closed_at IS NULL
                 THEN ROUND((quoted_qty_scaled - bought_qty_scaled)
                            * quoted_unit_price_minor / 10000)
                 ELSE 0 END AS unsold_amount,
            CASE WHEN quoted_qty_scaled IS NOT NULL
                      AND bought_qty_scaled < quoted_qty_scaled
+                     AND closed_at IS NULL
                 THEN ROUND((quoted_qty_scaled - bought_qty_scaled)
                            * cost_unit_minor / 10000)
-                ELSE 0 END AS unsold_cost
+                ELSE 0 END AS unsold_cost,
+           CASE WHEN quoted_qty_scaled IS NOT NULL
+                     AND bought_qty_scaled < quoted_qty_scaled
+                     AND closed_at IS NOT NULL
+                THEN ROUND((quoted_qty_scaled - bought_qty_scaled)
+                           * quoted_unit_price_minor / 10000)
+                ELSE 0 END AS closed_loss_amount,
+           CASE WHEN quoted_qty_scaled IS NOT NULL
+                     AND bought_qty_scaled < quoted_qty_scaled
+                     AND closed_at IS NOT NULL
+                THEN ROUND((quoted_qty_scaled - bought_qty_scaled)
+                           * cost_unit_minor / 10000)
+                ELSE 0 END AS closed_loss_cost,
+           -- Fulfillment coverage is measured on the latest revision's leaves
+           -- only: a bought leaf a later revision removed is realized history,
+           -- not part of what this quotation currently offers. A removed
+           -- bought-only row keeps a zero numerator and never inflates the
+           -- ratio.
+           CASE WHEN quoted_qty_scaled IS NOT NULL
+                THEN bought_qty_scaled
+                ELSE 0 END AS bought_on_quoted,
+           COALESCE(quoted_qty_scaled, 0) AS quoted_quantity
     FROM position
 )
 SELECT jsonb_build_object(
     'unsoldAmountMinor', COALESCE(SUM(unsold_amount), 0),
     'unsoldMarginMinor', COALESCE(SUM(unsold_amount - unsold_cost), 0),
+    -- Bought quantity over quoted quantity in basis points, rounded half away
+    -- from zero by numeric ROUND. Above 10000 is a real over-buy and is never
+    -- capped; a zero quoted population is 0, not a division.
+    'fulfillmentBps', CASE
+        WHEN COALESCE(SUM(quoted_quantity), 0) > 0
+            THEN ROUND(COALESCE(SUM(bought_on_quoted), 0) * 10000
+                       / SUM(quoted_quantity))
+        ELSE 0 END,
     'quantityExtraIncomeAmountMinor', COALESCE(SUM(quantity_extra_amount), 0),
     'quantityExtraIncomeMarginMinor',
         COALESCE(SUM(quantity_extra_amount - quantity_extra_cost), 0),
     'priceExtraIncomeMinor', COALESCE(SUM(price_extra), 0),
     'priceLossMinor', COALESCE(SUM(price_loss), 0),
-    'closedLossAmountMinor', 0,
-    'closedLossMarginMinor', 0,
+    'closedLossAmountMinor', COALESCE(SUM(closed_loss_amount), 0),
+    'closedLossMarginMinor',
+        COALESCE(SUM(closed_loss_amount - closed_loss_cost), 0),
     'netRealizedVarianceAmountMinor',
-        COALESCE(SUM(quantity_extra_amount + price_extra - price_loss), 0),
+        COALESCE(SUM(quantity_extra_amount + price_extra - price_loss
+                     - closed_loss_amount), 0),
     'netRealizedVarianceMarginMinor',
         COALESCE(SUM(quantity_extra_amount - quantity_extra_cost
-                     + price_extra - price_loss), 0)
+                     + price_extra - price_loss
+                     - (closed_loss_amount - closed_loss_cost)), 0)
 )
 FROM classified
 `, schema)
@@ -1143,18 +1264,26 @@ item_alloc_agg AS (
 ),
 item_metrics AS (
     -- Resolve each item independently so a mixed historical PO keeps the cost
-    -- of allocated lines, matched legacy lines, and uncosted null-ref lines.
+    -- of allocated lines, matched legacy lines, and uncosted null-ref lines. An
+    -- extra line (#655) is a pass-through expense: it contributes neither cost
+    -- nor capital, and its full net is its own Extra Expense bucket.
     SELECT po.id AS po_id,
            CASE
+               WHEN poi.line_kind = 'extra' THEN 0::numeric
                WHEN ia.alloc_count > 0 THEN ia.alloc_costed
                WHEN resolved.cost_unit IS NOT NULL THEN poi.net_minor::numeric
                ELSE 0::numeric
            END AS item_costed,
            CASE
+               WHEN poi.line_kind = 'extra' THEN 0::numeric
                WHEN ia.alloc_count > 0 THEN ia.alloc_capital_scaled
                WHEN resolved.cost_unit IS NOT NULL THEN poi.quantity_scaled::numeric * resolved.cost_unit
                ELSE 0::numeric
-           END AS item_capital_scaled
+           END AS item_capital_scaled,
+           CASE
+               WHEN poi.line_kind = 'extra' THEN poi.net_minor::numeric
+               ELSE 0::numeric
+           END AS item_extra_expense
     FROM base_population po
     JOIN %[1]s.purchase_order_items poi ON poi.purchase_order_id = po.id
     LEFT JOIN item_alloc_agg ia ON ia.purchase_order_item_id = poi.id
@@ -1183,6 +1312,7 @@ po_metrics AS (
            po.business_category,
            po.subtotal_minor::numeric - po.discount_minor + po.adjustment_minor AS amount,
            COALESCE(SUM(im.item_costed), 0) AS costed,
+           COALESCE(SUM(im.item_extra_expense), 0) AS extra_expense,
            ROUND(COALESCE(SUM(im.item_capital_scaled), 0) / 10000) AS capital,
            (po.discount_minor <> 0 OR po.adjustment_minor <> 0) AS legacy_adjustment,
            (po.quotation_id IS NULL) AS source_missing,
@@ -1206,7 +1336,8 @@ actual_rows AS (
                po.received_date
            )::date AS bucket_start,
            CASE WHEN po.business_category = '' THEN 'UNASSIGNED' ELSE po.business_category END AS category,
-           po.amount, po.costed, po.capital, po.source_missing, po.legacy_adjustment
+           po.amount, po.costed, po.extra_expense, po.capital,
+           po.source_missing, po.legacy_adjustment
     FROM po_metrics po
     WHERE po.is_actual
 ),
@@ -1220,6 +1351,7 @@ actual_cube AS (
            COUNT(*) AS po_count,
            SUM(amount) AS amount,
            SUM(costed) AS costed,
+           SUM(extra_expense) AS extra_expense,
            SUM(capital) AS capital,
            COUNT(*) FILTER (WHERE source_missing) AS source_missing_count,
            COUNT(*) FILTER (WHERE legacy_adjustment) AS legacy_adjustment_count,
@@ -1232,6 +1364,7 @@ history_metrics AS (
            COUNT(*) AS po_count,
            SUM(amount) AS amount,
            SUM(costed) AS costed,
+           SUM(extra_expense) AS extra_expense,
            SUM(capital) AS capital
     FROM po_metrics
     WHERE received_date < $6::date
@@ -1244,6 +1377,7 @@ daily_metrics AS (
            COUNT(*) AS po_count,
            SUM(amount) AS amount,
            SUM(costed) AS costed,
+           SUM(extra_expense) AS extra_expense,
            SUM(capital) AS capital
     FROM po_metrics
     WHERE received_date >= date_trunc('month', $8::date)::date
@@ -1259,21 +1393,86 @@ facet_rollup AS (
       AND po.received_date >= $3::date
       AND po.received_date < $4::date
     GROUP BY po.currency
+),
+population_counts AS (
+    -- Issue #648: population health for the selected currency. These are
+    -- deliberately outside the date and category filters: an unallocated
+    -- record or a lapsed offer is a fact about the population, not about the
+    -- range the screen happens to show. Quotations carry no organization
+    -- column (029 keeps one tenant per deployment), so the quotation count is
+    -- currency-scoped only, exactly as the fulfillment read is.
+    SELECT
+        (
+            -- The pre-#650 shape: a saved order with no allocation row at all.
+            -- A record whose every line is a deliberate extra also owns no
+            -- allocation and is counted, because the predicate is the set.
+            SELECT COUNT(*)
+            FROM %[1]s.purchase_orders po
+            WHERE po.org_id = $1
+              AND po.state = 'saved'
+              AND po.currency = $2
+              AND NOT EXISTS (
+                  SELECT 1
+                  FROM %[1]s.purchase_order_allocations a
+                  WHERE a.purchase_order_id = po.id
+              )
+        ) AS unallocated_po_count,
+        (
+            -- A quotation-kind line that names no quotation leaf must fall
+            -- back to the legacy join, which cannot resolve its cost. An extra
+            -- line is nil-reference by design and is not a legacy line.
+            SELECT COUNT(*)
+            FROM %[1]s.purchase_orders po
+            WHERE po.org_id = $1
+              AND po.state = 'saved'
+              AND po.currency = $2
+              AND EXISTS (
+                  SELECT 1
+                  FROM %[1]s.purchase_order_items poi
+                  WHERE poi.purchase_order_id = po.id
+                    AND poi.quotation_item_no IS NULL
+                    AND poi.line_kind <> 'extra'
+              )
+        ) AS legacy_fallback_po_count,
+        (
+            -- The latest issued revision is the one that dates the offer, the
+            -- same choice the fulfillment read makes: a quotation whose latest
+            -- revision is another currency is not an offer in this partition.
+            -- Expiry is the company's WIB calendar day, and the last valid day
+            -- itself is still valid, exactly as quotationExpiryAt decides it.
+            SELECT COUNT(*)
+            FROM (
+                SELECT DISTINCT ON (r.quotation_id)
+                       r.currency, r.created_at, r.validity_days, q.closed_at
+                FROM %[1]s.quotation_revisions r
+                JOIN %[1]s.quotations q ON q.id = r.quotation_id
+                ORDER BY r.quotation_id, r.revision_number DESC
+            ) latest
+            WHERE latest.currency = $2
+              AND latest.closed_at IS NULL
+              AND (latest.created_at AT TIME ZONE 'Asia/Jakarta')::date
+                  + latest.validity_days < $8::date
+        ) AS expired_unclosed_quotation_count
 )
 SELECT
     (SELECT jsonb_build_object(
         'poCount', po_count,
         'amountMinor', COALESCE(amount, 0),
         'costedMinor', COALESCE(costed, 0),
+        'extraExpenseMinor', COALESCE(extra_expense, 0),
         'capitalMinor', COALESCE(capital, 0),
         'sourceMissingPoCount', source_missing_count,
-        'legacyAdjustmentPoCount', legacy_adjustment_count
-     ) FROM actual_cube WHERE grouping = 3),
+        'legacyAdjustmentPoCount', legacy_adjustment_count,
+        'unallocatedPoCount', unallocated_po_count,
+        'legacyFallbackPoCount', legacy_fallback_po_count,
+        'expiredUnclosedQuotationCount', expired_unclosed_quotation_count
+     ) FROM actual_cube, population_counts WHERE grouping = 3),
     (SELECT COALESCE(jsonb_agg(jsonb_build_object(
         'periodStart', to_char(bucket_start, 'YYYY-MM-DD'),
         'poCount', po_count,
         'amountMinor', amount,
         'costedMinor', costed,
+        'extraExpenseMinor', extra_expense,
         'capitalMinor', capital
      ) ORDER BY bucket_start), '[]'::jsonb) FROM actual_cube WHERE grouping = 1),
     (SELECT COALESCE(jsonb_agg(jsonb_build_object(
@@ -1281,6 +1480,7 @@ SELECT
         'poCount', po_count,
         'amountMinor', amount,
         'costedMinor', costed,
+        'extraExpenseMinor', extra_expense,
         'capitalMinor', capital
      ) ORDER BY category), '[]'::jsonb) FROM actual_cube WHERE grouping = 2),
     (SELECT COALESCE(jsonb_agg(jsonb_build_object(
@@ -1294,6 +1494,7 @@ SELECT
         'poCount', po_count,
         'amountMinor', amount,
         'costedMinor', costed,
+        'extraExpenseMinor', extra_expense,
         'capitalMinor', capital
      ) ORDER BY month_start), '[]'::jsonb) FROM history_metrics),
     (SELECT COALESCE(jsonb_agg(jsonb_build_object(
@@ -1301,6 +1502,7 @@ SELECT
         'poCount', po_count,
         'amountMinor', amount,
         'costedMinor', costed,
+        'extraExpenseMinor', extra_expense,
         'capitalMinor', capital
      ) ORDER BY day_start), '[]'::jsonb) FROM daily_metrics),
     (SELECT COALESCE(jsonb_agg(currency ORDER BY currency), '[]'::jsonb) FROM facet_rollup),

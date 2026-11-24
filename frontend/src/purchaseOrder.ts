@@ -8,13 +8,65 @@
 
 import {
   formatMoney,
-  tryParseMoneyInput,
   type CurrencyInfo,
 } from "./format";
+import {
+  MAX_DISCOUNT_PERCENT,
+  MAX_EXACT_MINOR,
+  QUANTITY_SCALE,
+  buildAggregatePayload,
+  lineGrossMinor,
+  parseDiscountPercent,
+  parseQuantityScaled,
+  parseUnitPriceMinor,
+  pruneEmptyAggregates,
+  rowDiscountMinor,
+  toMoneyMinor,
+  ungroupAggregate,
+  validateAggregateLayout,
+} from "./poAggregate";
 import { legacyServiceCategory, legacyTaxType } from "./tax";
 
-/** The fixed four-decimal quantity scale shared with the Go store. */
-export const QUANTITY_SCALE = 10000;
+// The exact-input parsers and the money kernel live in poAggregate.ts, the
+// lower layer, so that module can own the aggregate arithmetic without a
+// runtime cycle. They are re-exported here because this module is the PO
+// editor's public surface and every existing caller imports them from here.
+export {
+  MAX_DISCOUNT_PERCENT,
+  MAX_EXACT_MINOR,
+  QUANTITY_SCALE,
+  parseDiscountPercent,
+  parseQuantityScaled,
+  parseUnitPriceMinor,
+};
+
+/**
+ * The two purchase order line kinds (#655). A quotation line fulfils one leaf
+ * of the issued revision it was copied from and owns the allocation; an extra
+ * line was never on the quotation, carries no reference and no allocation, and
+ * is a pass-through expense with zero margin.
+ */
+export type PurchaseOrderLineKind = "quotation" | "extra";
+
+/**
+ * The one sentence that keeps the editor and the entry page honest: a
+ * purchase order starts from an issued quotation revision, never from an empty
+ * form. The Editor tab shows it before anything is open, and it is the
+ * refusal if a source-less draft is ever reachable (#655).
+ */
+export const PURCHASE_ORDER_SOURCE_REQUIRED_COPY =
+  "Start a purchase order from an issued quotation revision. The quotation supplies the customer, currency and line items; the customer PO number and dates are entered here.";
+
+/**
+ * Reads a stored kind. Only the exact extra value flips a line: an absent or
+ * unknown value is the compatibility quotation, because a line the server did
+ * not call an extra still fulfils its reference.
+ */
+export function purchaseOrderLineKindOf(
+  raw: string | null | undefined
+): PurchaseOrderLineKind {
+  return raw === "extra" ? "extra" : "quotation";
+}
 
 /** One line as the desktop binding returns it (PascalCase = Wails models). */
 export interface PurchaseOrderDTOItem {
@@ -30,6 +82,12 @@ export interface PurchaseOrderDTOItem {
   ClientKey?: string | null;
   QuotationItemNo?: number | null;
   QuotationSubNo?: number | null;
+  /**
+   * #655: quotation or extra. Absent on a payload from a server older than
+   * #655, which only ever created quotation lines; read it through
+   * `purchaseOrderLineKindOf`, never by truthiness.
+   */
+  LineKind?: string;
   LineNumber: number;
   Description: string;
   QuantityScaled: number;
@@ -50,6 +108,31 @@ export interface PurchaseOrderDTOItem {
    */
   QuotedUnitPriceMinor?: number | null;
   RemainingQuantityScaled?: number | null;
+  /**
+   * #654: the aggregate presentation group this row belongs to. The desktop
+   * binding carries 0 for ungrouped (its generated model has no pointers);
+   * null/undefined on an older payload mean the same thing.
+   */
+  AggregateGroupID?: number | null;
+}
+
+/**
+ * One PO-only aggregate presentation header (#654). TotalMinor and
+ * DisplayUnitPriceMinor are derived on read; neither is stored, and no group
+ * row carries supplier cost, margin or variance (Story 42).
+ */
+export interface PurchaseOrderDTOAggregateGroup {
+  ID?: number;
+  /** The first child's persisted line number; the read order is stable. */
+  DisplayOrder: number;
+  Title: string;
+  OrderedQuantityScaled: number;
+  OrderedUoM: string;
+  ShowChildrenToCustomer: boolean;
+  /** Derived on read: the sum of the child lines' nets. */
+  TotalMinor: number;
+  /** Derived on read; null when the exact value exceeds the safe range. */
+  DisplayUnitPriceMinor?: number | null;
 }
 
 /** The printed source figures the quotation revision carried (issue #470). */
@@ -207,6 +290,11 @@ export interface PurchaseOrderDTO {
    * forward on every write; the editor submits the version it loaded.
    */
   Version: number;
+  /**
+   * #654: the PO-only aggregate presentation headers, in read order. An older
+   * server omits the field; absence is "no aggregates", never inferred.
+   */
+  AggregateGroups?: PurchaseOrderDTOAggregateGroup[];
 }
 
 /** One editable line. Quantity and money stay strings until they are parsed. */
@@ -240,6 +328,12 @@ export interface PurchaseOrderLine {
   quotationItemNo: number | null;
   quotationSubNo: number | null;
   /**
+   * #655: quotation or extra. Structural, not a label: it decides whether the
+   * row carries a reference and an allocation, and it is part of the payload
+   * and the dirty snapshot. An extra line has no quotation reference.
+   */
+  lineKind: PurchaseOrderLineKind;
+  /**
    * Split-line identity (#573). Empty for a plain line; every row of one split
    * line shares the key, and the parent is a presentation of those rows.
    */
@@ -255,6 +349,28 @@ export interface PurchaseOrderLine {
    */
   quotedUnitPriceMinor?: number | null;
   remainingQuantityScaled?: number | null;
+  /**
+   * #654: the editor-stable aggregate group this row belongs to, or null when
+   * it stands on its own. It is UI identity like `key`, never submitted; the
+   * payload sends the group's 1-based position instead.
+   */
+  aggregateKey: number | null;
+}
+
+/**
+ * One editable aggregate header (#654). The quantity stays a string until it
+ * is parsed on save, exactly like a line's quantity and price.
+ */
+export interface PurchaseOrderAggregateGroupState {
+  /** Editor-stable key; never submitted. */
+  key: number;
+  /** Read-only convenience: the persisted row id, absent until a save. */
+  persistedId?: number;
+  title: string;
+  /** The user-typed display quantity; parsed on save. */
+  orderedQuantity: string;
+  orderedUoM: string;
+  showChildrenToCustomer: boolean;
 }
 
 /** Editable header fields. The customer snapshot and source are read-only. */
@@ -300,6 +416,10 @@ export interface PurchaseOrderEditorState {
   /** Canonical snapshot of the last loaded/saved values, for dirtiness. */
   baseline: string;
   nextKey: number;
+  /** The aggregate headers in display order (#654). */
+  aggregateGroups: PurchaseOrderAggregateGroupState[];
+  /** The next unused editor key for a new aggregate header. */
+  nextAggregateKey: number;
   saving: boolean;
   error: string | null;
 }
@@ -327,6 +447,23 @@ export type PurchaseOrderEditorAction =
   | { type: "lineAddedFromSource"; uom: string; quotationItemNo: number; quotationSubNo: number | null }
   | { type: "lineRemoved"; key: number }
   | { type: "linesReplaced"; lines: PurchaseOrderLine[] }
+  /** #654: record a new aggregate header and set its rows' membership. */
+  | { type: "aggregateAdded"; group: PurchaseOrderAggregateGroupState; lineKeys: number[] }
+  /** #654: edit a header's title, display quantity, unit or print toggle. */
+  | {
+      type: "aggregateChanged";
+      key: number;
+      patch: Partial<
+        Pick<
+          PurchaseOrderAggregateGroupState,
+          "title" | "orderedQuantity" | "orderedUoM" | "showChildrenToCustomer"
+        >
+      >;
+    }
+  /** #654: clear membership and remove the header, without touching the rows. */
+  | { type: "aggregateUngrouped"; key: number }
+  /** #654: drop headers left with no children after a removal. */
+  | { type: "aggregatePruned" }
   | {
       type: "sourceBasisChanged";
       patch: Partial<
@@ -337,13 +474,20 @@ export type PurchaseOrderEditorAction =
       >;
     }
   | { type: "currencyChanged"; code: string; from: CurrencyInfo; to: CurrencyInfo }
-  | { type: "created"; orderId: number; version: number }
   | { type: "saveStarted" }
   | { type: "saveConflict" }
   | { type: "versionAdopted"; version: number }
   | { type: "valuesReplaced"; header: PurchaseOrderHeader; lines: PurchaseOrderLine[] }
   | { type: "saveFailed"; error: string }
   | { type: "saveSucceeded"; order: PurchaseOrderDTO; currency: CurrencyInfo };
+
+/** One submitted aggregate header (#654, PascalCase = Wails binding). */
+export interface PurchaseOrderAggregateGroupInput {
+  Title: string;
+  OrderedQuantityScaled: number;
+  OrderedUoM: string;
+  ShowChildrenToCustomer: boolean;
+}
 
 /** One replace-lines payload entry (PascalCase = Wails binding). */
 export interface PurchaseOrderItemInput {
@@ -361,6 +505,11 @@ export interface PurchaseOrderItemInput {
   ClientKey?: string | null;
   QuotationItemNo?: number | null;
   QuotationSubNo?: number | null;
+  /**
+   * #655: the line's kind. It is always sent explicitly, even for a quotation
+   * line, so the server never has to infer what the editor knew.
+   */
+  LineKind: PurchaseOrderLineKind;
   Description: string;
   QuantityScaled: number;
   UoM: string;
@@ -370,6 +519,12 @@ export interface PurchaseOrderItemInput {
   GroupKey: string;
   ParentDescription: string;
   DescriptionLines: string[];
+  /**
+   * #654: the 1-based position of this row's aggregate group in
+   * `AggregateGroups`; 0 means ungrouped. Position, never the editor key, so
+   * a save that rekeys the groups does not mark the editor dirty.
+   */
+  AggregateGroupIndex?: number;
 }
 
 /** The update payload (PascalCase = Wails binding). */
@@ -392,6 +547,12 @@ export interface PurchaseOrderUpdateInput {
   /** The draft's confirmation-number request (#581). Allocates nothing. */
   ConfirmationRequested: boolean;
   Items: PurchaseOrderItemInput[];
+  /**
+   * #654: always present, empty when the order has no aggregates. The server
+   * distinguishes an absent slice (an old client, refused on a grouped record)
+   * from an empty one (the deliberate ungroup).
+   */
+  AggregateGroups: PurchaseOrderAggregateGroupInput[];
   DiscountPercent: number;
   AdjustmentMinor: number;
   /** The currency and tax triple, editable only before a source is linked. */
@@ -403,30 +564,6 @@ export interface PurchaseOrderUpdateInput {
   ExpectedVersion: number;
   /** True only after the Overwrite choice; keeps the replaced draft. */
   Overwrite: boolean;
-}
-
-/**
- * Parses a quantity typed as a decimal string into the exact 10^4-scaled
- * integer. Up to four decimal places; a comma is accepted as the decimal
- * separator because the office types both. Positive only: a zero-quantity
- * line is not an order line, and the database refuses it too. Null means the
- * field cannot be saved.
- */
-export function parseQuantityScaled(raw: string): number | null {
-  const text = raw.trim();
-  if (text === "") return null;
-  const match = /^(\d+)(?:([.,])(\d{0,4}))?$/.exec(text);
-  if (!match) return null;
-  const whole = Number(match[1]);
-  const fraction = Number((match[3] ?? "").padEnd(4, "0"));
-  if (!Number.isSafeInteger(whole) || whole > MAX_EXACT_MINOR / QUANTITY_SCALE) {
-    return null;
-  }
-  const scaled = whole * QUANTITY_SCALE + fraction;
-  if (!Number.isSafeInteger(scaled) || scaled <= 0 || scaled > MAX_EXACT_MINOR) {
-    return null;
-  }
-  return scaled;
 }
 
 /** One inline variance badge on a purchase-order line (#653). */
@@ -511,27 +648,6 @@ export function formatQuantityScaled(scaled: number): string {
   return fraction === "" ? String(whole) : `${whole}.${fraction}`;
 }
 
-/**
- * Parses a unit-price field in the PO's own currency. Null means not a
- * number; zero is a real, valid price. `tryParseMoneyInput` is the strict
- * variant of parseMoneyInput, so unparseable text cannot silently become 0.
- */
-export function parseUnitPriceMinor(
-  currency: CurrencyInfo,
-  raw: string
-): number | null {
-  const parsed = tryParseMoneyInput(currency, raw);
-  if (
-    parsed === null ||
-    parsed < 0 ||
-    !Number.isSafeInteger(parsed) ||
-    parsed > MAX_EXACT_MINOR
-  ) {
-    return null;
-  }
-  return parsed;
-}
-
 /** Formats a stored minor amount for its money input. */
 export function formatUnitPriceMinor(
   currency: CurrencyInfo,
@@ -539,20 +655,6 @@ export function formatUnitPriceMinor(
 ): string {
   return formatMoney(currency, minor);
 }
-
-/** The ceiling on a row or whole-PO discount; mirrors MaxDiscountPercent in Go. */
-export const MAX_DISCOUNT_PERCENT = 100;
-
-/**
- * The supported money range: 2^53-1, JavaScript's Number.MAX_SAFE_INTEGER.
- *
- * Every amount crosses JSON as a `number`, which can only name every integer up
- * to this bound. Go's int64 is wider, but 27_021_597_764_222_973 reads back one
- * minor unit lower, so the store, the schema CHECK and this module all refuse
- * anything above it rather than display an inexact total. The Go constant is
- * MaxExactMinor in backend/store/po_calc.go.
- */
-export const MAX_EXACT_MINOR = Number.MAX_SAFE_INTEGER;
 
 /**
  * The customer-facing PPN rate for a persisted tax basis, mirroring
@@ -769,24 +871,6 @@ export function trimAdjustmentReason(value: string): string {
   return characters.slice(start, end).join("");
 }
 
-const MAX_EXACT_MINOR_BIGINT = BigInt(MAX_EXACT_MINOR);
-
-/**
- * Parses a discount field as a whole percentage from 0 to 100. Empty means no
- * discount. A decimal ("10.5") is refused rather than rounded, because the
- * stored column is an integer percentage and a silent round would print a
- * different discount from the one entered.
- */
-export function parseDiscountPercent(raw: string): number | null {
-  const text = raw.trim();
-  if (text === "") return 0;
-  if (!/^\d+$/.test(text)) return null;
-  const percent = Number(text);
-  if (!Number.isSafeInteger(percent)) return null;
-  if (percent < 0 || percent > MAX_DISCOUNT_PERCENT) return null;
-  return percent;
-}
-
 /** One row's exact figures: what it costs before and after its own discount. */
 export interface PurchaseOrderLineCalculation {
   grossMinor: number;
@@ -835,36 +919,9 @@ export interface PurchaseOrderCalculation {
   error: string | null;
 }
 
-function toMoney(value: bigint): number | null {
-  if (value < 0n || value > MAX_EXACT_MINOR_BIGINT) return null;
-  return Number(value);
-}
-
-/**
- * Exact `quantity × price ÷ 10^4` with the half-away-from-zero rounding the Go
- * calculator uses. A big-int intermediate is what makes an overflowing line
- * detectable instead of silently wrapped.
- */
-function lineGrossMinor(
-  quantityScaled: number,
-  unitPriceMinor: number
-): number | null {
-  const product = BigInt(quantityScaled) * BigInt(unitPriceMinor);
-  const divisor = BigInt(QUANTITY_SCALE);
-  const quotient = product / divisor;
-  const remainder = product % divisor;
-  const rounded = remainder * 2n >= divisor ? quotient + 1n : quotient;
-  return toMoney(rounded);
-}
-
-/** `amount × percent ÷ 100`, truncated, exactly as the quotation does it. */
-function percentageMinor(amount: number, percent: number): number | null {
-  return toMoney((BigInt(amount) * BigInt(percent)) / 100n);
-}
-
 /** `amount × basis points ÷ 10000`, truncated, exactly as calcTax does it. */
 function basisPointsMinor(amount: number, bps: number): number | null {
-  return toMoney((BigInt(amount) * BigInt(bps)) / 10000n);
+  return toMoneyMinor((BigInt(amount) * BigInt(bps)) / 10000n);
 }
 
 /**
@@ -921,7 +978,7 @@ export function calculatePurchaseOrder(
       firstError ??= `Line ${index + 1}: the line total exceeds the supported amount range.`;
       continue;
     }
-    const discount = line.discountEnabled ? percentageMinor(gross, percent) : 0;
+    const discount = line.discountEnabled ? rowDiscountMinor(gross, percent) : 0;
     if (discount === null) {
       lineResults.push(null);
       firstError ??= `Line ${index + 1}: the line discount exceeds the supported amount range.`;
@@ -943,7 +1000,7 @@ export function calculatePurchaseOrder(
     return { lines: lineResults, totals: null, error };
   }
 
-  const subtotalMinor = toMoney(subtotal);
+  const subtotalMinor = toMoneyMinor(subtotal);
   if (subtotalMinor === null) {
     return {
       lines: lineResults,
@@ -961,7 +1018,7 @@ export function calculatePurchaseOrder(
     };
   }
   const grandBig = BigInt(subtotalMinor) + BigInt(ppn);
-  if (grandBig > MAX_EXACT_MINOR_BIGINT) {
+  if (grandBig > BigInt(MAX_EXACT_MINOR)) {
     return {
       lines: lineResults,
       totals: null,
@@ -972,8 +1029,8 @@ export function calculatePurchaseOrder(
   return {
     lines: lineResults,
     totals: {
-      grossMinor: toMoney(grossTotal),
-      rowDiscountMinor: toMoney(rowDiscountTotal),
+      grossMinor: toMoneyMinor(grossTotal),
+      rowDiscountMinor: toMoneyMinor(rowDiscountTotal),
       subtotalMinor,
       discountMinor: 0,
       afterDiscountMinor: subtotalMinor,
@@ -1056,6 +1113,26 @@ export function initialPurchaseOrderEditorState(
   order: PurchaseOrderDTO,
   currency: CurrencyInfo
 ): PurchaseOrderEditorState {
+  // #654: the aggregate headers are keyed by their array position, which is the
+  // store's display order. Each line's persisted group id resolves to that
+  // key; an id this payload does not carry (or 0, the desktop binding's
+  // "ungrouped") is null rather than a guessed group.
+  const groupKeyByID = new Map<number, number>();
+  const aggregateGroups: PurchaseOrderAggregateGroupState[] = (
+    order.AggregateGroups ?? []
+  ).map((entry, index) => {
+    if (typeof entry.ID === "number" && entry.ID > 0) {
+      groupKeyByID.set(entry.ID, index);
+    }
+    return {
+      key: index,
+      persistedId: entry.ID,
+      title: entry.Title,
+      orderedQuantity: formatQuantityScaled(entry.OrderedQuantityScaled),
+      orderedUoM: entry.OrderedUoM,
+      showChildrenToCustomer: entry.ShowChildrenToCustomer ?? false,
+    };
+  });
   const lines = order.Items.map((item, index) => ({
     key: index,
     // #517: a row-carried alias is reused verbatim so reopen keeps the same
@@ -1075,11 +1152,16 @@ export function initialPurchaseOrderEditorState(
     discountPercent: String(item.DiscountPercent ?? 0),
     quotationItemNo: item.QuotationItemNo ?? null,
     quotationSubNo: item.QuotationSubNo ?? null,
+    lineKind: purchaseOrderLineKindOf(item.LineKind),
     groupKey: item.GroupKey ?? "",
     parentDescription: item.ParentDescription ?? "",
     descriptionLines: item.DescriptionLines ?? [],
     quotedUnitPriceMinor: item.QuotedUnitPriceMinor ?? null,
     remainingQuantityScaled: item.RemainingQuantityScaled ?? null,
+    aggregateKey:
+      typeof item.AggregateGroupID === "number" && item.AggregateGroupID > 0
+        ? groupKeyByID.get(item.AggregateGroupID) ?? null
+        : null,
   }));
   const state: PurchaseOrderEditorState = {
     orderId: order.ID,
@@ -1111,6 +1193,8 @@ export function initialPurchaseOrderEditorState(
     version: order.Version,
     baseline: "",
     nextKey: lines.length,
+    aggregateGroups,
+    nextAggregateKey: aggregateGroups.length,
     saving: false,
     error: null,
   };
@@ -1122,10 +1206,19 @@ export function initialPurchaseOrderEditorState(
  * The canonical value snapshot dirtiness compares. Keys are excluded because
  * they are UI identity, not data; line order is included because it is the
  * customer's order.
+ *
+ * #654: an aggregate is part of the customer-facing order, so its four values
+ * and each line's membership are included — but as the group's array
+ * position, never the editor key. A save that rekeys the groups therefore
+ * produces the same snapshot and does not make a saved order look dirty.
  */
 export function serializePurchaseOrderEditor(
   state: PurchaseOrderEditorState
 ): string {
+  const positionByGroupKey = new Map<number, number>();
+  state.aggregateGroups.forEach((group, index) => {
+    positionByGroupKey.set(group.key, index + 1);
+  });
   return JSON.stringify({
     header: state.header,
     currency: state.currency,
@@ -1133,6 +1226,12 @@ export function serializePurchaseOrderEditor(
     taxType: state.taxType,
     serviceCategory: state.serviceCategory,
     taxCategory: state.taxCategory,
+    aggregateGroups: state.aggregateGroups.map((group) => ({
+      title: group.title,
+      orderedQuantity: group.orderedQuantity,
+      orderedUoM: group.orderedUoM,
+      showChildrenToCustomer: group.showChildrenToCustomer,
+    })),
     lines: state.lines.map((line) => ({
       description: line.description,
       quantity: line.quantity,
@@ -1142,9 +1241,14 @@ export function serializePurchaseOrderEditor(
       discountPercent: line.discountPercent,
       quotationItemNo: line.quotationItemNo,
       quotationSubNo: line.quotationSubNo,
+      lineKind: line.lineKind,
       groupKey: line.groupKey,
       parentDescription: line.parentDescription,
       descriptionLines: line.descriptionLines,
+      aggregateIndex:
+        line.aggregateKey === null
+          ? 0
+          : positionByGroupKey.get(line.aggregateKey) ?? 0,
     })),
   });
 }
@@ -1228,6 +1332,19 @@ export function buildPurchaseOrderUpdate(
       error: `Payment terms must be ${MAX_PAYMENT_TERMS_LENGTH} characters or fewer.`,
     };
   }
+  // #654: the aggregate layout is checked before the lines are rendered into
+  // the payload, so an impossible placement is named by its group instead of
+  // being sent for the server to refuse after the round trip.
+  const aggregateError = validateAggregateLayout(state, currency);
+  if (aggregateError !== null) {
+    return { input: null, error: aggregateError };
+  }
+  const aggregatePayload = buildAggregatePayload(state.aggregateGroups, state.lines);
+  if (aggregatePayload.error !== null) {
+    // validateAggregateLayout already runs the same rules; this is a guard,
+    // not a second rule set.
+    return { input: null, error: aggregatePayload.error };
+  }
 
   const items: PurchaseOrderItemInput[] = [];
   for (let index = 0; index < state.lines.length; index++) {
@@ -1273,11 +1390,16 @@ export function buildPurchaseOrderUpdate(
         };
       }
     }
+    const aggregateGroupIndex =
+      line.aggregateKey === null
+        ? 0
+        : aggregatePayload.indexByGroupKey.get(line.aggregateKey) ?? 0;
     items.push({
       ID: line.persistedId ?? null,
       ClientKey: line.clientKey,
       QuotationItemNo: line.quotationItemNo,
       QuotationSubNo: line.quotationSubNo,
+      LineKind: line.lineKind,
       Description: line.description,
       QuantityScaled: quantity,
       UoM: line.uom,
@@ -1287,6 +1409,10 @@ export function buildPurchaseOrderUpdate(
       GroupKey: line.groupKey,
       ParentDescription: line.parentDescription,
       DescriptionLines: line.descriptionLines,
+      // #654: the group's 1-based position. An ungrouped row omits the field
+      // rather than sending 0, so every existing payload keeps its exact shape
+      // and the server's "0 or absent means ungrouped" rule reads it plainly.
+      ...(aggregateGroupIndex > 0 ? { AggregateGroupIndex: aggregateGroupIndex } : {}),
     });
   }
   // The calculation is also the save-time guard: an out-of-range total is
@@ -1317,6 +1443,10 @@ export function buildPurchaseOrderUpdate(
       AdjustmentReason: "",
       ConfirmationRequested: state.header.confirmationRequested,
       Items: items,
+      // #654: always an array. The server reads an absent slice as an old
+      // client and refuses to ungroup a grouped record it cannot represent;
+      // an empty array is the deliberate ungroup.
+      AggregateGroups: aggregatePayload.groups,
       DiscountPercent: 0,
       AdjustmentMinor: 0,
       // A never- or formerly-linked draft may move currency/basis before a
@@ -1389,6 +1519,19 @@ export function listValidationBlockers(
       label: "Payment terms",
       message: `Payment terms must be ${MAX_PAYMENT_TERMS_LENGTH} characters or fewer.`,
       fieldLabel: "Payment terms",
+    });
+  }
+  // #654: the aggregate layout is checked before the lines, exactly as the
+  // payload builder orders it. It is one blocker because the layout validator
+  // names the first problem by its group and line; a second aggregate blocker
+  // would only repeat it.
+  const aggregateError = validateAggregateLayout(state, currency);
+  if (aggregateError !== null) {
+    blockers.push({
+      key: "aggregate:layout",
+      label: "Aggregate lines",
+      message: aggregateError,
+      fieldLabel: "Aggregate lines",
     });
   }
   // #628: the category is a Final Save requirement, not a draft-save field
@@ -1500,9 +1643,13 @@ export function purchaseOrderEditorReducer(
             discountPercent: "0",
             quotationItemNo: null,
             quotationSubNo: null,
+            // #655: the explicit add is the extra line. A quotation-backed
+            // line arrives from a ghost or a source match, never from here.
+            lineKind: "extra",
             groupKey: "",
             parentDescription: "",
             descriptionLines: [],
+            aggregateKey: null,
           },
         ],
         nextKey: state.nextKey + 1,
@@ -1525,18 +1672,23 @@ export function purchaseOrderEditorReducer(
             discountPercent: "0",
             quotationItemNo: action.quotationItemNo,
             quotationSubNo: action.quotationSubNo,
+            lineKind: "quotation",
             groupKey: "",
             parentDescription: "",
             descriptionLines: [],
+            aggregateKey: null,
           },
         ],
         nextKey: state.nextKey + 1,
       };
-    case "lineRemoved":
-      return {
+    case "lineRemoved": {
+      // #654: removing the last child leaves no header behind; a group is
+      // never allowed to become an empty fake row on the customer document.
+      return pruneEmptyAggregates({
         ...state,
         lines: state.lines.filter((line) => line.key !== action.key),
-      };
+      });
+    }
     case "linesReplaced": {
       const highest = action.lines.reduce((max, line) => Math.max(max, line.key + 1), 0);
       return {
@@ -1545,6 +1697,45 @@ export function purchaseOrderEditorReducer(
         nextKey: Math.max(state.nextKey, highest),
       };
     }
+    case "aggregateAdded": {
+      // Upsert by key: a repeated dispatch replaces the header rather than
+      // creating a duplicate that could never be placed on a save.
+      const exists = state.aggregateGroups.some(
+        (group) => group.key === action.group.key
+      );
+      const lineKeys = new Set(action.lineKeys);
+      return {
+        ...state,
+        aggregateGroups: exists
+          ? state.aggregateGroups.map((group) =>
+              group.key === action.group.key ? action.group : group
+            )
+          : [...state.aggregateGroups, action.group],
+        lines: state.lines.map((line) =>
+          lineKeys.has(line.key)
+            ? { ...line, aggregateKey: action.group.key }
+            : line
+        ),
+        nextAggregateKey: Math.max(state.nextAggregateKey, action.group.key + 1),
+      };
+    }
+    case "aggregateChanged":
+      return {
+        ...state,
+        aggregateGroups: state.aggregateGroups.map((group) =>
+          group.key === action.key ? { ...group, ...action.patch } : group
+        ),
+      };
+    case "aggregateUngrouped":
+      return {
+        ...state,
+        aggregateGroups: state.aggregateGroups.filter(
+          (group) => group.key !== action.key
+        ),
+        lines: ungroupAggregate(state.lines, action.key),
+      };
+    case "aggregatePruned":
+      return pruneEmptyAggregates(state);
     case "sourceBasisChanged": {
       const next = { ...state, ...action.patch };
       if (action.patch.taxType === "Goods") next.serviceCategory = "";
@@ -1575,11 +1766,6 @@ export function purchaseOrderEditorReducer(
       });
       return { ...state, currency: action.code, lines };
     }
-    case "created":
-      // The first Save/upload persisted the transient row. Keep the working
-      // copy and only adopt the server identity, so a failed follow-up update
-      // retries against this row instead of creating a second one.
-      return { ...state, orderId: action.orderId, version: action.version };
     case "saveStarted":
       return { ...state, saving: true, error: null };
     case "saveConflict":
@@ -1624,7 +1810,7 @@ export function purchaseOrderEditorReducer(
           persistedClientKey: line.persistedClientKey,
         };
       });
-      return { ...saved, lines, nextKey: Math.max(saved.nextKey, state.nextKey) };
+      return { ...saved, lines, nextKey: Math.max(saved.nextKey, state.nextKey), nextAggregateKey: Math.max(saved.nextAggregateKey, state.nextAggregateKey) };
     }
     default:
       return state;

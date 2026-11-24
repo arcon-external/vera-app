@@ -97,6 +97,16 @@ function asStringArray(value: unknown): string[] {
 }
 
 /**
+ * #648: a stored stable number. Only a positive whole number is an identity;
+ * anything else (missing, zero, a hand-edited fraction) reads as unnumbered so
+ * the editor numbers it from position instead of sending it to the server.
+ */
+function asLineNo(value: unknown): number {
+  const no = asNumber(value, 0);
+  return Number.isFinite(no) && no > 0 ? Math.trunc(no) : 0;
+}
+
+/**
  * Restores one sub-item, tolerating a shape the current build does not
  * recognise. A missing field falls back to what newSubItem() would have set,
  * rather than leaving the row unusable.
@@ -105,6 +115,10 @@ function restoreSubItem(raw: unknown, id: number): EditorSubItem {
   const sub = (raw ?? {}) as Record<string, unknown>;
   return {
     id,
+    // #648: a draft written before item identity existed has no number, and 0
+    // says exactly that. The editor numbers it by position on load; the parser
+    // must never invent one that could belong to a bought quotation item.
+    no: asLineNo(sub.no),
     description: asString(sub.description),
     qty: asString(sub.qty, "1"),
     uom: asString(sub.uom, "Lot"),
@@ -122,8 +136,9 @@ function restoreSubItem(raw: unknown, id: number): EditorSubItem {
 function restoreItem(raw: unknown, key: number): EditorItem {
   const item = (raw ?? {}) as Record<string, unknown>;
   const subs = Array.isArray(item.subItems) ? item.subItems : [];
-  return {
+  const restored: EditorItem = {
     key,
+    no: asLineNo(item.no),
     description: asString(item.description),
     bullets: asStringArray(item.bullets),
     qty: asString(item.qty, "1"),
@@ -136,6 +151,11 @@ function restoreItem(raw: unknown, key: number): EditorItem {
     subItems: subs.map((sub, index) => restoreSubItem(sub, index + 1)),
     showSubPrices: asBoolean(item.showSubPrices),
   };
+  // #648: keep the line's sub-item high-water mark across a save/reopen so a
+  // removed sub-item's number cannot come back attached to a new one.
+  const nextSubNo = asLineNo(item.nextSubNo);
+  if (nextSubNo > 0) restored.nextSubNo = nextSubNo;
+  return restored;
 }
 
 /**

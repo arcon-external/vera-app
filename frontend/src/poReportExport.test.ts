@@ -26,6 +26,7 @@ function zeroMetrics(): PurchaseOrderReportMetrics {
     amountMinor: 0,
     costedMinor: 0,
     uncostedMinor: 0,
+    extraExpenseMinor: 0,
     capitalMinor: 0,
     marginMinor: 0,
     marginBps: null,

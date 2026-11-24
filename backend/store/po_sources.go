@@ -51,6 +51,15 @@ type POSourceOccupancy struct {
 	SavedPOCount         int
 	DraftPOCount         int
 	LegacyHeaderDiscount bool
+	// Closure and expiry (#656). Closed means Create PO must be refused and the
+	// remainder is Closed Loss, not Unsold. ExpiredUnclosed is an advisory badge
+	// only: expiry alone never becomes a loss.
+	Closed          bool
+	ClosedAt        *time.Time
+	ClosedReason    string
+	ClosedByName    string
+	ValidUntil      *time.Time
+	ExpiredUnclosed bool
 }
 
 // POSourceQuotation is one row of the selector's first step. It describes the
@@ -74,6 +83,14 @@ type POSourceQuotation struct {
 	DraftPOCount         int
 	AllBought            bool
 	LegacyHeaderDiscount bool
+	// Closure and expiry (#656), from the quotation row and its latest issued
+	// revision. A closed row stays visible with a badge; it is never hidden by
+	// hideUsed, which is about "nothing left to buy".
+	Closed          bool
+	ClosedAt        *time.Time
+	ClosedReason    string
+	ValidUntil      *time.Time
+	ExpiredUnclosed bool
 }
 
 // POSourceRevision is one issued revision of a selected Quotation.
@@ -230,7 +247,8 @@ func (s *Store) ListPOSourceQuotations(ctx context.Context, page int, search str
 	from := fmt.Sprintf(`
 		FROM %[1]s.quotations q
 		JOIN LATERAL (
-			SELECT r.revision_number, r.subject, r.discount_percent
+			SELECT r.revision_number, r.subject, r.discount_percent,
+			       r.created_at, r.validity_days
 			FROM %[1]s.quotation_revisions r
 			WHERE r.quotation_id = q.id
 			ORDER BY r.revision_number DESC
@@ -262,7 +280,10 @@ func (s *Store) ListPOSourceQuotations(ctx context.Context, page int, search str
 	// hideUsed now means "hide a quotation that is fully bought"; a partial
 	// quotation stays selectable. The repaired record's own id no longer
 	// changes occupancy: a target may already carry other POs.
-	where := " WHERE (NOT $1 OR NOT COALESCE(ss.all_bought, FALSE))"
+	// #656: a closed quotation is a historical record, so the used filter keeps
+	// it visible (and disabled by the client): the filter is about "nothing
+	// left to buy", while a closed row still explains where the remainder went.
+	where := " WHERE (NOT $1 OR NOT COALESCE(ss.all_bought, FALSE) OR q.closed_at IS NOT NULL)"
 	args := []any{hideUsed, org.ID, excludePOID}
 	if term := strings.TrimSpace(search); term != "" {
 		pattern := "%" + escapeLike(term) + "%"
@@ -303,7 +324,8 @@ func (s *Store) ListPOSourceQuotations(ctx context.Context, page int, search str
 		       COALESCE(po_counts.saved_count, 0),
 		       COALESCE(po_counts.draft_count, 0),
 		       COALESCE(ss.all_bought, FALSE),
-		       (l.discount_percent > 0)
+		       (l.discount_percent > 0),
+		       q.closed_at, q.closed_reason, l.created_at, l.validity_days
 		%s%s
 		ORDER BY q.id DESC
 		LIMIT $%d OFFSET $%d`, from, where, len(args)+1, len(args)+2),
@@ -314,10 +336,15 @@ func (s *Store) ListPOSourceQuotations(ctx context.Context, page int, search str
 	defer rows.Close()
 
 	quotations := make([]POSourceQuotation, 0, POSourcePageSize)
+	now := time.Now()
 	for rows.Next() {
 		var quotation POSourceQuotation
 		var activeID pgtype.Int8
 		var activeState pgtype.Text
+		var closedAt *time.Time
+		var closedReason string
+		var issuedAt time.Time
+		var validityDays int16
 		if err := rows.Scan(
 			&quotation.ID,
 			&quotation.QuoteNumber,
@@ -333,9 +360,19 @@ func (s *Store) ListPOSourceQuotations(ctx context.Context, page int, search str
 			&quotation.DraftPOCount,
 			&quotation.AllBought,
 			&quotation.LegacyHeaderDiscount,
+			&closedAt,
+			&closedReason,
+			&issuedAt,
+			&validityDays,
 		); err != nil {
 			return nil, 0, fmt.Errorf("scan po source quotation: %w", err)
 		}
+		quotation.Closed = closedAt != nil
+		quotation.ClosedAt = closedAt
+		quotation.ClosedReason = closedReason
+		validUntil, expired := quotationExpiryAt(issuedAt, validityDays, now)
+		quotation.ValidUntil = &validUntil
+		quotation.ExpiredUnclosed = expired && closedAt == nil
 		if activeID.Valid {
 			quotation.ActivePO = &POSourceActivePO{
 				ID:    activeID.Int64,
@@ -498,6 +535,12 @@ func (s *Store) GetPOSourceOccupancy(ctx context.Context, quotationID int64) (PO
 		SavedPOCount:         availability.SavedPOCount,
 		DraftPOCount:         availability.DraftPOCount,
 		LegacyHeaderDiscount: availability.LegacyHeaderDiscount,
+		Closed:               availability.Closed,
+		ClosedAt:             availability.ClosedAt,
+		ClosedReason:         availability.ClosedReason,
+		ClosedByName:         availability.ClosedByName,
+		ValidUntil:           availability.ValidUntil,
+		ExpiredUnclosed:      availability.ExpiredUnclosed,
 	}
 	var activeID int64
 	var activeState string

@@ -608,6 +608,7 @@ describe("Purchase order performance chart (issue #631)", () => {
         amountMinor: 1_000_000 + index,
         costedMinor: 1_000_000 + index,
         uncostedMinor: 0,
+        extraExpenseMinor: 0,
         capitalMinor: 800_000,
         marginMinor: 200_000 + index,
         marginBps: 2500,

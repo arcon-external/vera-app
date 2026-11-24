@@ -384,6 +384,7 @@ describe("PurchaseOrderRepairPage (issue #475)", () => {
         DescriptionLines: [],
         QuotationItemNo: 2,
         QuotationSubNo: null,
+        LineKind: "quotation",
         Description: "Revised widget",
         QuantityScaled: 20000,
         UoM: "Pc",
