@@ -1,0 +1,275 @@
+name: CI toolchain image
+
+# Publishes the GTK/WebKit C toolchain the `dev` and `production` Wails build
+# tags need, so #495 can pull it instead of running apt on every pull request.
+# In run 45339319459 that apt step spent 21m51s on the critical path to do about
+# 8s of tag builds. The image is built once, validated, and only then promoted.
+#
+# Go is deliberately absent. The publish job mounts the GOROOT that setup-go
+# installed from go.mod -- read-only -- plus the module and build caches, and
+# runs the real tag vet inside the candidate. A Go upgrade is therefore a
+# setup-go change, and the image cannot drift from the toolchain go.mod pins.
+#
+# Bootstrap (one-time, done by a human after the first publish):
+#
+#   1. GHCR creates the package private. Open
+#      https://github.com/orgs/arcon-external/packages/container/ci-toolchain/settings
+#      and set Visibility to Public, or an unauthenticated consumer cannot pull
+#      `latest`. Prove it from a clean environment with:
+#        docker logout ghcr.io
+#        docker pull ghcr.io/arcon-external/vera-app/ci-toolchain:latest
+#   2. Until step 1 is done, the fallback is explicit and authenticated: the
+#      consuming job adds `packages: read` to its permissions and runs
+#      `docker login ghcr.io` with GITHUB_TOKEN before pulling. #686 owns that
+#      wiring. This workflow does not assume the visibility change happened,
+#      and it does not prove the anonymous path for you.
+#
+# Either way the consumer must fail loudly when the pull fails: never fall back
+# to apt, because that is the 22 minutes this image exists to remove.
+
+on:
+  pull_request:
+    # Only a change to the image can change the image. A PR touching the tag
+    # matrix itself is #686's business, not this workflow's.
+    paths:
+      - .github/ci/gtk/Dockerfile
+      - .github/workflows/ci-image.yml
+  push:
+    branches: [main]
+    paths:
+      - .github/ci/gtk/Dockerfile
+      - .github/workflows/ci-image.yml
+  # The first publish (and any recovery) runs by hand. Path filters do not
+  # apply to a dispatch, which is what makes this the escape hatch.
+  workflow_dispatch:
+  schedule:
+    # Monday, weekly: Ubuntu package updates and security fixes reach the image
+    # without waiting for a Dockerfile change. Dependabot moves the pinned base
+    # digest; this rebuild moves everything above it.
+    - cron: "17 3 * * 1"
+
+# Least privilege by default. The publish job raises `packages: write` for
+# itself only. The pull_request job inherits this read-only set and never gets a
+# token that can push or overwrite a package -- which matters because a fork PR
+# runs that job with a token from this repository.
+permissions:
+  contents: read
+
+# One publish at a time per ref. `latest` is promoted from `candidate`, so two
+# overlapping main runs could validate one image and promote another; serialising
+# removes that window. PR runs are still cancelled when a newer push arrives,
+# but a main/schedule run is never cancelled mid-publish.
+concurrency:
+  group: ci-image-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  # The pull_request path: build the Dockerfile, run nothing that writes a
+  # package, and smoke the exact libraries #495 asks pkg-config for. This is the
+  # only check a Dockerfile change gets before merge.
+  build:
+    name: Build the Dockerfile (no push)
+    if: github.event_name == 'pull_request'
+    timeout-minutes: 45
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Build the image
+        id: build
+        uses: docker/build-push-action@v7
+        with:
+          context: .github/ci/gtk
+          file: .github/ci/gtk/Dockerfile
+          platforms: linux/amd64
+          load: true
+          push: false
+          tags: vera-ci-toolchain:pr-${{ github.sha }}
+          # Read the cache the publish job writes under the main scope. No
+          # cache-to: a PR ref cannot feed main, and publishing owns population.
+          cache-from: type=gha
+
+      - name: Smoke-test pkg-config
+        # The three packages #495 names, resolved the way the Go build resolves
+        # them. A missing header or a pkg-config file that only exists in the
+        # -dev package shows up here rather than in a tag build.
+        run: |
+          set -euo pipefail
+          IMAGE="vera-ci-toolchain:pr-${{ github.sha }}"
+          docker run --rm "$IMAGE" \
+            pkg-config --modversion gtk+-3.0 webkit2gtk-4.1 libsoup-3.0
+          docker run --rm "$IMAGE" \
+            sh -ec 'pkg-config --cflags --libs gtk+-3.0 webkit2gtk-4.1 libsoup-3.0 >/dev/null'
+          docker run --rm "$IMAGE" \
+            sh -ec 'test -f /usr/include/gtk-3.0/gtk/gtk.h && test -f /usr/include/webkitgtk-4.1/webkit2/webkit2.h'
+
+  # main, schedule and dispatch: publish `sha-<commit>` and `candidate`, prove
+  # the candidate can compile the tag matrix with the host Go toolchain, and
+  # only then move `latest`. Any failure above the promotion leaves `latest` on
+  # the previous good image, so #686 can never pull a candidate that did not
+  # compile.
+  publish:
+    name: Publish candidate, validate, promote latest
+    if: github.event_name != 'pull_request'
+    timeout-minutes: 45
+    runs-on: ubuntu-24.04
+    # The only job with a write token. `contents: read` covers checkout; no
+    # secret other than GITHUB_TOKEN is used anywhere in this workflow.
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push the candidate
+        id: build
+        uses: docker/build-push-action@v7
+        with:
+          context: .github/ci/gtk
+          file: .github/ci/gtk/Dockerfile
+          platforms: linux/amd64
+          push: true
+          tags: |
+            ghcr.io/arcon-external/vera-app/ci-toolchain:sha-${{ github.sha }}
+            ghcr.io/arcon-external/vera-app/ci-toolchain:candidate
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Verify the candidate tag points at this build
+        # The digest is the identity that gets validated and promoted. Resolve
+        # the tag once and compare it with the digest the build reported, so a
+        # later `latest` cannot silently come from a different build.
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+        run: |
+          set -euo pipefail
+          if [ -z "${DIGEST:-}" ]; then
+            echo "::error::build-push-action produced no digest"
+            exit 1
+          fi
+          published="$(docker buildx imagetools inspect --raw \
+            ghcr.io/arcon-external/vera-app/ci-toolchain:candidate \
+            | sha256sum | cut -d' ' -f1)"
+          if [ "sha256:${published}" != "${DIGEST}" ]; then
+            echo "::error::candidate resolves to sha256:${published}, but this run built ${DIGEST}"
+            exit 1
+          fi
+          echo "candidate resolves to ${DIGEST}"
+
+      - name: Log the candidate digest
+        # The job summary is the durable record of what was published; the
+        # annotation makes it visible in the run list without opening the log.
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+        run: |
+          set -euo pipefail
+          echo "::notice title=CI toolchain candidate::${DIGEST} from ${GITHUB_SHA}"
+          {
+            echo "### CI toolchain image"
+            echo ""
+            echo "| ref | digest |"
+            echo "| --- | --- |"
+            echo "| \`candidate\` | \`${DIGEST}\` |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Set up Node
+        uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install frontend dependencies
+        run: npm --prefix frontend ci
+
+      - name: Build frontend (required for go:embed)
+        # The root package embeds frontend/dist, so the tag vet cannot compile
+        # without a real build. A stub would let the Go side pass while proving
+        # nothing about the embed it actually ships.
+        run: npm --prefix frontend run build
+
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          # The restore/save pairs in pr.yml own the cache budget. This
+          # workflow runs only on image changes and a weekly rebuild, so its
+          # modules are downloaded once below and handed to the container.
+          cache: false
+
+      - name: Download Go modules for the container
+        run: go mod download
+
+      - name: Pull the candidate image
+        run: docker pull ghcr.io/arcon-external/vera-app/ci-toolchain:candidate
+
+      - name: Validate the candidate with the host Go toolchain
+        # The image carries no Go. Mount the setup-go GOROOT read-only and give
+        # Go its own caches, then run the exact command #495 depends on. If this
+        # fails, the container is broken or the tag matrix is broken, and either
+        # way `latest` must not move.
+        run: |
+          set -euo pipefail
+          IMAGE="ghcr.io/arcon-external/vera-app/ci-toolchain:candidate"
+          GOROOT="$(go env GOROOT)"
+          GOMODCACHE="$(go env GOMODCACHE)"
+          GOCACHE="$(go env GOCACHE)"
+          echo "GOROOT=${GOROOT}"
+          echo "GOMODCACHE=${GOMODCACHE}"
+          echo "GOCACHE=${GOCACHE}"
+          mkdir -p "$GOCACHE"
+          docker run --rm \
+            --volume "${GOROOT}:/usr/local/go:ro" \
+            --volume "${GOMODCACHE}:/go/pkg/mod" \
+            --volume "${GOCACHE}:/go-build-cache" \
+            --volume "${GITHUB_WORKSPACE}:/src:ro" \
+            --workdir /src \
+            --env HOME=/tmp \
+            --env PATH=/usr/local/go/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
+            --env GOMODCACHE=/go/pkg/mod \
+            --env GOCACHE=/go-build-cache \
+            --env GOFLAGS=-mod=readonly \
+            --env CGO_ENABLED=1 \
+            "$IMAGE" sh -ec '
+              echo "go: $(go version)"
+              pkg-config --modversion gtk+-3.0 webkit2gtk-4.1 libsoup-3.0
+              go vet -tags dev,webkit2_41 ./ ./backend/auth
+            '
+
+      - name: Promote the validated candidate to latest
+        # Everything above this line is a gate. A candidate that failed the tag
+        # vet never reaches `latest`, and the previous good image stays in place.
+        run: |
+          set -euo pipefail
+          docker buildx imagetools create \
+            --tag ghcr.io/arcon-external/vera-app/ci-toolchain:latest \
+            ghcr.io/arcon-external/vera-app/ci-toolchain:candidate
+
+      - name: Verify latest points at the validated image
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+        run: |
+          set -euo pipefail
+          latest="$(docker buildx imagetools inspect --raw \
+            ghcr.io/arcon-external/vera-app/ci-toolchain:latest \
+            | sha256sum | cut -d' ' -f1)"
+          if [ "sha256:${latest}" != "${DIGEST}" ]; then
+            echo "::error::latest resolves to sha256:${latest}, but the validated candidate is ${DIGEST}"
+            exit 1
+          fi
+          echo "latest resolves to ${DIGEST}"
