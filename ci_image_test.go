@@ -351,15 +351,22 @@ func TestCIImageWorkflowShape(t *testing.T) {
 	validateIdx := ciStepIndex(t, publish.Steps, "Validate the candidate")
 	validate := publish.Steps[validateIdx]
 	for _, want := range []string{
-		"go vet -tags dev,webkit2_41 ./ ./backend/auth",
+		"bash scripts/ci-tag-matrix.sh",
 		"GOROOT",
 		"/usr/local/go:ro",
 		"GOMODCACHE",
 		"GOCACHE",
+		"GOTOOLCHAIN=local",
 	} {
 		if !strings.Contains(validate.Run, want) {
 			t.Fatalf("the candidate validation does not mention %q:\n%s", want, validate.Run)
 		}
+	}
+	// The publish gate and the PR step must run the same file. An inline copy
+	// of the matrix here could validate a different set of commands than #495
+	// executes, which is the drift this script exists to prevent.
+	if strings.Contains(validate.Run, "go vet -tags") || strings.Contains(validate.Run, "go test -tags") {
+		t.Fatalf("the candidate validation embeds the tag matrix instead of running scripts/ci-tag-matrix.sh:\n%s", validate.Run)
 	}
 
 	promoteIdx := ciStepIndex(t, publish.Steps, "Promote")

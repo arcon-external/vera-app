@@ -395,6 +395,13 @@ jobs:
     # failure.
     timeout-minutes: 45
     runs-on: ubuntu-24.04
+    # The #495 step pulls the private toolchain image from GHCR. Naming any
+    # scope zeroes the rest, so contents: read (checkout) is explicit and
+    # packages: read is the only extra grant. The token can pull the package;
+    # it cannot push or overwrite it.
+    permissions:
+      contents: read
+      packages: read
     services:
       postgres:
         image: postgres:18-alpine
@@ -544,50 +551,98 @@ jobs:
         if: steps.scope.outputs.needs_go != 'false'
         run: go vet ./...
 
+      - name: Log in to GHCR
+        # Authenticated pull, not a visibility assumption. The toolchain image
+        # is private; this job's `packages: read` plus GITHUB_TOKEN is what
+        # makes it pullable with no human step. Public visibility remains an
+        # optional optimisation, never a prerequisite.
+        if: >-
+          steps.scope.outputs.needs_go != 'false' &&
+          steps.scope.outputs.needs_tags != 'false'
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Pull the CI toolchain image
+        # Three attempts, then fail closed. A transient registry blip should
+        # not fail a PR, but a persistent failure must fail it: falling back to
+        # the apt install this image replaced is the 22-minute cost (622s in
+        # run 45171434818) the whole change exists to remove. The digest is
+        # both logged and handed to the matrix step, so the run executes
+        # exactly the image whose identity it recorded.
+        if: >-
+          steps.scope.outputs.needs_go != 'false' &&
+          steps.scope.outputs.needs_tags != 'false'
+        run: |
+          set -euo pipefail
+          image="ghcr.io/arcon-external/vera-app/ci-toolchain:latest"
+          pulled=0
+          for attempt in 1 2 3; do
+            if docker pull "$image"; then
+              pulled=1
+              break
+            fi
+            echo "::warning::docker pull $image failed (attempt ${attempt}/3)"
+            sleep $((attempt * 5))
+          done
+          if [ "$pulled" -ne 1 ]; then
+            echo "::error::could not pull $image after 3 attempts; the tag matrix cannot run and this job does not fall back to apt"
+            exit 1
+          fi
+          digest="$(docker image inspect --format '{{index .RepoDigests 0}}' "$image")"
+          echo "::notice title=CI toolchain image::${digest}"
+          echo "pulled $image (${digest})"
+          echo "CI_TOOLCHAIN_IMAGE=${digest}" >> "$GITHUB_ENV"
+
       - name: API configuration and session build modes (#495)
         # The development API resolver and the dev keychain identity are
         # //go:build dev && !production variants, and the ordinary suite never
         # compiles them: without this step a broken dev branch stays invisible
         # until someone runs `wails dev`.
         #
-        # `dev` and `production` select Wails' real Linux frontend, which
-        # cgo-links GTK/WebKit; only the default tags use Wails' no-cgo stub.
-        # Ubuntu 24.04 ships WebKit 4.1, so every root command adds
-        # `webkit2_41` and the packages below supply it. Without them the first
-        # command fails in pkg-config before any #495 test runs.
+        # It runs inside the prebuilt GTK/WebKit image, on the host Go
+        # toolchain mounted read-only from actions/setup-go, so the image holds
+        # native dependencies only and cannot drift from go.mod. The workspace
+        # mount carries the frontend/dist the root package embeds. `--user`
+        # keeps files the container creates owned by the runner; HOME=/tmp and
+        # the two cache mounts give Go writable state without writing into the
+        # image.
         #
-        # Root package covers default, packaged, dev and debug-packaged. The
-        # Wails-free auth package covers those plus dev+production, which pins
-        # the exclusive predicate (dev && !production versus !dev || production).
-        # Wails v2.16 itself declares App twice when both tags are set, so the
-        # dev+production root package cannot link; auth is where that
-        # combination is executable.
+        # The command is scripts/ci-tag-matrix.sh, the same file the ci-image
+        # publish job validates a candidate with before promoting `latest`, so
+        # the matrix and its proof cannot drift.
         #
-        # Gated on the diff, because the apt install is the most expensive
-        # thing in this workflow that has nothing to do with the code under
-        # test: 622s in run 45171434818, of which `apt-get update` alone was
-        # 9.5 minutes, on the critical path of a PR that did not touch a build
-        # tag. The scope step runs it on main, on workflow_dispatch, and on any
-        # PR whose merge-base diff touches the root package, backend/auth,
-        # wails.json or the Go module files -- the whole surface that can
-        # change this matrix's outcome. A PR that touches only docs, frontend
-        # source or unrelated backend packages skips it: the accepted
-        # trade-off is that the tag matrix is not re-proven on a PR that
-        # cannot affect it.
+        # Gated on the diff: the tag matrix re-proves only the surface that can
+        # change its outcome -- root *.go, backend/auth/, wails.json and the Go
+        # module files -- plus every main/workflow_dispatch run. A PR that
+        # touches only docs, frontend source or unrelated backend packages
+        # skips it. With the image there is no apt cost left to avoid, but the
+        # gate still keeps unrelated PRs from pulling and running a redundant
+        # matrix.
         if: >-
           steps.scope.outputs.needs_go != 'false' &&
           steps.scope.outputs.needs_tags != 'false'
         run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y -qq libgtk-3-dev libwebkit2gtk-4.1-dev libsoup-3.0-dev pkg-config
-          go vet -tags dev,webkit2_41 ./ ./backend/auth
-          go test -count=1 -run 'TestAPIBaseURL|TestProductionAPIURL|TestKeyring' ./ ./backend/auth
-          for tags in production dev production,debug; do
-            go test -tags "$tags,webkit2_41" -count=1 \
-              -run 'TestAPIBaseURL|TestProductionAPIURL|TestKeyring' ./ ./backend/auth
-          done
-          go test -tags dev,production -count=1 \
-            -run 'TestKeyring' ./backend/auth
+          set -euo pipefail
+          docker run --rm \
+            --user "$(id -u):$(id -g)" \
+            --volume "${GITHUB_WORKSPACE}:/src" \
+            --workdir /src \
+            --volume "$(go env GOROOT):/goroot:ro" \
+            --volume "${HOME}/go/pkg/mod:/go/pkg/mod" \
+            --volume "${HOME}/.cache/go-build:/go-build" \
+            --env GOROOT=/goroot \
+            --env PATH=/goroot/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
+            --env GOMODCACHE=/go/pkg/mod \
+            --env GOCACHE=/go-build \
+            --env HOME=/tmp \
+            --env CGO_ENABLED=1 \
+            --env GOTOOLCHAIN=local \
+            --env GOFLAGS=-mod=readonly \
+            "${CI_TOOLCHAIN_IMAGE}" \
+            bash scripts/ci-tag-matrix.sh
 
       - name: Build the chromedp tag (the renderer-equivalence oracle)
         # The default suite never builds this tag, so without this step the
@@ -691,8 +746,8 @@ jobs:
     # Narrowed, not defaulted. Checkout needs contents; the Dependabot step
     # below needs security-events. Declaring both keeps the grant
     # least-privilege -- naming any scope zeroes the rest, so contents has to
-    # be listed explicitly. Kept off the Go job deliberately: its cache
-    # restore/save steps keep whatever token they have today.
+    # be listed explicitly. The Go store job names its own scopes because the
+    # #495 step pulls the toolchain image.
     permissions:
       contents: read
       security-events: read
