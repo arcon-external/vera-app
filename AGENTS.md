@@ -285,7 +285,10 @@ test process creates and migrates a template database, then gives each test a
 `CREATE DATABASE … TEMPLATE` clone and drops it in `t.Cleanup`. The template is
 named after the test binary, so `store.test` and `api.test` never share (or drop)
 each other's template when `go test ./...` runs them in parallel against one
-database. The template is migrated with the app schema `vera_test` and every
+database. Concurrent processes of the same test binary take Postgres session
+advisory locks keyed on the template and clone names, so two `store.test` runs
+wait instead of dropping each other's template or clone. The template is
+migrated with the app schema `vera_test` and every
 clone keeps it: Postgres does not dump the built-in `public` schema, so the
 restore drill could neither restore a dump of its own clone after `ResetSchema`
 drops the schema, nor prove the dump names the app schema. The schema name is
