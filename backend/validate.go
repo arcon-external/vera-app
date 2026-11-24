@@ -8,6 +8,14 @@ import (
 )
 
 func validateSavePath(path string) (string, error) {
+	return validateSavePathForExtension(path, ".pdf")
+}
+
+// validateSavePathForExtension is the format-aware form of validateSavePath.
+// The quotation, template preview and report PDF use ".pdf"; the report
+// workbook (#683) uses ".xlsx". Everything else — an absolute path, an existing
+// directory, a symlink destination, a missing parent — is checked once.
+func validateSavePathForExtension(path, extension string) (string, error) {
 	if strings.TrimSpace(path) == "" {
 		return "", fmt.Errorf("path is required")
 	}
@@ -17,8 +25,8 @@ func validateSavePath(path string) (string, error) {
 		return "", fmt.Errorf("resolve absolute path: %w", err)
 	}
 
-	if !strings.EqualFold(filepath.Ext(absPath), ".pdf") {
-		return "", fmt.Errorf("file must use .pdf extension")
+	if !strings.EqualFold(filepath.Ext(absPath), extension) {
+		return "", fmt.Errorf("file must use %s extension", extension)
 	}
 
 	parentDir := filepath.Dir(absPath)

@@ -70,6 +70,16 @@ func reportJSON(t *testing.T, snapshot poreport.Report) string {
 	return string(raw)
 }
 
+// adminQuotation is a signed-in admin binding. Issue #683 makes the report
+// exports admin-only, so the successful-path tests must carry the role the
+// route and the binding now require.
+func adminQuotation() *Quotation {
+	q := newTestQuotation()
+	q.SetAuthService(auth.AdminTestService())
+	return q
+}
+
+// staffQuotation is a signed-in staff binding: the role that must be refused.
 func staffQuotation() *Quotation {
 	q := newTestQuotation()
 	q.SetAuthService(auth.StaffTestService())
@@ -77,7 +87,7 @@ func staffQuotation() *Quotation {
 }
 
 func TestExportPurchaseOrderReportWritesTheChosenFile(t *testing.T) {
-	q := staffQuotation()
+	q := adminQuotation()
 	dir := t.TempDir()
 	path := filepath.Join(dir, "report.pdf")
 
@@ -135,7 +145,7 @@ func TestExportPurchaseOrderReportWritesTheChosenFile(t *testing.T) {
 }
 
 func TestExportPurchaseOrderReportCancelReturnsEmptyPath(t *testing.T) {
-	q := staffQuotation()
+	q := adminQuotation()
 	previousDialog := saveFileDialog
 	saveFileDialog = func(context.Context, runtime.SaveDialogOptions) (string, error) {
 		return "", nil
@@ -152,7 +162,7 @@ func TestExportPurchaseOrderReportCancelReturnsEmptyPath(t *testing.T) {
 }
 
 func TestExportPurchaseOrderReportRefusesACorruptSnapshotBeforeTheDialog(t *testing.T) {
-	q := staffQuotation()
+	q := adminQuotation()
 	previousDialog := saveFileDialog
 	dialogOpened := false
 	saveFileDialog = func(context.Context, runtime.SaveDialogOptions) (string, error) {
@@ -188,7 +198,7 @@ func TestExportPurchaseOrderReportRefusesACorruptSnapshotBeforeTheDialog(t *test
 }
 
 func TestExportPurchaseOrderReportValidatesTheChosenPath(t *testing.T) {
-	q := staffQuotation()
+	q := adminQuotation()
 	previousDialog := saveFileDialog
 	saveFileDialog = func(context.Context, runtime.SaveDialogOptions) (string, error) {
 		return filepath.Join(t.TempDir(), "report.txt"), nil
@@ -209,6 +219,158 @@ func TestExportPurchaseOrderReportRequiresASignedInUser(t *testing.T) {
 	t.Cleanup(func() { apiClient = previousClient })
 	if _, err := q.ExportPurchaseOrderReport(reportJSON(t, reportExportFixture())); err == nil {
 		t.Errorf("an unauthenticated export was accepted")
+	}
+}
+
+// Issue #683: a staff session may not export the report even though it is
+// signed in. The refusal is decided before the payload is decoded and before
+// the save dialog opens, so a staff caller can never write a file.
+func TestExportPurchaseOrderReportRefusesStaff(t *testing.T) {
+	q := staffQuotation()
+	dialogOpened := false
+	previousDialog := saveFileDialog
+	saveFileDialog = func(context.Context, runtime.SaveDialogOptions) (string, error) {
+		dialogOpened = true
+		return filepath.Join(t.TempDir(), "never.pdf"), nil
+	}
+	t.Cleanup(func() { saveFileDialog = previousDialog })
+
+	if _, err := q.ExportPurchaseOrderReport(reportJSON(t, reportExportFixture())); err == nil {
+		t.Fatalf("a staff export was accepted")
+	}
+	if dialogOpened {
+		t.Errorf("the save dialog opened for a staff session")
+	}
+}
+
+// Issue #683: the Excel export is the same payload and the same save
+// discipline as the PDF, with an `.xlsx` destination. It is a separate binding
+// so the PDF path stays byte-for-byte what it was; the file it writes is a real
+// workbook, not a renamed PDF.
+func TestExportPurchaseOrderReportXLSXWritesTheChosenFile(t *testing.T) {
+	q := adminQuotation()
+	dir := t.TempDir()
+	path := filepath.Join(dir, "report.xlsx")
+
+	var gotOptions runtime.SaveDialogOptions
+	previousDialog := saveFileDialog
+	saveFileDialog = func(_ context.Context, options runtime.SaveDialogOptions) (string, error) {
+		gotOptions = options
+		return path, nil
+	}
+	t.Cleanup(func() { saveFileDialog = previousDialog })
+
+	// The export must not reach the API: nil is the strongest possible proof.
+	previousClient := apiClient
+	apiClient = nil
+	t.Cleanup(func() { apiClient = previousClient })
+
+	got, err := q.ExportPurchaseOrderReportXLSX(reportJSON(t, reportExportFixture()))
+	if err != nil {
+		t.Fatalf("ExportPurchaseOrderReportXLSX: %v", err)
+	}
+	if got != path {
+		t.Errorf("returned path = %q, want %q", got, path)
+	}
+	if gotOptions.Title != "Save Purchase Order Report" {
+		t.Errorf("dialog title = %q", gotOptions.Title)
+	}
+	if gotOptions.DefaultFilename != "Purchase_Order_Report_2025-01-01_to_2026-01-01.xlsx" {
+		t.Errorf("dialog filename = %q", gotOptions.DefaultFilename)
+	}
+	if len(gotOptions.Filters) != 1 || gotOptions.Filters[0].Pattern != "*.xlsx" {
+		t.Errorf("dialog filters = %+v", gotOptions.Filters)
+	}
+
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read written workbook: %v", err)
+	}
+	if !strings.HasPrefix(string(raw), "PK") {
+		t.Fatalf("written file is not a zip workbook (%d bytes)", len(raw))
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Mode().Perm() != 0o644 {
+		t.Errorf("workbook mode = %04o, want 0644", info.Mode().Perm())
+	}
+	temps, err := filepath.Glob(filepath.Join(dir, ".report-*.tmp"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(temps) != 0 {
+		t.Errorf("temporary workbook files left behind: %v", temps)
+	}
+}
+
+func TestExportPurchaseOrderReportXLSXCancelReturnsEmptyPath(t *testing.T) {
+	q := adminQuotation()
+	previousDialog := saveFileDialog
+	saveFileDialog = func(context.Context, runtime.SaveDialogOptions) (string, error) {
+		return "", nil
+	}
+	t.Cleanup(func() { saveFileDialog = previousDialog })
+
+	got, err := q.ExportPurchaseOrderReportXLSX(reportJSON(t, reportExportFixture()))
+	if err != nil {
+		t.Errorf("cancel returned an error: %v", err)
+	}
+	if got != "" {
+		t.Errorf("cancel returned %q, want an empty path", got)
+	}
+}
+
+func TestExportPurchaseOrderReportXLSXRefusesStaff(t *testing.T) {
+	q := staffQuotation()
+	dialogOpened := false
+	previousDialog := saveFileDialog
+	saveFileDialog = func(context.Context, runtime.SaveDialogOptions) (string, error) {
+		dialogOpened = true
+		return filepath.Join(t.TempDir(), "never.xlsx"), nil
+	}
+	t.Cleanup(func() { saveFileDialog = previousDialog })
+
+	if _, err := q.ExportPurchaseOrderReportXLSX(reportJSON(t, reportExportFixture())); err == nil {
+		t.Fatalf("a staff workbook export was accepted")
+	}
+	if dialogOpened {
+		t.Errorf("the save dialog opened for a staff session")
+	}
+}
+
+func TestExportPurchaseOrderReportXLSXRefusesAnInvalidViewBeforeTheDialog(t *testing.T) {
+	q := adminQuotation()
+	badVersion := reportViewFixture()
+	badVersion.Version = report.EnvelopeVersion(2)
+
+	dialogOpened := false
+	previousDialog := saveFileDialog
+	saveFileDialog = func(context.Context, runtime.SaveDialogOptions) (string, error) {
+		dialogOpened = true
+		return filepath.Join(t.TempDir(), "never.xlsx"), nil
+	}
+	t.Cleanup(func() { saveFileDialog = previousDialog })
+
+	if _, err := q.ExportPurchaseOrderReportXLSX(viewJSON(t, badVersion)); err == nil {
+		t.Fatalf("an invalid view was accepted")
+	}
+	if dialogOpened {
+		t.Errorf("the save dialog opened before the invalid view was refused")
+	}
+}
+
+func TestExportPurchaseOrderReportXLSXValidatesTheChosenPath(t *testing.T) {
+	q := adminQuotation()
+	previousDialog := saveFileDialog
+	saveFileDialog = func(context.Context, runtime.SaveDialogOptions) (string, error) {
+		return filepath.Join(t.TempDir(), "report.pdf"), nil
+	}
+	t.Cleanup(func() { saveFileDialog = previousDialog })
+
+	if _, err := q.ExportPurchaseOrderReportXLSX(reportJSON(t, reportExportFixture())); err == nil {
+		t.Errorf("a PDF destination was accepted for a workbook")
 	}
 }
 
@@ -243,7 +405,7 @@ func viewJSON(t *testing.T, view report.ViewEnvelope) string {
 }
 
 func TestExportPurchaseOrderReportWritesAVersionedView(t *testing.T) {
-	q := staffQuotation()
+	q := adminQuotation()
 	dir := t.TempDir()
 	path := filepath.Join(dir, "selected-month.pdf")
 	previousDialog := saveFileDialog
@@ -345,7 +507,7 @@ func TestExportPurchaseOrderReportRefusesAnInvalidViewBeforeTheDialog(t *testing
 		{name: "null version", payload: `{"version":null,"sources":[],"overview":0,"periods":{"sources":[],"months":[],"layout":"individual"},"categories":{"source":0,"codes":[],"layout":"aggregate"}}`},
 	}
 
-	q := staffQuotation()
+	q := adminQuotation()
 	dialogOpened := false
 	previousDialog := saveFileDialog
 	saveFileDialog = func(context.Context, runtime.SaveDialogOptions) (string, error) {
@@ -441,7 +603,7 @@ func TestExportPurchaseOrderReportWritesEmptyAndAggregateViews(t *testing.T) {
 	}
 	for _, test := range cases {
 		t.Run(test.name, func(t *testing.T) {
-			q := staffQuotation()
+			q := adminQuotation()
 			dir := t.TempDir()
 			path := filepath.Join(dir, "extended-view.pdf")
 			previousDialog := saveFileDialog
@@ -548,7 +710,7 @@ func TestExportPurchaseOrderReportWritesCategoryComparisonViews(t *testing.T) {
 	}
 	for _, test := range cases {
 		t.Run(test.name, func(t *testing.T) {
-			q := staffQuotation()
+			q := adminQuotation()
 			dir := t.TempDir()
 			path := filepath.Join(dir, "category-view.pdf")
 			previousDialog := saveFileDialog
@@ -629,7 +791,7 @@ func TestExportPurchaseOrderReportRefusesInvalidCategoryViewsBeforeTheDialog(t *
 		{name: "code absent from the source", view: absentRow},
 	}
 
-	q := staffQuotation()
+	q := adminQuotation()
 	dialogOpened := false
 	previousDialog := saveFileDialog
 	saveFileDialog = func(context.Context, runtime.SaveDialogOptions) (string, error) {
