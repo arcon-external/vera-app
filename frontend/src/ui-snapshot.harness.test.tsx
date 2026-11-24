@@ -4548,6 +4548,12 @@ const CASES: SnapshotCase[] = [
         onRemoveSubBullet={() => undefined}
         onSubBulletChange={() => undefined}
         onPasteItems={() => undefined}
+        boughtQuantities={
+          new Map([
+            ["1:0", 20000],
+            ["2:1", 25000],
+          ])
+        }
       />
     ),
   },
