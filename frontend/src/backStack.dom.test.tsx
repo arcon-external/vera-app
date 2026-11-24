@@ -1310,8 +1310,16 @@ describe("Features Tutorial (issue #595)", () => {
   });
 });
 
-describe("Reports workspace (#630)", () => {
-  it("offers Reports after the four document workspaces and before Admin", async () => {
+describe("Reports workspace (#630, admin-only since #683)", () => {
+  /** #683: Reports is admin-only, so its workspace tests sign in as admins. */
+  function useAdminSession(): void {
+    const admin = { ...USER, Role: "admin" };
+    mocks.restoreSession.mockResolvedValue(admin);
+    mocks.currentUser.mockResolvedValue(admin);
+  }
+
+  it("offers Reports to an admin after the four document workspaces and before Admin", async () => {
+    useAdminSession();
     await renderApp();
 
     const labels = [
@@ -1349,6 +1357,7 @@ describe("Reports workspace (#630)", () => {
   });
 
   it("opens Reports as a standalone shell workspace and Back returns Home", async () => {
+    useAdminSession();
     await renderApp();
     await act(async () => {
       button("Open Reports").click();
@@ -1376,6 +1385,7 @@ describe("Reports workspace (#630)", () => {
   });
 
   it("keeps the selected filters across Account settings and back", async () => {
+    useAdminSession();
     await renderApp();
     await act(async () => {
       button("Open Reports").click();
@@ -1431,6 +1441,7 @@ describe("Reports workspace (#630)", () => {
   });
 
   it("keeps the existing unsaved-document guard after a Reports visit", async () => {
+    useAdminSession();
     await renderApp();
     await act(async () => {
       button("Open Reports").click();

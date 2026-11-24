@@ -238,6 +238,7 @@ interface RenderOptions {
   defaultCurrency?: string;
   catalogue?: CurrencyInfo[] | null;
   onExport?: (view: PurchaseOrderReportView) => Promise<string>;
+  onExportXLSX?: (view: PurchaseOrderReportView) => Promise<string>;
   mutationEpoch?: number;
   isAdmin?: boolean;
   onCloseQuotation?: (quotationID: number, reason: string) => Promise<unknown>;
@@ -252,6 +253,7 @@ async function renderPage(options: RenderOptions = {}): Promise<void> {
           defaultCurrency={options.defaultCurrency ?? "IDR"}
           currencyCatalogue={options.catalogue ?? CATALOGUE}
           onExport={options.onExport}
+          onExportXLSX={options.onExportXLSX}
           mutationEpoch={options.mutationEpoch ?? 0}
           isAdmin={options.isAdmin}
           onCloseQuotation={options.onCloseQuotation}
@@ -1269,6 +1271,173 @@ describe("Reports export seam (issue #630)", () => {
     });
     await flush();
     expect(button("Export PDF").disabled).toBe(false);
+  });
+});
+
+// #683: the Excel workbook is a second native save over the same frozen view.
+// It mirrors the PDF seam exactly (same snapshot, same failure isolation) and
+// the two exports never run at the same time.
+describe("Reports Excel export seam (issue #683)", () => {
+  it("disables Export Excel when no XLSX callback is wired", async () => {
+    await renderPage({ onExport: async () => "/tmp/opencode/report.pdf" });
+    expect(button("Export Excel").disabled).toBe(true);
+    expect(button("Export Excel").title).toBe("Excel export is not available.");
+    expect(button("Export PDF").disabled).toBe(false);
+  });
+
+  it("disables Export Excel while no report is loaded", async () => {
+    const pending = deferred<PurchaseOrderReportData>();
+    reportMock.mockImplementationOnce(() => pending.promise);
+    const onExportXLSX = vi.fn(async () => "/tmp/opencode/report.xlsx");
+    await renderPage({
+      onExport: async () => "/tmp/opencode/report.pdf",
+      onExportXLSX,
+    });
+
+    expect(button("Export Excel").disabled).toBe(true);
+    expect(button("Export Excel").title).toBe(
+      "A valid, current report is required before export."
+    );
+    pending.resolve(reportFor({ ...calls()[0] }));
+    await flush();
+    expect(button("Export Excel").disabled).toBe(false);
+    expect(button("Export Excel").title).toBe(
+      "Save this visible report as an Excel workbook"
+    );
+  });
+
+  it("sends the same frozen view to Excel and PDF and toasts the saved path", async () => {
+    const onExport = vi.fn(
+      async (_view: PurchaseOrderReportView) => "/tmp/opencode/report.pdf"
+    );
+    const onExportXLSX = vi.fn(
+      async (_view: PurchaseOrderReportView) => "/tmp/opencode/report.xlsx"
+    );
+    await renderPage({ onExport, onExportXLSX });
+
+    await act(async () => {
+      button("Export Excel").click();
+    });
+    await flush();
+
+    expect(onExportXLSX).toHaveBeenCalledTimes(1);
+    expect(onExport).not.toHaveBeenCalled();
+    expect(document.body.textContent).toContain(
+      "Report saved to /tmp/opencode/report.xlsx"
+    );
+
+    const xlsxView = onExportXLSX.mock.calls[0][0] as PurchaseOrderReportView;
+    expect(xlsxView.version).toBe(1);
+    expect(xlsxView.overview).toBe(0);
+    expect(xlsxView.sources[0].filter).toEqual(calls()[0]);
+    expect(xlsxView.sources[0].totals).toEqual(
+      purchaseOrderReportFixture().totals
+    );
+
+    // The workbook save does not disturb the report or the PDF path: the PDF
+    // export that follows carries byte-identical frozen evidence.
+    expect(button("Export PDF").disabled).toBe(false);
+    await act(async () => {
+      button("Export PDF").click();
+    });
+    await flush();
+    expect(onExport).toHaveBeenCalledTimes(1);
+    expect(onExport.mock.calls[0][0]).toEqual(xlsxView);
+    expect(reportMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("reports an Excel failure and keeps the visible report", async () => {
+    const onExportXLSX = vi
+      .fn()
+      .mockRejectedValueOnce(new Error("The save dialog was refused."))
+      .mockRejectedValueOnce({});
+    await renderPage({
+      onExport: async () => "/tmp/opencode/report.pdf",
+      onExportXLSX,
+    });
+
+    await act(async () => {
+      button("Export Excel").click();
+    });
+    await flush();
+
+    expect(document.body.textContent).toContain("The save dialog was refused.");
+    expect(document.body.textContent).not.toContain(
+      "Report saved to /tmp/opencode/report.xlsx"
+    );
+    // No refetch: the same visible snapshot is still on screen and exportable.
+    expect(reportMock).toHaveBeenCalledTimes(1);
+    expect(
+      document.querySelector('[aria-label="Report KPIs"]')?.textContent
+    ).toContain("Rp");
+    expect(button("Export Excel").disabled).toBe(false);
+    expect(button("Export PDF").disabled).toBe(false);
+
+    // A shapeless rejection still names what failed, not a generic sentence.
+    await act(async () => {
+      button("Export Excel").click();
+    });
+    await flush();
+    expect(document.body.textContent).toContain(
+      "The Excel workbook could not be saved. Choose another location and try again."
+    );
+    expect(button("Export Excel").disabled).toBe(false);
+  });
+
+  it("treats an empty workbook path as cancelled, with no success toast", async () => {
+    const onExportXLSX = vi.fn(async () => "");
+    await renderPage({
+      onExport: async () => "/tmp/opencode/report.pdf",
+      onExportXLSX,
+    });
+
+    await act(async () => {
+      button("Export Excel").click();
+    });
+    await flush();
+
+    expect(onExportXLSX).toHaveBeenCalledTimes(1);
+    expect(document.body.textContent).not.toContain("Report saved");
+    expect(document.body.textContent).not.toContain("Excel workbook could not");
+    expect(button("Export Excel").disabled).toBe(false);
+  });
+
+  it("never runs the PDF and Excel exports at the same time", async () => {
+    const xlsx = deferred<string>();
+    const pdf = deferred<string>();
+    const onExport = vi.fn(() => pdf.promise);
+    const onExportXLSX = vi.fn(() => xlsx.promise);
+    await renderPage({ onExport, onExportXLSX });
+
+    await act(async () => {
+      button("Export Excel").click();
+    });
+    await flush();
+    expect(onExportXLSX).toHaveBeenCalledTimes(1);
+    expect(button("Export Excel").disabled).toBe(true);
+    expect(button("Export Excel").title).toBe("The workbook is being saved.");
+    expect(button("Export PDF").disabled).toBe(true);
+
+    xlsx.resolve("/tmp/opencode/report.xlsx");
+    await flush();
+    expect(button("Export Excel").disabled).toBe(false);
+    expect(button("Export PDF").disabled).toBe(false);
+
+    await act(async () => {
+      button("Export PDF").click();
+    });
+    await flush();
+    expect(onExport).toHaveBeenCalledTimes(1);
+    expect(button("Export PDF").disabled).toBe(true);
+    expect(button("Export Excel").disabled).toBe(true);
+    expect(button("Export Excel").title).toBe(
+      "Wait for the PDF export to finish."
+    );
+
+    pdf.resolve("/tmp/opencode/report.pdf");
+    await flush();
+    expect(button("Export PDF").disabled).toBe(false);
+    expect(button("Export Excel").disabled).toBe(false);
   });
 });
 

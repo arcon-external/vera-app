@@ -3,6 +3,7 @@ import {
   Prepare,
   Export,
   ExportPurchaseOrderReport,
+  ExportPurchaseOrderReportXLSX,
   GetCustomerPreview,
   GetInternalBreakdown,
   GetQuotationPreviewHTML,
@@ -129,6 +130,7 @@ import { usePurchaseOrderLeaveGuard, type AppPage } from "./poLeaveGuard";
 import {
   isPurchaseOrderWorkspacePage,
   isQuotationWorkspacePage,
+  isReportsWorkspacePage,
   isSettingsPage,
   lastWorkspacePage,
   popHistory,
@@ -558,8 +560,11 @@ export function purchaseOrderTab(page: AppPage): "editor" | "drafts" | "archive"
   return "editor";
 }
 
+// #683: Reports is admin-only. It is not an "admin-*" tab, so the page guard
+// names it explicitly; the shell's resolved page and the Admin Dashboard's
+// render condition both read it, and the dashboard excludes Reports itself.
 export function isAdminPage(page: AppPage): boolean {
-  return page.startsWith("admin-");
+  return page === "reports" || page.startsWith("admin-");
 }
 
 function App() {
@@ -627,6 +632,10 @@ function App() {
       ),
   });
   const closePurchaseOrder = poWorkspace.close;
+  // The signed-in account. Declared before navigatePage because #683's Reports
+  // guard reads its role inside the navigation callback; the rest of the
+  // session state stays with the session block below.
+  const [user, setUser] = useState<SignedInUser | null>(null);
   // Ticket 02: the page-history stack. Home → workspace → settings pushes the
   // page being left; tab switches inside one workspace replace it, so Back
   // from anywhere in a workspace returns Home rather than the previous tab.
@@ -677,15 +686,16 @@ function App() {
       }
       // #630: the Reports workspace is mounted from its first visit onward.
       // Marking it here means a navigation refused by the leave guard never
-      // creates a hidden report page.
-      if (next === "reports") setReportsOpened(true);
+      // creates a hidden report page. #683: Reports is admin-only, so a staff
+      // navigation request never opens (or mounts) it.
+      if (next === "reports" && user?.Role === "admin") setReportsOpened(true);
       // Issue #494: a successful return to Home ends the remembered workspace
       // context. Only the allowed navigation reaches here; a refused one has
       // no way to clear it.
       if (next === "home") setSettingsOrigin(null);
       setPage(next);
     },
-    [closePurchaseOrder, page, saveScroll]
+    [closePurchaseOrder, page, saveScroll, user?.Role]
   );
   const [editingQuote, setEditingQuote] = useState<{
     number: string;
@@ -881,7 +891,6 @@ function App() {
     },
     [poLeave, poWorkspace.open, pushToast]
   );
-  const [user, setUser] = useState<SignedInUser | null>(null);
   // Issue #531: an involuntary session end preserves the workspace and shows
   // a re-login surface. endedUser is the account whose work is preserved, so
   // the same account can restore it and a different one starts clean.
@@ -2515,10 +2524,17 @@ function App() {
 
   // Issue #632: Reports owns busy/cancel/error and the visible snapshot; App
   // only passes that exact snapshot to the native renderer. The binding never
-  // refetches, so the PDF cannot disagree with the screen.
+  // refetches, so the PDF cannot disagree with the screen. #683's workbook
+  // export is the same contract over the same frozen view.
   const handleExportPurchaseOrderReport = useCallback(
     (view: PurchaseOrderReportView) =>
       ExportPurchaseOrderReport(JSON.stringify(view)),
+    []
+  );
+
+  const handleExportPurchaseOrderReportXLSX = useCallback(
+    (view: PurchaseOrderReportView) =>
+      ExportPurchaseOrderReportXLSX(JSON.stringify(view)),
     []
   );
 
@@ -3349,7 +3365,7 @@ function App() {
         />
       ) : null}
 
-      {reportsOpened ? (
+      {reportsOpened && isAdmin ? (
         <div hidden={visiblePage !== "reports"}>
           <PurchaseOrderReportsPage
             key={user?.ID ?? 0}
@@ -3358,6 +3374,7 @@ function App() {
             defaultCurrency={companyCurrency}
             currencyCatalogue={currencyCatalogue}
             onExport={handleExportPurchaseOrderReport}
+            onExportXLSX={handleExportPurchaseOrderReportXLSX}
             isAdmin={isAdmin}
             onCloseQuotation={closeQuotationFromDetail}
             onReopenQuotation={reopenQuotationFromDetail}
@@ -3717,7 +3734,9 @@ function App() {
         </div>
       ) : null}
 
-      {isAdminPage(visiblePage) && isAdmin ? (
+      {isAdminPage(visiblePage) &&
+      !isReportsWorkspacePage(visiblePage) &&
+      isAdmin ? (
         <AdminDashboard
           tab={adminTabForPage(visiblePage)}
           onCompanyDirtyChange={setCompanyDirty}

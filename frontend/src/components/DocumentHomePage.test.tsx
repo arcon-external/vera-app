@@ -3,8 +3,8 @@ import { describe, expect, it } from "vitest";
 import { DocumentHomePage } from "./DocumentHomePage";
 
 // Issue #491: Home is the global workspace dashboard. Issue #630 adds Reports
-// as a sixth destination: a wide card after the four document workspaces and
-// before Admin Dashboard, available to staff and admins.
+// as a sixth destination; #683 makes it admin-only, so staff see the four
+// document workspaces and no Reports or Admin card.
 //
 // The suite runs in node with no DOM (see vitest.config.ts), so the page is
 // rendered to a string and asserted on as markup -- the same house pattern as
@@ -113,17 +113,16 @@ describe("DocumentHomePage workspaces (issue #491)", () => {
     expect(html).toContain("sm:grid-cols-2");
   });
 
-  it("hides the Admin card for a non-admin but still offers Reports", () => {
+  it("hides Reports and Admin from a non-admin", () => {
     const html = renderHome(false);
+    expect(html).not.toContain("Open Reports");
+    expect(html).not.toContain(">Reports<");
     expect(html).not.toContain("Open Admin Dashboard");
     expect(html).not.toContain(">Admin Dashboard<");
-    // Five cards, five icons; Reports is independently available.
-    expect(html.split('viewBox="0 0 24 24"').length - 1).toBe(5);
-    expect(html.split("sm:col-span-2").length - 1).toBe(1);
+    // Four cards, four icons; neither wide card renders for staff.
+    expect(html.split('viewBox="0 0 24 24"').length - 1).toBe(4);
+    expect(html).not.toContain("sm:col-span-2");
     expect(buttonTagFor(html, "Open Quotation")).toBeDefined();
     expect(buttonTagFor(html, "Open Purchase Orders")).toBeDefined();
-    expect(buttonTagFor(html, "Open Reports")).not.toContain(" disabled=");
-    // The wide-card class belongs to Reports, never to a hidden Admin card.
-    expect(html).toContain("sm:col-span-2");
   });
 });
