@@ -12,7 +12,9 @@ version: 2
 # All four ecosystems, not just the actions:
 #
 #   github-actions  the pins in .github/workflows/*.yml
-#   docker          Dockerfile.veraserver's builder and runtime images
+#   docker          Dockerfile.veraserver's builder and runtime images, plus
+#                   the pinned Ubuntu base of the CI toolchain image; two
+#                   directories, so two docker entries below
 #   gomod           go.mod — AGENTS.md §17 names x/crypto, pgx/v5 and echo as the
 #                   areas most often flagged, and alerts alone means waiting for
 #                   a problem to exist before it is fixed
@@ -36,6 +38,20 @@ updates:
 
   - package-ecosystem: docker
     directory: "/"
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 3
+    labels:
+      - development
+    commit-message:
+      prefix: "chore"
+
+  # The toolchain image's Ubuntu base is pinned by digest. Without this entry
+  # the pin would never move, and a base-image CVE fix would need a hand edit
+  # nobody is watching for (#685).
+  - package-ecosystem: docker
+    directory: "/.github/ci/gtk"
     schedule:
       interval: weekly
       day: monday
