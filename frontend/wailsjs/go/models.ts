@@ -3438,6 +3438,7 @@ export namespace backend {
 	    DiscountPercent: number;
 	    DiscountEnabled: boolean;
 	    MarginEnabled: boolean;
+	    No: number;
 	    SubSubItems: QuotationSubSubItemInput[];
 
 	    static createFrom(source: any = {}) {
@@ -3454,6 +3455,7 @@ export namespace backend {
 	        this.DiscountPercent = source["DiscountPercent"];
 	        this.DiscountEnabled = source["DiscountEnabled"];
 	        this.MarginEnabled = source["MarginEnabled"];
+	        this.No = source["No"];
 	        this.SubSubItems = this.convertValues(source["SubSubItems"], QuotationSubSubItemInput);
 	    }
 
@@ -3481,6 +3483,7 @@ export namespace backend {
 	    SubItems: QuotationSubItemInput[];
 	    UnitPrice: number;
 	    Qty: number;
+	    No: number;
 	    MarginPercent: number;
 	    DiscountPercent: number;
 	    DiscountEnabled: boolean;
@@ -3498,6 +3501,7 @@ export namespace backend {
 	        this.SubItems = this.convertValues(source["SubItems"], QuotationSubItemInput);
 	        this.UnitPrice = source["UnitPrice"];
 	        this.Qty = source["Qty"];
+	        this.No = source["No"];
 	        this.MarginPercent = source["MarginPercent"];
 	        this.DiscountPercent = source["DiscountPercent"];
 	        this.DiscountEnabled = source["DiscountEnabled"];
