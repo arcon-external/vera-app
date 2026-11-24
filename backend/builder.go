@@ -64,7 +64,62 @@ type PricingSummary struct {
 	CustomerGrandTotal        uint64
 }
 
-func buildItems(inputItems []QuotationItemInput, currencyCode string) []QuotationItem {
+// assignIdentityNumbers resolves one level's stable line identities. A
+// submitted number above zero is preserved; a zero -- a line the editor just
+// added -- takes the next number above every submitted one. Numbering is
+// identity, not position (#648): removing a line must leave the numbers after
+// it untouched, because bought quantity, Unsold remainders and ghost rows all
+// key on (item number, sub number). Renumbering would move that history to a
+// different product without anyone editing it.
+//
+// Duplicates are refused rather than resolved. Two lines claiming one identity
+// is not a display problem; there is no answer to which of them a purchase
+// order bought, and letting the database's unique index answer instead would
+// report it after the document had already been priced.
+func assignIdentityNumbers(where string, submitted []uint32) ([]uint32, error) {
+	seen := make(map[uint32]struct{}, len(submitted))
+	var highest uint32
+	for _, no := range submitted {
+		if no == 0 {
+			continue
+		}
+		if _, duplicate := seen[no]; duplicate {
+			return nil, fmt.Errorf("%s: number %d is used more than once", where, no)
+		}
+		seen[no] = struct{}{}
+		if no > highest {
+			highest = no
+		}
+	}
+
+	assigned := make([]uint32, len(submitted))
+	next := highest
+	for i, no := range submitted {
+		if no != 0 {
+			assigned[i] = no
+			continue
+		}
+		next++
+		if next == 0 {
+			// Only reachable if a caller claimed the top of uint32 and then
+			// asked for another line. Refusing beats wrapping to 0, which is
+			// both the "new line" sentinel and an invalid database number.
+			return nil, fmt.Errorf("%s: no number is available above the highest submitted number", where)
+		}
+		assigned[i] = next
+	}
+	return assigned, nil
+}
+
+func buildItems(inputItems []QuotationItemInput, currencyCode string) ([]QuotationItem, error) {
+	submitted := make([]uint32, len(inputItems))
+	for i := range inputItems {
+		submitted[i] = inputItems[i].No
+	}
+	numbers, err := assignIdentityNumbers("item numbers", submitted)
+	if err != nil {
+		return nil, err
+	}
 	items := make([]QuotationItem, 0, len(inputItems))
 	for key, itemInput := range inputItems {
 		item := newQuotationItem(
@@ -102,9 +157,12 @@ func buildItems(inputItems []QuotationItemInput, currencyCode string) []Quotatio
 			item.MarginPercent = itemInput.MarginPercent
 		}
 
-		item.No = uint32(key + 1)
+		item.No = numbers[key]
 		if len(itemInput.SubItems) > 0 {
-			item.SubItems = buildSubItems(item.No, itemInput.SubItems, currencyCode)
+			item.SubItems, err = buildSubItems(item.No, itemInput.SubItems, currencyCode)
+			if err != nil {
+				return nil, err
+			}
 			// The parent is a package rollup: its cost and price are the sums
 			// of its parts. Qty 1 by validation, so the totals below carry the
 			// package once. MarginAmount keeps its per-unit meaning (sell
@@ -176,7 +234,7 @@ func buildItems(inputItems []QuotationItemInput, currencyCode string) []Quotatio
 		items = append(items, item)
 	}
 
-	return items
+	return items, nil
 }
 
 // buildSubItems prices one part of a package on its own, exactly as a
@@ -184,9 +242,22 @@ func buildItems(inputItems []QuotationItemInput, currencyCode string) []Quotatio
 // so truncation happens at the same places it would on a single line, and the
 // package total is the exact sum of the priced parts.
 //
+// The parts carry stable numbers within their parent (the same preserve-or-
+// number-above rule buildItems applies), and the printed X.Y label derives
+// from them rather than from the array position.
+//
 // Sub-sub-items attach numbering only: they carry no values, so they sum to
 // nothing and leave every total untouched.
-func buildSubItems(parentNo uint32, subs []QuotationSubItemInput, currencyCode string) []QuotationSubItem {
+func buildSubItems(parentNo uint32, subs []QuotationSubItemInput, currencyCode string) ([]QuotationSubItem, error) {
+	where := fmt.Sprintf("item %d sub-item numbers", parentNo)
+	submitted := make([]uint32, len(subs))
+	for i := range subs {
+		submitted[i] = subs[i].No
+	}
+	numbers, err := assignIdentityNumbers(where, submitted)
+	if err != nil {
+		return nil, err
+	}
 	out := make([]QuotationSubItem, 0, len(subs))
 	for i, sub := range subs {
 		listUnit := sub.UnitCost
@@ -200,7 +271,8 @@ func buildSubItems(parentNo uint32, subs []QuotationSubItemInput, currencyCode s
 		qty := uint64(sub.Qty)
 		item := QuotationSubItem{
 			Description:       sub.Description,
-			SubNo:             fmt.Sprintf("%d.%d", parentNo, i+1),
+			SubNo:             fmt.Sprintf("%d.%d", parentNo, numbers[i]),
+			No:                numbers[i],
 			UoM:               sub.UoM,
 			SubSubItems:       buildSubSubItems(sub.SubSubItems),
 			OriginalUnitPrice: sub.UnitCost,
@@ -223,7 +295,7 @@ func buildSubItems(parentNo uint32, subs []QuotationSubItemInput, currencyCode s
 		item.DiscountPercent = sub.DiscountPercent
 		out = append(out, item)
 	}
-	return out
+	return out, nil
 }
 
 // buildSubSubItems carries one part's detail lines through. They are plain

@@ -16,7 +16,7 @@ import (
 // buildPricing -- nothing is asserted against a literal the arithmetic did not
 // produce -- and the total is checked against the two rows the report names.
 func TestRowDiscountTotalMatchesTheReportShape(t *testing.T) {
-	items := buildItems([]QuotationItemInput{
+	items := mustBuildItems(t, []QuotationItemInput{
 		// Item 1: a plain margined line with no row discount. It keeps the shape
 		// a real quotation, and it must contribute nothing to the total.
 		{Description: "Main switchboard", Qty: 1, UoM: "Lot", UnitPrice: 3000000,
@@ -153,7 +153,7 @@ func TestRowDiscountTotalIsLeafAwareAcrossShapes(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			pricing := buildPricing(buildItems(tc.items, "IDR"), 0, 0, 0)
+			pricing := buildPricing(mustBuildItems(t, tc.items, "IDR"), 0, 0, 0)
 			if pricing.RowDiscountTotal != tc.want {
 				t.Errorf("RowDiscountTotal = %d; want %d", pricing.RowDiscountTotal, tc.want)
 			}
@@ -166,7 +166,7 @@ func TestRowDiscountTotalIsLeafAwareAcrossShapes(t *testing.T) {
 // parts' discounts, so the total must equal that sum once -- never the parent
 // rollup plus the parts a second time.
 func TestRowDiscountTotalDoesNotDoubleCountPackageRollups(t *testing.T) {
-	items := buildItems([]QuotationItemInput{{
+	items := mustBuildItems(t, []QuotationItemInput{{
 		Description: "Package", ShowSubPrices: true, Qty: 1, UoM: "Lot",
 		SubItems: []QuotationSubItemInput{
 			{Description: "part a", Qty: 1, UoM: "Pc", UnitCost: 1000000, DiscountEnabled: true, DiscountPercent: 10}, // 100.000

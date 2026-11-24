@@ -6,6 +6,18 @@ import (
 	"vera-app/backend/auth"
 )
 
+// mustBuildItems is the builder's test entry point. Every fixture below is
+// valid input, so a build failure means the fixture is attacking itself; the
+// tests that exercise refusal call buildItems directly.
+func mustBuildItems(tb testing.TB, inputItems []QuotationItemInput, currencyCode string) []QuotationItem {
+	tb.Helper()
+	items, err := buildItems(inputItems, currencyCode)
+	if err != nil {
+		tb.Fatalf("buildItems: %v", err)
+	}
+	return items
+}
+
 func TestApplyMarkup(t *testing.T) {
 	cases := []struct {
 		name   string
@@ -41,7 +53,7 @@ func TestBuildItemsAppliesMargin(t *testing.T) {
 		{Description: "Item A", Qty: 2, UoM: "Lot", UnitPrice: 100000, MarginEnabled: true, MarginPercent: 20},
 	}
 
-	items := buildItems(inputs, "IDR")
+	items := mustBuildItems(t, inputs, "IDR")
 	if len(items) != 1 {
 		t.Fatalf("buildItems returned %d items; want 1", len(items))
 	}
