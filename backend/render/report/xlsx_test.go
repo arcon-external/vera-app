@@ -781,13 +781,41 @@ func TestRenderXLSXViewPrintsTheSelectedMonths(t *testing.T) {
 	}
 
 	// The one-calendar-year aggregate reads its twelve rows from its own
-	// annual source, so every recorded month is printed.
+	// annual source and labels them exactly as the PDF's aggregate table does.
 	source := annualViewReport(2025, "2025-12-20", nil)
 	aggregate := annualAggregateView(source)
 	aggregateBook := openWorkbook(t, renderXLSXView(t, aggregate))
-	if months := datedRows(t, aggregateBook, "Periods"); len(months) != 12 {
-		t.Errorf("aggregate Periods rows = %v; want the twelve months of 2025", months)
+	labels := periodLabels(t, aggregateBook)
+	if len(labels) != 12 || labels[0] != "Jan" || labels[11] != "Dec (recorded)" {
+		t.Errorf("aggregate Periods labels = %v; want Jan..Dec (recorded)", labels)
 	}
+}
+
+// periodLabels returns column A of the Periods sheet's month rows: everything
+// below the header up to, but not including, the total row.
+func periodLabels(t *testing.T, workbook *excelize.File) []string {
+	t.Helper()
+	rows, err := workbook.GetRows("Periods")
+	if err != nil {
+		t.Fatalf("read Periods rows: %v", err)
+	}
+	labels := make([]string, 0, len(rows))
+	started := false
+	for _, row := range rows {
+		label := cellAt(row, 0)
+		if label == "Period" {
+			started = true
+			continue
+		}
+		if !started || label == "" {
+			continue
+		}
+		if strings.Contains(strings.ToLower(label), "total") {
+			break
+		}
+		labels = append(labels, label)
+	}
+	return labels
 }
 
 // Issue #683, F3. A category selection prints exactly those rows in the
@@ -953,5 +981,99 @@ func TestRenderXLSXViewCurrentAndFutureMonthsFollowThePdfEvidence(t *testing.T) 
 		if cellAt(row, 0) == "Overview total" {
 			t.Errorf("an empty future selection printed an overview total")
 		}
+	}
+}
+
+// Issue #683, aggregate blocker. The PDF's aggregate table prints all twelve
+// months of the year, and a month with no recorded purchase order keeps its own
+// labelled row: the label says "no recorded POs" and no figure is printed. The
+// workbook must print that same table, not drop the month.
+func TestRenderXLSXAggregatePeriodsPrintEveryMonthLikeThePdf(t *testing.T) {
+	source := currentYearReport() // as of 2026-11-19; December has no POs
+	workbook := openWorkbook(t, renderXLSXView(t, annualAggregateView(source)))
+
+	want := []string{
+		"Jan", "Feb", "Mar", "Apr", "May", "Jun",
+		"Jul", "Aug", "Sep", "Oct", "Nov (recorded)", "Dec (no recorded POs)",
+	}
+	labels := periodLabels(t, workbook)
+	if len(labels) != len(want) {
+		t.Fatalf("aggregate Periods labels = %v; want the twelve months %v", labels, want)
+	}
+	for index := range want {
+		if labels[index] != want[index] {
+			t.Errorf("aggregate label %d = %q, want %q", index, labels[index], want[index])
+		}
+	}
+
+	// December is printed, and every figure cell on it is empty: no amount, no
+	// count and no zero standing in for evidence.
+	december := rowNumberWithFirstCell(t, workbook, "Periods", "Dec (no recorded POs)")
+	for column := 1; column <= 8; column++ {
+		if got := rawCell(t, workbook, "Periods", december, column); got != "" {
+			t.Errorf("December column %d = %q; want no figure", column+1, got)
+		}
+	}
+
+	// A recorded month prints the annual source's own row.
+	november := rowNumberWithFirstCell(t, workbook, "Periods", "Nov (recorded)")
+	assertNumber(t, "November PO count", numberAt(t, workbook, "Periods", november, 1), 2)
+	assertNumber(t, "November amount", numberAt(t, workbook, "Periods", november, 2), 100_000_000)
+}
+
+// Issue #683, aggregate blocker. The aggregate's one total is the annual
+// source's own server total under the PDF's "Recorded total" label, even when
+// the view carries several sources and the overview is a different one.
+func TestRenderXLSXAggregateTotalIsTheAggregateSourceTotal(t *testing.T) {
+	aggregateSource := currentYearReport() // 22 POs, Rp1,100,000,000
+	overview := annualViewReport(2025, "2026-11-19", nil)
+	view := ViewEnvelope{
+		Version:  ViewVersion,
+		Sources:  []poreport.Report{aggregateSource, overview},
+		Overview: 1,
+		Periods: ViewPeriods{
+			Sources: []int{0}, Months: monthsOfYear(2026), Layout: ViewLayoutAggregate,
+		},
+		Categories: ViewCategories{Source: 1, Codes: viewCodes(overview), Layout: ViewLayoutAggregate},
+	}
+	workbook := openWorkbook(t, renderXLSXView(t, view))
+
+	// The overview's own totals are 2 POs and Rp100,000,000, so a total taken
+	// from the overview instead of the aggregate source cannot pass this.
+	assertNumber(t, "summary PO count", labelNumber(t, workbook, "PO count"), 2)
+
+	total := rowNumberWithLabel(t, workbook, "Periods", "Recorded total")
+	if got := cellAt(rowWithLabel(t, workbook, "Periods", "Recorded total"), 0); got != "Recorded total" {
+		t.Errorf("aggregate total label = %q; want Recorded total", got)
+	}
+	assertNumber(t, "aggregate total PO count", numberAt(t, workbook, "Periods", total, 1), 22)
+	assertNumber(t, "aggregate total amount", numberAt(t, workbook, "Periods", total, 2), 1_100_000_000)
+}
+
+// Issue #683, aggregate blocker. The current month in an aggregate table is the
+// annual source's recorded row, exactly as the PDF prints it. It is not the
+// month-to-date readout an individual selection prints.
+func TestRenderXLSXAggregateCurrentMonthIsRecordedNotMonthToDate(t *testing.T) {
+	source := currentYearReport()
+	workbook := openWorkbook(t, renderXLSXView(t, annualAggregateView(source)))
+
+	if labels := periodLabels(t, workbook); !containsString(labels, "Nov (recorded)") {
+		t.Errorf("aggregate labels = %v; want the current month labelled Nov (recorded)", labels)
+	}
+	rows, err := workbook.GetRows("Periods")
+	if err != nil {
+		t.Fatalf("read Periods rows: %v", err)
+	}
+	for index, row := range rows {
+		for _, cell := range row {
+			if strings.TrimSpace(cell) == "Month to date" {
+				t.Errorf("Periods row %d prints %q; an aggregate month is a recorded row", index+1, cell)
+			}
+		}
+	}
+	november := rowNumberWithFirstCell(t, workbook, "Periods", "Nov (recorded)")
+	assertNumber(t, "November amount", numberAt(t, workbook, "Periods", november, 2), 100_000_000)
+	if got := cellAt(rowWithFirstCellContaining(t, workbook, "Periods", "Nov (recorded)"), 9); got != "" {
+		t.Errorf("aggregate current-month status = %q; want no status override", got)
 	}
 }

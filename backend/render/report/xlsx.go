@@ -490,25 +490,37 @@ func (b *reportWorkbook) major(minor int64) float64 {
 }
 
 // periodSection is the Periods sheet's row set and the total that belongs to
-// it. A legacy snapshot prints its own actual rows and total; a versioned view
-// prints the selected months and keeps the overview's total, labelled for what
-// it is. A section with no rows prints its empty message and no total, exactly
-// as the PDF's empty selection does.
+// it. A legacy snapshot prints its own actual rows and total; an individual
+// view prints the selected months and keeps the overview's total, labelled for
+// what it is; an aggregate view prints all twelve months of its annual source
+// exactly as the PDF's aggregate table does. A section with no rows prints its
+// empty message and no total, exactly as the PDF's empty selection does.
 type periodSection struct {
-	rows       []poreport.Period
+	rows       []periodRow
 	total      *poreport.Metrics
 	totalLabel string
 	note       string
 	empty      string
-	// status overrides the Status cell for a period start. A view names the
-	// current month "Month to date" and a recorded future month "Recorded
-	// future"; a legacy row keeps its own partial/in-progress flags.
-	status map[string]string
+}
+
+// periodRow is one printed row of the Periods sheet. Label is what column A
+// says: an ISO period start for the legacy and individual layouts, and the
+// PDF's aggregate month label ("Jan", "Nov (recorded)", "Dec (no recorded
+// POs)") for an aggregate. HasMetrics is false only for an aggregate month with
+// no recorded purchase order, which the PDF prints as a labelled row of dashes
+// and which is never a zero actual.
+type periodRow struct {
+	Label      string
+	Metrics    poreport.Metrics
+	HasMetrics bool
+	Status     string
+	InProgress bool
+	Partial    bool
 }
 
 // newPeriodSection builds the Periods sheet's rows from the document: the
-// snapshot's own rows for a legacy payload, the resolved selected months for a
-// view.
+// snapshot's own rows for a legacy payload, the resolved selected months for an
+// individual view, the annual source's twelve rows for an aggregate.
 func newPeriodSection(overview poreport.Report, resolved *resolvedView) periodSection {
 	if resolved == nil {
 		note := "Actual purchase orders in the report range. PPN is excluded; an uncosted amount is never counted as profit."
@@ -517,7 +529,7 @@ func newPeriodSection(overview poreport.Report, resolved *resolvedView) periodSe
 		}
 		totals := overview.Totals
 		return periodSection{
-			rows:       xlsxVisiblePeriods(overview),
+			rows:       xlsxSnapshotPeriods(overview),
 			total:      &totals,
 			totalLabel: "Report total",
 			note:       note,
@@ -525,16 +537,19 @@ func newPeriodSection(overview poreport.Report, resolved *resolvedView) periodSe
 		}
 	}
 
-	rows, status, omitted := xlsxSelectedPeriods(*resolved)
+	if resolved.Aggregate != nil {
+		return xlsxAggregateSection(*resolved.Aggregate)
+	}
+
+	rows, omitted := xlsxSelectedPeriods(*resolved)
 	note := "Selected months only, each read from its frozen source. PPN is excluded; an uncosted amount is never counted as profit."
 	if omitted > 0 {
 		note += " A selected future month with no recorded purchase order is left out rather than printed as a zero actual; its projection is on the Forecast sheet."
 	}
 	section := periodSection{
-		rows:   rows,
-		note:   note,
-		status: status,
-		empty:  "No recorded purchase orders in the selected months.",
+		rows:  rows,
+		note:  note,
+		empty: "No recorded purchase orders in the selected months.",
 	}
 	if len(resolved.View.Periods.Months) == 0 {
 		section.empty = "No months selected. Choose at least one month to print a period comparison; no figure and no total are shown here."
@@ -550,81 +565,112 @@ func newPeriodSection(overview poreport.Report, resolved *resolvedView) periodSe
 	return section
 }
 
-// xlsxSelectedPeriods reads the resolved view's month rows. It mirrors the
+// xlsxSnapshotPeriods maps a legacy snapshot's printed rows onto the sheet.
+func xlsxSnapshotPeriods(snapshot poreport.Report) []periodRow {
+	periods := xlsxVisiblePeriods(snapshot)
+	rows := make([]periodRow, 0, len(periods))
+	for _, period := range periods {
+		rows = append(rows, periodRow{
+			Label:      period.PeriodStart,
+			Metrics:    period.Metrics,
+			HasMetrics: true,
+			InProgress: period.InProgress,
+			Partial:    period.Partial,
+		})
+	}
+	return rows
+}
+
+// xlsxAggregateSection mirrors the PDF's drawAggregateMonths. Every month of the
+// supplied year is printed, including a future month with no recorded purchase
+// order: that row keeps the PDF's label and carries no figures at all, because
+// the absence of evidence is not a zero. The one total is the annual source's
+// own server total, labelled for what it is; no row is summed and no estimate
+// enters it.
+func xlsxAggregateSection(aggregate resolvedAggregate) periodSection {
+	rows := make([]periodRow, 0, len(aggregate.Months))
+	for _, month := range aggregate.Months {
+		row := periodRow{Label: aggregateMonthLabel(month)}
+		if month.Recorded && month.Row != nil {
+			row.Metrics = month.Row.Metrics
+			row.HasMetrics = true
+		}
+		rows = append(rows, row)
+	}
+	first := aggregate.Months[0].Month
+	last := aggregate.Months[len(aggregate.Months)-1].Month
+	note := fmt.Sprintf("%s – %s, read from one annual snapshot. PPN is excluded; an uncosted amount is never counted as profit. "+
+		"Recorded month rows come from this annual snapshot, and a future month with no recorded purchase order prints its label and no figure rather than a zero. "+
+		"The Recorded total is the server's annual total, not a sum of the printed rows; no forecast or estimate is included in this total.",
+		monthHeading(first), monthHeading(last))
+	for _, month := range aggregate.Months {
+		if month.IsCurrent {
+			note += " The current month row is the annual snapshot's recorded row, not an actual-to-date readout."
+			break
+		}
+	}
+	if aggregate.IncludesFutureDated {
+		note += " Future-dated records are included as recorded evidence, never as a forecast."
+	}
+	totals := aggregate.Source.Totals
+	return periodSection{
+		rows:       rows,
+		total:      &totals,
+		totalLabel: "Recorded total",
+		note:       note,
+		empty:      "No recorded purchase orders in the selected months.",
+	}
+}
+
+// xlsxSelectedPeriods reads an individual month selection. It mirrors the
 // PDF's monthPrimary: a current month prints its server actual-to-date readout,
 // a past month or a future month with recorded purchase orders prints its
 // supplied row, and a future month with no recorded purchase order has no
 // actual row at all. A month without evidence is counted in omitted, never
 // printed as a zero.
-func xlsxSelectedPeriods(resolved resolvedView) ([]poreport.Period, map[string]string, int) {
-	status := make(map[string]string)
-	if resolved.Aggregate != nil {
-		rows := make([]poreport.Period, 0, len(resolved.Aggregate.Months))
-		omitted := 0
-		for _, month := range resolved.Aggregate.Months {
-			if !month.Recorded || month.Row == nil {
-				omitted++
-				continue
-			}
-			period := *month.Row
-			period.PeriodStart = month.Month + "-01"
-			switch {
-			case month.IsCurrent:
-				status[period.PeriodStart] = "Month to date"
-				period.InProgress = true
-				period.Partial = false
-			case month.IsFuture:
-				status[period.PeriodStart] = "Recorded future"
-				period.InProgress = false
-				period.Partial = false
-			}
-			rows = append(rows, period)
-		}
-		return rows, status, omitted
-	}
-
-	rows := make([]poreport.Period, 0, len(resolved.Months))
+func xlsxSelectedPeriods(resolved resolvedView) ([]periodRow, int) {
+	rows := make([]periodRow, 0, len(resolved.Months))
 	omitted := 0
 	for _, month := range resolved.Months {
-		period, label, ok := xlsxSelectedMonthPeriod(month)
+		row, ok := xlsxSelectedMonthRow(month)
 		if !ok {
 			omitted++
 			continue
 		}
-		if label != "" {
-			status[period.PeriodStart] = label
-		}
-		rows = append(rows, period)
+		rows = append(rows, row)
 	}
-	return rows, status, omitted
+	return rows, omitted
 }
 
-// xlsxSelectedMonthPeriod is one resolved month as an actual row. A dashed
-// card in the PDF has no row here: the absence of evidence is not a zero.
-func xlsxSelectedMonthPeriod(month resolvedMonth) (poreport.Period, string, bool) {
-	period := poreport.Period{PeriodStart: month.Month + "-01"}
+// xlsxSelectedMonthRow is one resolved month as an actual row. A dashed card in
+// the PDF has no row here: the absence of evidence is not a zero.
+func xlsxSelectedMonthRow(month resolvedMonth) (periodRow, bool) {
+	row := periodRow{Label: month.Month + "-01"}
 	switch {
 	case month.IsCurrent:
 		if month.Summary == nil {
-			return poreport.Period{}, "", false
+			return periodRow{}, false
 		}
-		period.Metrics = month.Summary.Actual
-		return period, "Month to date", true
+		row.Metrics = month.Summary.Actual
+		row.HasMetrics = true
+		row.Status = "Month to date"
 	case month.IsFuture:
 		if month.Period == nil || month.Period.PoCount == 0 {
-			return poreport.Period{}, "", false
+			return periodRow{}, false
 		}
-		period.Metrics = month.Period.Metrics
-		return period, "Recorded future", true
+		row.Metrics = month.Period.Metrics
+		row.HasMetrics = true
+		row.Status = "Recorded future"
 	default:
 		if month.Period == nil {
-			return poreport.Period{}, "", false
+			return periodRow{}, false
 		}
-		period.Metrics = month.Period.Metrics
-		period.Partial = month.Period.Partial
-		period.InProgress = month.Period.InProgress
-		return period, "", true
+		row.Metrics = month.Period.Metrics
+		row.HasMetrics = true
+		row.Partial = month.Period.Partial
+		row.InProgress = month.Period.InProgress
 	}
+	return row, true
 }
 
 func (b *reportWorkbook) renderPeriods(section periodSection) error {
@@ -651,30 +697,46 @@ func (b *reportWorkbook) renderPeriods(section periodSection) error {
 	}
 	row := headerRow + 1
 	for _, period := range section.rows {
-		if err := b.set(sheet, fmt.Sprintf("A%d", row), period.PeriodStart, b.styles.text); err != nil {
+		if err := b.set(sheet, fmt.Sprintf("A%d", row), period.Label, b.styles.text); err != nil {
 			return err
 		}
-		if err := b.set(sheet, fmt.Sprintf("B%d", row), period.PoCount, b.styles.count); err != nil {
+		if !period.HasMetrics {
+			// The PDF prints a dash in every figure for this month. The numeric
+			// cells stay empty here instead: the sheet's chart skips a blank
+			// ("gap"), where a text dash or a stored zero would plot as a value.
+			for column := 1; column <= 8; column++ {
+				if err := b.set(sheet, fmt.Sprintf("%s%d", columnLetter(column), row), nil, b.styles.money); err != nil {
+					return err
+				}
+			}
+			if err := b.set(sheet, fmt.Sprintf("J%d", row), period.Status, b.styles.text); err != nil {
+				return err
+			}
+			row++
+			continue
+		}
+		if err := b.set(sheet, fmt.Sprintf("B%d", row), period.Metrics.PoCount, b.styles.count); err != nil {
 			return err
 		}
 		for index, minor := range []int64{
-			period.AmountMinor, period.CostedMinor, period.CapitalMinor, period.MarginMinor,
+			period.Metrics.AmountMinor, period.Metrics.CostedMinor,
+			period.Metrics.CapitalMinor, period.Metrics.MarginMinor,
 		} {
 			column := columnLetter(2 + index)
 			if err := b.set(sheet, fmt.Sprintf("%s%d", column, row), b.major(minor), b.styles.money); err != nil {
 				return err
 			}
 		}
-		if err := b.setPercentCell(sheet, fmt.Sprintf("G%d", row), period.MarginBps); err != nil {
+		if err := b.setPercentCell(sheet, fmt.Sprintf("G%d", row), period.Metrics.MarginBps); err != nil {
 			return err
 		}
-		if err := b.setPercentCell(sheet, fmt.Sprintf("H%d", row), period.CoverageBps); err != nil {
+		if err := b.setPercentCell(sheet, fmt.Sprintf("H%d", row), period.Metrics.CoverageBps); err != nil {
 			return err
 		}
-		if err := b.set(sheet, fmt.Sprintf("I%d", row), b.major(period.UncostedMinor), b.styles.money); err != nil {
+		if err := b.set(sheet, fmt.Sprintf("I%d", row), b.major(period.Metrics.UncostedMinor), b.styles.money); err != nil {
 			return err
 		}
-		status := section.status[period.PeriodStart]
+		status := period.Status
 		if status == "" {
 			switch {
 			case period.InProgress:
