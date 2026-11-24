@@ -234,6 +234,17 @@ func validatePRWorkflow(raw []byte) error {
 	c.require(diffSites == 1,
 		"the merge-base diff must appear exactly once (shared Scope job), found %d", diffSites)
 
+	// No job may reintroduce a per-step scope condition; the job gate is the
+	// only path. The scope job's own job-level outputs are not steps, so they
+	// legitimately read steps.scope and are not matched here.
+	for id, job := range wf.Jobs {
+		for _, step := range job.Steps {
+			c.require(!strings.Contains(step.Run, "steps.scope") &&
+				!strings.Contains(step.If, "steps.scope"),
+				"%s step %q still references steps.scope", id, step.Name)
+		}
+	}
+
 	// ---- Consumers of needs_go ------------------------------------------
 	checkConsumer := func(id string) (ciWorkflowJob, bool) {
 		job, found := wf.Jobs[id]
