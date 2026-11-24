@@ -1,10 +1,16 @@
 package store
 
 import (
+	"bufio"
+	"bytes"
 	"context"
+	"fmt"
+	"os"
+	"os/exec"
 	"regexp"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -317,6 +323,368 @@ func TestCloneNamesAreScopedToTheTestBinary(t *testing.T) {
 	if api == store {
 		t.Fatalf("one identity under two test binaries maps to one clone %q", api)
 	}
+}
+
+// TestAdvisoryLockKeysAreStableAndScoped pins the derivation the locks
+// depend on: every process must meet on one key for one template, and two
+// templates must never share a key; the clone key space is separate too.
+func TestAdvisoryLockKeysAreStableAndScoped(t *testing.T) {
+	template := testdb.TemplateNameFor("store.test")
+	key := testdb.TemplateLockKey(template)
+	if again := testdb.TemplateLockKey(template); again != key {
+		t.Fatalf("the same template produced keys %d then %d; two processes would not meet", key, again)
+	}
+	if other := testdb.TemplateLockKey(testdb.TemplateNameFor("api.test")); other == key {
+		t.Fatalf("store.test and api.test share the lock key %d; their templates are independent", key)
+	}
+
+	// Pin the number. Changing the derivation moves every process to a new
+	// lock, so a process still running the previous binary and one running the
+	// new one would hold two different locks over the same template -- exactly
+	// the race the lock exists to remove.
+	if got, want := key, int64(8525218076598627597); got != want {
+		t.Errorf("TemplateLockKey(%q) = %d; want the pinned %d", template, got, want)
+	}
+
+	// The clone reservation is a second key space: a clone and a template with
+	// the same text must not meet on one lock.
+	clone := "vera_test_clients_e61e5a20_10d7aeb6"
+	if got, want := testdb.CloneLockKey(clone), int64(-8992055891338330083); got != want {
+		t.Errorf("CloneLockKey(%q) = %d; want the pinned %d", clone, got, want)
+	}
+	if testdb.CloneLockKey(clone) == testdb.TemplateLockKey(clone) {
+		t.Error("a clone and a template with the same name share one lock key")
+	}
+}
+
+// TestTemplateLockWaitsAndTimesOut pins both halves of the lock contract on
+// real Postgres sessions: a second session waits while the lock is held, and a
+// bounded wait fails with the template's name instead of continuing into DROP
+// DATABASE.
+func TestTemplateLockWaitsAndTimesOut(t *testing.T) {
+	dsn := testDSN(t)
+	template := testdb.TemplateNameFor(testdb.BinaryName())
+	ctx, cancel := context.WithTimeout(context.Background(), testdb.Timeout)
+	defer cancel()
+
+	holder := connectForLock(t, ctx, dsn)
+	defer func() { _ = holder.Close(context.Background()) }()
+	if err := testdb.AcquireTemplateLock(ctx, holder, template); err != nil {
+		t.Fatalf("hold the template lock: %v", err)
+	}
+
+	// A bounded attempt on a second session has to give up with the template's
+	// name rather than report a lock it never got.
+	timedOut := connectForLock(t, ctx, dsn)
+	defer func() { _ = timedOut.Close(context.Background()) }()
+	shortCtx, shortCancel := context.WithTimeout(context.Background(), 250*time.Millisecond)
+	defer shortCancel()
+	err := testdb.AcquireTemplateLock(shortCtx, timedOut, template)
+	if err == nil {
+		t.Fatal("a second session acquired a lock the first session holds")
+	}
+	for _, want := range []string{template, context.DeadlineExceeded.Error()} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("timeout error %q does not name %q", err, want)
+		}
+	}
+
+	// The same wait without the short deadline blocks until the holder
+	// releases, then succeeds on the session that asked for it.
+	waiter := connectForLock(t, ctx, dsn)
+	defer func() { _ = waiter.Close(context.Background()) }()
+	waited := make(chan error, 1)
+	go func() {
+		waitCtx, waitCancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer waitCancel()
+		waited <- testdb.AcquireTemplateLock(waitCtx, waiter, template)
+	}()
+	select {
+	case err := <-waited:
+		t.Fatalf("the waiter returned before the lock was released: %v", err)
+	case <-time.After(250 * time.Millisecond):
+	}
+	if err := testdb.ReleaseTemplateLock(ctx, holder, template); err != nil {
+		t.Fatalf("release the template lock: %v", err)
+	}
+	select {
+	case err := <-waited:
+		if err != nil {
+			t.Fatalf("the waiter failed after the lock was released: %v", err)
+		}
+	case <-time.After(30 * time.Second):
+		t.Fatal("the waiter never acquired the released lock")
+	}
+	if err := testdb.ReleaseTemplateLock(ctx, waiter, template); err != nil {
+		t.Fatalf("release the waiter's lock: %v", err)
+	}
+}
+
+// templateLockChildEnv marks the child half of
+// TestTemplateLockSerializesAcquireAcrossProcesses: the test binary re-runs
+// itself, and only that process calls Acquire.
+const templateLockChildEnv = "VERA_TESTDB_TEMPLATE_LOCK_CHILD"
+
+// TestTemplateLockSerializesAcquireAcrossProcesses runs a second copy of this
+// test binary against the same template -- the local multi-agent case -- and
+// proves Acquire makes it wait instead of letting it drop the template. The
+// child announces itself, then blocks inside Acquire's template build while
+// this process holds the lock; pg_locks shows the wait, and the template's OID
+// proves it was not rebuilt underneath a clone.
+func TestTemplateLockSerializesAcquireAcrossProcesses(t *testing.T) {
+	if os.Getenv(templateLockChildEnv) == "1" {
+		fmt.Println("LOCK-CHILD READY")
+		handle := testdb.Acquire(t, testDSN(t), "vera_probe_lock_child", migrateTestDatabase)
+		fmt.Println("LOCK-CHILD DONE " + handle.Name)
+		return
+	}
+
+	dsn := testDSN(t)
+	// Build this process's template and keep a clone, the state a running test
+	// binary is in when another checkout starts the same binary.
+	parentClone := testdb.Acquire(t, dsn, "vera_probe_lock_parent", migrateTestDatabase)
+	template := testdb.TemplateNameFor(testdb.BinaryName())
+	ctx, cancel := context.WithTimeout(context.Background(), testdb.Timeout)
+	defer cancel()
+
+	holder := connectForLock(t, ctx, dsn)
+	defer func() { _ = holder.Close(context.Background()) }()
+	if err := testdb.AcquireTemplateLock(ctx, holder, template); err != nil {
+		t.Fatalf("hold the template lock: %v", err)
+	}
+	templateOID := testDatabaseOID(t, dsn, template)
+
+	child := startSelfTestChild(t, t.Name(), templateLockChildEnv+"=1", "LOCK-CHILD READY")
+	waitForAdvisoryLockWait(t, dsn, testdb.TemplateLockKey(template), 30*time.Second, "the template lock")
+	if got := testDatabaseOID(t, dsn, template); got != templateOID {
+		t.Fatalf("the waiting child rebuilt the template (oid %d -> %d); Acquire is not holding the lock",
+			templateOID, got)
+	}
+	if !testDatabaseExists(t, dsn, parentClone.Name) {
+		t.Fatalf("the parent's clone %s vanished while the child was blocked", parentClone.Name)
+	}
+
+	if err := testdb.ReleaseTemplateLock(ctx, holder, template); err != nil {
+		t.Fatalf("release the template lock: %v", err)
+	}
+	if err := child.wait(t); err != nil {
+		t.Fatalf("the second test process failed after the lock was released: %v\nstderr:\n%s",
+			err, child.stderr.String())
+	}
+
+	// The child rebuilding the template is fine now: this process's clone is
+	// independent, and both survive because the child serialized behind the
+	// lock rather than dropping the template under a live clone.
+	if !testDatabaseExists(t, dsn, template) {
+		t.Errorf("template %q is gone after the second process finished", template)
+	}
+	if !testDatabaseExists(t, dsn, parentClone.Name) {
+		t.Errorf("clone %q is gone after the second process rebuilt the template", parentClone.Name)
+	}
+}
+
+// cloneLockChildEnv marks the child half of
+// TestCloneLockSerializesAcquireAcrossProcesses.
+const cloneLockChildEnv = "VERA_TESTDB_CLONE_LOCK_CHILD"
+
+// TestCloneLockSerializesAcquireAcrossProcesses covers the collision a template
+// lock alone cannot fix: two processes running the same test derive the same
+// clone name, so the second would force-drop a database the first is using.
+// The child blocks inside Acquire on the clone reservation; this process proves
+// the wait in pg_locks, that the clone does not exist while the name is
+// reserved, and that the child creates and then drops it after the release.
+func TestCloneLockSerializesAcquireAcrossProcesses(t *testing.T) {
+	if os.Getenv(cloneLockChildEnv) == "1" {
+		fmt.Println("CLONE-CHILD READY")
+		handle := testdb.Acquire(t, testDSN(t), "vera_probe_clone_reserved", migrateTestDatabase)
+		fmt.Println("CLONE-CHILD DONE " + handle.Name)
+		return
+	}
+
+	dsn := testDSN(t)
+	// Build this process's template and keep its own clone, so the child's
+	// template build does not disturb the state under test.
+	testdb.Acquire(t, dsn, "vera_probe_clone_reservation_parent", migrateTestDatabase)
+	childClone := testdb.CloneNameFor("vera_probe_clone_reserved", testdb.BinaryName(), t.Name())
+
+	ctx, cancel := context.WithTimeout(context.Background(), testdb.Timeout)
+	defer cancel()
+	holder := connectForLock(t, ctx, dsn)
+	defer func() { _ = holder.Close(context.Background()) }()
+	if err := testdb.AcquireCloneLock(ctx, holder, childClone); err != nil {
+		t.Fatalf("reserve the child's clone name: %v", err)
+	}
+	// A clone left by an interrupted run would be visible while the child is
+	// blocked; remove it under the reservation this test already holds.
+	if _, err := holder.Exec(ctx, "DROP DATABASE IF EXISTS "+quoteIdentifier(childClone)+" WITH (FORCE)"); err != nil {
+		t.Fatalf("remove the stale clone %s: %v", childClone, err)
+	}
+
+	child := startSelfTestChild(t, t.Name(), cloneLockChildEnv+"=1", "CLONE-CHILD READY")
+	waitForAdvisoryLockWait(t, dsn, testdb.CloneLockKey(childClone), 60*time.Second, "the clone reservation")
+	if testDatabaseExists(t, dsn, childClone) {
+		t.Fatalf("clone %s exists while its name is reserved and the child is waiting", childClone)
+	}
+
+	if err := testdb.ReleaseCloneLock(ctx, holder, childClone); err != nil {
+		t.Fatalf("release the clone reservation: %v", err)
+	}
+	if err := child.wait(t); err != nil {
+		t.Fatalf("the second test process failed after the reservation was released: %v\nstderr:\n%s",
+			err, child.stderr.String())
+	}
+	if testDatabaseExists(t, dsn, childClone) {
+		t.Errorf("clone %s still exists after the child's test finished; its reservation was released early",
+			childClone)
+	}
+}
+
+// selfTestChild is a second copy of this test binary restricted to one test,
+// started so the cross-process locks can be observed from both sides.
+type selfTestChild struct {
+	cmd    *exec.Cmd
+	stderr bytes.Buffer
+	waited bool
+}
+
+// startSelfTestChild starts the child and waits for its ready line. The child
+// is killed at test end unless the test already waited for it.
+func startSelfTestChild(t *testing.T, testName, env, ready string) *selfTestChild {
+	t.Helper()
+	executable, err := os.Executable()
+	if err != nil {
+		t.Fatalf("locate the test binary: %v", err)
+	}
+	child := &selfTestChild{}
+	child.cmd = exec.Command(executable,
+		"-test.run=^"+testName+"$",
+		"-test.count=1",
+		"-test.timeout=5m")
+	child.cmd.Env = append(os.Environ(), env)
+	stdout, err := child.cmd.StdoutPipe()
+	if err != nil {
+		t.Fatalf("pipe the child's stdout: %v", err)
+	}
+	child.cmd.Stderr = &child.stderr
+	if err := child.cmd.Start(); err != nil {
+		t.Fatalf("start the second test process: %v", err)
+	}
+	t.Cleanup(func() {
+		if !child.waited {
+			_ = child.cmd.Process.Kill()
+			_ = child.cmd.Wait()
+		}
+	})
+	lines := make(chan string, 1)
+	go func() {
+		scanner := bufio.NewScanner(stdout)
+		if scanner.Scan() {
+			lines <- scanner.Text()
+		}
+	}()
+	select {
+	case line := <-lines:
+		if line != ready {
+			t.Fatalf("the child said %q before its Acquire; want %q", line, ready)
+		}
+	case <-time.After(30 * time.Second):
+		// Stop the child before reading its buffer: Stderr is copied from a
+		// goroutine, so reading it while the process runs is a data race.
+		_ = child.cmd.Process.Kill()
+		_ = child.cmd.Wait()
+		child.waited = true
+		t.Fatalf("the child never announced itself; stderr:\n%s", child.stderr.String())
+	}
+	return child
+}
+
+// wait waits for the child and reports its exit error. It bounds the wait and
+// kills the child on timeout so a wedged lock cannot hang the suite.
+func (c *selfTestChild) wait(t *testing.T) error {
+	t.Helper()
+	finished := make(chan error, 1)
+	go func() { finished <- c.cmd.Wait() }()
+	select {
+	case err := <-finished:
+		c.waited = true
+		return err
+	case <-time.After(2 * time.Minute):
+		_ = c.cmd.Process.Kill()
+		err := <-finished
+		c.waited = true
+		t.Fatalf("the second test process never finished: %v\nstderr:\n%s", err, c.stderr.String())
+		return err
+	}
+}
+
+// connectForLock opens a dedicated session: an advisory lock belongs to its
+// session, so the connection that takes it is the one that must release it.
+func connectForLock(t *testing.T, ctx context.Context, dsn string) *pgx.Conn {
+	t.Helper()
+	conn, err := pgx.Connect(ctx, dsn)
+	if err != nil {
+		t.Fatalf("connect for the test database lock: %v", err)
+	}
+	return conn
+}
+
+// waitForAdvisoryLockWait waits until pg_locks shows an ungranted advisory lock
+// for key, which is the child sitting inside pg_advisory_lock. It observes the
+// server, not the child's stdout: "READY" only says the child started, and the
+// point is that it is waiting on the named lock.
+func waitForAdvisoryLockWait(t *testing.T, dsn string, key int64, limit time.Duration, what string) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), limit)
+	defer cancel()
+	conn, err := pgx.Connect(ctx, dsn)
+	if err != nil {
+		t.Fatalf("connect to read pg_locks: %v", err)
+	}
+	defer func() { _ = conn.Close(context.Background()) }()
+
+	// A 64-bit advisory key is reported as classid = high 32 bits and
+	// objid = low 32 bits, with objsubid 1 for the single-key form.
+	classid := int64(uint32(uint64(key) >> 32))
+	objid := int64(uint32(uint64(key)))
+	deadline := time.Now().Add(limit)
+	for {
+		var waiting int
+		err := conn.QueryRow(ctx, `
+			SELECT COUNT(*) FROM pg_locks
+			WHERE locktype = 'advisory' AND NOT granted
+			  AND classid = $1::oid AND objid = $2::oid AND objsubid = 1`,
+			classid, objid).Scan(&waiting)
+		if err != nil {
+			if ctx.Err() != nil {
+				t.Fatalf("the child never waited on %s within %s", what, limit)
+			}
+			t.Fatalf("read pg_locks for %s: %v", what, err)
+		}
+		if waiting > 0 {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("the child never waited on %s within %s", what, limit)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+}
+
+// testDatabaseOID is the template's identity on the server. A DROP and CREATE
+// gives it a new OID, so an unchanged OID proves the template was not rebuilt.
+func testDatabaseOID(t *testing.T, dsn, name string) uint32 {
+	t.Helper()
+	ctx := context.Background()
+	conn, err := pgx.Connect(ctx, dsn)
+	if err != nil {
+		t.Fatalf("connect to read %s's oid: %v", name, err)
+	}
+	defer func() { _ = conn.Close(context.Background()) }()
+	var oid uint32
+	if err := conn.QueryRow(ctx, `SELECT oid FROM pg_database WHERE datname = $1`, name).Scan(&oid); err != nil {
+		t.Fatalf("read %s's oid: %v", name, err)
+	}
+	return oid
 }
 
 // testDatabaseExists asks the server directly whether a database is there. It
