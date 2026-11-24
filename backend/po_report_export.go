@@ -17,6 +17,11 @@ import (
 // view through the native save dialog and returns the chosen path. An empty
 // path means the user cancelled; that is not an error.
 //
+// Issue #683: the report workspace is an admin surface, so this binding requires
+// an admin rather than merely a signed-in user. The role check runs before the
+// payload is decoded, which means a staff caller cannot reach the renderer or the
+// dialog at all.
+//
 // The payload is the only source of the document. This binding does not call
 // the report endpoint, recalculate a figure, store an archive or touch the
 // signing path: the screen already holds the report it showed, and the PDF has
@@ -25,7 +30,7 @@ import (
 // document. Malformed, oversized or out-of-range payloads are refused before
 // the dialog opens.
 func (q *Quotation) ExportPurchaseOrderReport(reportJSON string) (string, error) {
-	if err := q.requireUser(q.ctx); err != nil {
+	if err := q.requireAdmin(q.ctx); err != nil {
 		return "", err
 	}
 	document, err := report.DecodeExport([]byte(reportJSON))
@@ -61,30 +66,80 @@ func (q *Quotation) ExportPurchaseOrderReport(reportJSON string) (string, error)
 	if err != nil {
 		return "", fmt.Errorf("validate purchase order report path: %w", err)
 	}
-	if err := writeReportPDF(validatedPath, pdf); err != nil {
+	if err := writeReportFile(validatedPath, pdf); err != nil {
 		return "", err
 	}
 	return validatedPath, nil
 }
 
-// reportFilename previews the save name. The filter's dates are validated ISO
-// dates, so they carry no path separator and cannot escape the chosen folder.
+// ExportPurchaseOrderReportXLSX writes the supplied report snapshot or
+// versioned view through the native save dialog as an Excel workbook and
+// returns the chosen path. An empty path means the user cancelled; that is not
+// an error.
+//
+// Issue #683: this binding requires an admin exactly like the PDF export, and
+// for the same reason: the report workspace is an admin surface. The payload is
+// the only source of the workbook; nothing is fetched or recalculated, so the
+// spreadsheet and the PDF are the same document.
+func (q *Quotation) ExportPurchaseOrderReportXLSX(reportJSON string) (string, error) {
+	if err := q.requireAdmin(q.ctx); err != nil {
+		return "", err
+	}
+	document, err := report.DecodeExport([]byte(reportJSON))
+	if err != nil {
+		return "", err
+	}
+	workbook, err := report.RenderXLSX(document)
+	if err != nil {
+		return "", fmt.Errorf("render purchase order report workbook: %w", err)
+	}
+	overview := document.Overview()
+
+	filePath, err := saveFileDialog(q.ctx, runtime.SaveDialogOptions{
+		Title:           "Save Purchase Order Report",
+		DefaultFilename: reportFilenameWithExtension(overview, ".xlsx"),
+		Filters:         []runtime.FileFilter{{DisplayName: "Excel Files (*.xlsx)", Pattern: "*.xlsx"}},
+	})
+	if err != nil {
+		return "", fmt.Errorf("open save dialog: %w", err)
+	}
+	if filePath == "" {
+		return "", nil
+	}
+	validatedPath, err := validateSavePathForExtension(filePath, ".xlsx")
+	if err != nil {
+		return "", fmt.Errorf("validate purchase order report workbook path: %w", err)
+	}
+	if err := writeReportFile(validatedPath, workbook); err != nil {
+		return "", err
+	}
+	return validatedPath, nil
+}
+
+// reportFilename previews the PDF save name. The filter's dates are validated
+// ISO dates, so they carry no path separator and cannot escape the chosen
+// folder.
 func reportFilename(snapshot poreport.Report) string {
+	return reportFilenameWithExtension(snapshot, ".pdf")
+}
+
+// reportFilenameWithExtension previews a save name for one report format.
+func reportFilenameWithExtension(snapshot poreport.Report, extension string) string {
 	from := strings.TrimSpace(snapshot.Filter.From)
 	to := strings.TrimSpace(snapshot.Filter.To)
 	if from == "" || to == "" {
-		return "purchase-order-report.pdf"
+		return "purchase-order-report" + extension
 	}
-	return fmt.Sprintf("Purchase_Order_Report_%s_to_%s.pdf", from, to)
+	return fmt.Sprintf("Purchase_Order_Report_%s_to_%s%s", from, to, extension)
 }
 
-// writeReportPDF writes the report through a temporary file in the
+// writeReportFile writes the report through a temporary file in the
 // destination directory and renames it into place. On Unix the rename replaces
 // the destination atomically; Windows does not guarantee that, so the comment
 // claims no universal atomicity. In every case a failed write or rename is
 // returned after the temporary file is removed, and the previous destination
-// is not replaced with a truncated PDF.
-func writeReportPDF(path string, data []byte) error {
+// is not replaced with a truncated file.
+func writeReportFile(path string, data []byte) error {
 	dir := filepath.Dir(path)
 	tmp, err := os.CreateTemp(dir, ".report-*.tmp")
 	if err != nil {

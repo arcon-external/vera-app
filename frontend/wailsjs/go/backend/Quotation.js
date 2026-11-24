@@ -66,6 +66,10 @@ export function ExportPurchaseOrderReport(arg1) {
   return window['go']['backend']['Quotation']['ExportPurchaseOrderReport'](arg1);
 }
 
+export function ExportPurchaseOrderReportXLSX(arg1) {
+  return window['go']['backend']['Quotation']['ExportPurchaseOrderReportXLSX'](arg1);
+}
+
 export function ExportTo(arg1) {
   return window['go']['backend']['Quotation']['ExportTo'](arg1);
 }

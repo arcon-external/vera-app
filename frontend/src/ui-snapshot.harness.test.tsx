@@ -2343,9 +2343,9 @@ const CASES: SnapshotCase[] = [
     ),
   },
   {
-    // Issue #630: Home for a staff member. The Admin card is absent and the
-    // Reports card is still present, so the screenshot proves both the gate
-    // and Reports' independent availability.
+    // Issue #630 Home for a staff member; #683 made Reports admin-only, so
+    // only the four document workspaces render. The screenshot proves the gate:
+    // neither Reports nor Admin is present.
     name: "DocumentHomeStaff",
     element: (
       <DocumentHomePage

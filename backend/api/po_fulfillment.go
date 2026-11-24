@@ -21,10 +21,11 @@ import (
 // on their children, and the extra expense lines listed separately.
 //
 // It is a read of the same organization the PO archive and the report read, and
-// it adds no role restriction beyond a session: staff who record the orders may
-// see what was bought. Currency is a partition, so an omitted code defaults to
-// the company's own and an unknown code is refused rather than silently
-// treated as the default. There is no date filter by design: bought state spans
+// it is gated with the same admin rule as the report (#683): staff who record
+// the orders no longer read the fulfillment drill-down. Currency is a
+// partition, so an omitted code defaults to the company's own and an unknown
+// code is refused rather than silently treated as the default. There is no date
+// filter by design: bought state spans
 // revisions and time, so a date range would answer half the question.
 
 const (

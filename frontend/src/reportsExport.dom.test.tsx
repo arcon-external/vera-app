@@ -24,14 +24,17 @@ import { todayWIB } from "./workspaceSettings";
 
 // Issue #632: the export callback is wired in the real App, not re-created by
 // a harness. Only the desktop bindings are replaced, so every assertion is the
-// production path: Home -> Open Reports -> GetPurchaseOrderReport -> the
-// normalized snapshot the screen shows -> Export PDF -> the binding receives
-// exactly that snapshot as JSON.
+// production path: admin Home -> Open Reports -> GetPurchaseOrderReport -> the
+// normalized snapshot the screen shows -> Export PDF or Export Excel -> the
+// binding receives exactly that snapshot as JSON.
+//
+// #683 made Reports admin-only, so every session in this suite is an admin; the
+// staff side of the gate has its own describe below.
 //
 // The fixture is the shared normalized report fixture (#630), and the clock is
 // pinned to the date it describes, so the initial "this year" filter is the
-// report's own filter. The PDF renderer itself is not exercised here; #632's
-// own tests cover the native document.
+// report's own filter. The PDF and workbook renderers are not exercised here;
+// #632's and #683's own backend tests cover the native documents.
 
 const IDR = {
   code: "IDR",
@@ -55,6 +58,13 @@ const USD = {
 
 const USER = {
   ID: 7,
+  Email: "admin@example.com",
+  DisplayName: "Ada Admin",
+  Role: "admin",
+};
+
+const STAFF = {
+  ID: 9,
   Email: "staff@example.com",
   DisplayName: "Sam Staff",
   Role: "staff",
@@ -96,6 +106,9 @@ const mocks = vi.hoisted(() => ({
   })),
   getPurchaseOrderReport: vi.fn((..._args: unknown[]): unknown => undefined),
   exportPurchaseOrderReport: vi.fn(
+    (..._args: unknown[]): unknown => undefined
+  ),
+  exportPurchaseOrderReportXlsx: vi.fn(
     (..._args: unknown[]): unknown => undefined
   ),
   listQuotations: vi.fn((..._args: unknown[]): unknown => []),
@@ -154,6 +167,8 @@ vi.mock("@backend/backend/Quotation", async (importOriginal) => {
       mocks.getPurchaseOrderReport(...args),
     ExportPurchaseOrderReport: (...args: unknown[]) =>
       mocks.exportPurchaseOrderReport(...args),
+    ExportPurchaseOrderReportXLSX: (...args: unknown[]) =>
+      mocks.exportPurchaseOrderReportXlsx(...args),
     ListQuotations: (...args: unknown[]) => mocks.listQuotations(...args),
     PreviewDeletion: (...args: unknown[]) => mocks.previewDeletion(...args),
     CreateDeletionChallenge: (...args: unknown[]) =>
@@ -292,6 +307,9 @@ beforeEach(() => {
     async (query: unknown) => reportFor(query as PurchaseOrderReportQuery)
   );
   mocks.exportPurchaseOrderReport.mockResolvedValue("/tmp/opencode/report.pdf");
+  mocks.exportPurchaseOrderReportXlsx.mockResolvedValue(
+    "/tmp/opencode/report.xlsx"
+  );
   mocks.checkForUpdates.mockResolvedValue({ UpdateAvailable: false });
   Element.prototype.scrollIntoView = () => undefined;
   container = document.createElement("div");
@@ -369,6 +387,43 @@ function sentSnapshot(call = 0): PurchaseOrderReportView {
   return JSON.parse(sent) as PurchaseOrderReportView;
 }
 
+interface PollControl {
+  run: () => Promise<void>;
+  restore: () => void;
+}
+
+/** Captures App's 60-second session poll without faking every timer. */
+function pollControl(): PollControl {
+  const intervals = new Map<number, () => void>();
+  let nextID = 1;
+  const setSpy = vi
+    .spyOn(window, "setInterval")
+    .mockImplementation((handler) => {
+      const id = nextID++;
+      intervals.set(id, handler as () => void);
+      return id as unknown as ReturnType<typeof window.setInterval>;
+    });
+  const clearSpy = vi
+    .spyOn(window, "clearInterval")
+    .mockImplementation((id) => {
+      intervals.delete(Number(id));
+    });
+  return {
+    run: async () => {
+      const handlers = [...intervals.values()];
+      await act(async () => {
+        for (const handler of handlers) handler();
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      });
+      await flush();
+    },
+    restore: () => {
+      setSpy.mockRestore();
+      clearSpy.mockRestore();
+    },
+  };
+}
+
 describe("Reports export wiring through the real App (issue #632)", () => {
   it("exports the exact visible normalized snapshot from Home -> Reports", async () => {
     const pending = deferred<poreport.Report>();
@@ -444,6 +499,61 @@ describe("Reports export wiring through the real App (issue #632)", () => {
     expect(document.body.textContent).toContain(
       "Report saved to /tmp/opencode/report.pdf"
     );
+  });
+
+  it("wires Export Excel to the workbook binding with the exact visible snapshot", async () => {
+    await openReports();
+
+    expect(button("Export Excel").disabled).toBe(false);
+    await act(async () => {
+      button("Export Excel").click();
+    });
+    await flush();
+
+    expect(mocks.exportPurchaseOrderReportXlsx).toHaveBeenCalledTimes(1);
+    expect(mocks.exportPurchaseOrderReport).not.toHaveBeenCalled();
+    // The workbook is a pass-through of the visible snapshot too: no refetch,
+    // no filter newer than the figures on screen.
+    expect(mocks.getPurchaseOrderReport).toHaveBeenCalledTimes(1);
+
+    const expected = normalizePurchaseOrderReport(
+      reportFor(reportCalls()[0])
+    );
+    const expectedView = buildPurchaseOrderReportView(expected, {
+      months: [
+        { month: "2026-11", source: expected, usesOverviewMonthSummary: false },
+      ],
+      layout: "individual",
+    });
+    const sent = mocks.exportPurchaseOrderReportXlsx.mock.calls[0][0] as string;
+    expect(sent).toBe(JSON.stringify(expectedView));
+    const parsed = JSON.parse(sent) as PurchaseOrderReportView;
+    expect(parsed.sources[0].filter).toEqual(expected.filter);
+    expect(parsed.periods.months).toEqual(["2026-11"]);
+
+    expect(document.body.textContent).toContain(
+      "Report saved to /tmp/opencode/report.xlsx"
+    );
+    expect(button("Export PDF").disabled).toBe(false);
+  });
+
+  it("keeps the visible report when the workbook binding rejects", async () => {
+    mocks.exportPurchaseOrderReportXlsx.mockRejectedValue(
+      new Error("The save dialog was refused.")
+    );
+    await openReports();
+
+    await act(async () => {
+      button("Export Excel").click();
+    });
+    await flush();
+
+    expect(mocks.exportPurchaseOrderReportXlsx).toHaveBeenCalledTimes(1);
+    expect(document.body.textContent).toContain("The save dialog was refused.");
+    expect(document.body.textContent).not.toContain("Report saved to");
+    expect(mocks.getPurchaseOrderReport).toHaveBeenCalledTimes(1);
+    expect(button("Export Excel").disabled).toBe(false);
+    expect(button("Export PDF").disabled).toBe(false);
   });
 
   it("exports the All/Aggregate shape chosen through the live month picker", async () => {
@@ -718,43 +828,6 @@ describe("category comparison export through the real App (issue #643)", () => {
 // where it was. A different account adopted by the session poll clears the
 // mounted workspace; the same account's renewal keeps it.
 describe("report freshness through the real App (issue #645)", () => {
-  interface PollControl {
-    run: () => Promise<void>;
-    restore: () => void;
-  }
-
-  /** Captures App's 60-second session poll without faking every timer. */
-  function pollControl(): PollControl {
-    const intervals = new Map<number, () => void>();
-    let nextID = 1;
-    const setSpy = vi
-      .spyOn(window, "setInterval")
-      .mockImplementation((handler) => {
-        const id = nextID++;
-        intervals.set(id, handler as () => void);
-        return id as unknown as ReturnType<typeof window.setInterval>;
-      });
-    const clearSpy = vi
-      .spyOn(window, "clearInterval")
-      .mockImplementation((id) => {
-        intervals.delete(Number(id));
-      });
-    return {
-      run: async () => {
-        const handlers = [...intervals.values()];
-        await act(async () => {
-          for (const handler of handlers) handler();
-          await new Promise((resolve) => setTimeout(resolve, 0));
-        });
-        await flush();
-      },
-      restore: () => {
-        setSpy.mockRestore();
-        clearSpy.mockRestore();
-      },
-    };
-  }
-
   function navTab(label: string): HTMLButtonElement {
     const nav = document.querySelector('nav[aria-label="Primary"]');
     if (nav === null) throw new Error("no workspace tabs");
@@ -1491,6 +1564,56 @@ describe("report freshness through the real App (issue #645)", () => {
       ).toBe("2 months · 2026");
       // Adopting the same account is not a freshness event.
       expect(reportCalls()).toHaveLength(requestsBefore);
+    } finally {
+      polls.restore();
+    }
+  });
+});
+
+// #683: Reports is admin-only. Home never offers it to staff, an admin session
+// still opens it as its own workspace (and never the Admin Dashboard), and a
+// session demoted to staff while Reports is open falls back to Home without
+// leaving the report page mounted behind it.
+describe("admin-only Reports gate through the real App (issue #683)", () => {
+  it("offers no Reports or Admin card on Home to staff", async () => {
+    mocks.restoreSession.mockResolvedValue(STAFF);
+    mocks.currentUser.mockResolvedValue(STAFF);
+
+    await renderApp();
+
+    expect(document.querySelector('button[aria-label="Open Reports"]')).toBeNull();
+    expect(
+      document.querySelector('button[aria-label="Open Admin Dashboard"]')
+    ).toBeNull();
+    expect(button("Open Quotation")).toBeDefined();
+    expect(button("Open Purchase Orders")).toBeDefined();
+  });
+
+  it("opens Reports for an admin without mounting the Admin Dashboard", async () => {
+    await openReports();
+
+    expect(document.getElementById("reports-heading")?.textContent).toBe("Reports");
+    expect(document.querySelector('[aria-label="Clients section"]')).toBeNull();
+  });
+
+  it("returns a demoted session to Home and unmounts the open Reports page", async () => {
+    const polls = pollControl();
+    try {
+      await openReports();
+      expect(document.getElementById("reports-heading")).not.toBeNull();
+
+      // Same account, new role: the workspace is kept, so the page state still
+      // says "reports" while the session is no longer an admin.
+      mocks.checkSession.mockResolvedValue({
+        State: "active",
+        User: { ...USER, Role: "staff" },
+      });
+      await polls.run();
+
+      expect(document.getElementById("reports-heading")).toBeNull();
+      expect(document.body.textContent).toContain("Workspaces");
+      expect(button("Open Quotation")).toBeDefined();
+      expect(document.querySelector('button[aria-label="Open Reports"]')).toBeNull();
     } finally {
       polls.restore();
     }

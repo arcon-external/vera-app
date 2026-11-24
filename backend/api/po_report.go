@@ -20,10 +20,11 @@ import (
 // yearly projections, the current-period projection, and any disclosure notes.
 //
 // The endpoint is organization-scoped through the same context the PO archive
-// uses and adds no role restriction: staff who record the orders may read what
-// they made. Currency is a partition, so an omitted currency defaults to the
-// company's own and an unknown code is refused rather than silently treated as
-// the default.
+// uses. Issue #683 makes Reports an admin surface: the route is gated with a
+// 403 "reports_forbidden" before this handler runs, so staff who record the
+// orders can no longer read the performance snapshot. Currency is a partition,
+// so an omitted currency defaults to the company's own and an unknown code is
+// refused rather than silently treated as the default.
 
 const (
 	// reportErrorInvalid is the stable refusal code for a malformed date,

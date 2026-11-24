@@ -5,9 +5,9 @@ import { Badge, Button, Card, SectionHeading } from "./ui";
 // dashboard, not a tab inside Quotation. Each card opens a workspace; Delivery
 // Order and Invoice are visible but disabled with "Coming later", so
 // unavailable features are not misleading. Issue #630 adds Reports as its own
-// global workspace, available to everyone, after the four document workspaces
-// and before the admin-only Admin Dashboard. No data is fetched here: this is a
-// routing surface, not a document list.
+// global workspace; #683 makes it admin-only, so both Reports and Admin render
+// only for an admin. No data is fetched here: this is a routing surface, not a
+// document list.
 
 export interface DocumentHomePageProps {
   /** Opens the Quotation workspace's Editor tab. */
@@ -206,21 +206,23 @@ export function DocumentHomePage({
             </Button>
           }
         />
-        <DestinationCard
-          title="Reports"
-          description="Purchase order performance by category and period, with projections."
-          icon={<ReportsIcon />}
-          wide
-          action={
-            <Button
-              variant="primary"
-              aria-label="Open Reports"
-              onClick={onOpenReports}
-            >
-              Open Reports
-            </Button>
-          }
-        />
+        {isAdmin ? (
+          <DestinationCard
+            title="Reports"
+            description="Purchase order performance by category and period, with projections."
+            icon={<ReportsIcon />}
+            wide
+            action={
+              <Button
+                variant="primary"
+                aria-label="Open Reports"
+                onClick={onOpenReports}
+              >
+                Open Reports
+              </Button>
+            }
+          />
+        ) : null}
         {isAdmin && onOpenAdmin ? (
           <DestinationCard
             title="Admin Dashboard"
